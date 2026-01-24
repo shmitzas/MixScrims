@@ -1,4 +1,6 @@
 ﻿using SwiftlyS2.Shared.Events;
+using MixScrims.Contract;
+
 namespace MixScrims;
 
 public partial class MixScrims
@@ -16,6 +18,7 @@ public partial class MixScrims
     /// </summary>
     private void WarmupHandleOnMapStart(IOnMapLoadEvent @event)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState != MatchState.Warmup)
             return;
         LoadWarmupConfig();

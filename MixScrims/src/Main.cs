@@ -3,9 +3,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SwiftlyS2.Shared;
-using SwiftlyS2.Shared.CommandLine;
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Plugins;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -16,35 +16,24 @@ namespace MixScrims;
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
 )]
-public sealed partial class MixScrims(ISwiftlyCore core) : BasePlugin(core)
+
+public partial class MixScrims : BasePlugin
 {
-    private enum MatchState
-    {
-        Ended,
-        KnifeRound,
-        MapChosen,
-        MapLoading,
-        MapVoting,
-        Match,
-        PickingStartingSide,
-        PickingTeam,
-        Timeout,
-        Reset,
-        Warmup
-    }
-
-    private enum PluginState
-    {
-        Staging,
-        Production
-    }
-
-    private MatchState matchState = MatchState.Warmup;
-    private PluginState pluginState = PluginState.Staging;
     public static new ISwiftlyCore Core { get; private set; } = null!;
     private ILogger<MixScrims> logger = null!;
     private IOptions<Config> cfgOptions = null!;
     private Config cfg = new();
+    private MixScrimsService mixScrimsService = null!;
+
+    public MixScrims(ISwiftlyCore core) : base(core)
+    {
+        mixScrimsService = new MixScrimsService();
+    }
+
+    public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
+    {
+        interfaceManager.AddSharedInterface<IMixScrims, MixScrimsService>("MixScrims.API", mixScrimsService);
+    }
 
     public override void Load(bool hotReload)
     {
@@ -52,7 +41,7 @@ public sealed partial class MixScrims(ISwiftlyCore core) : BasePlugin(core)
         Core.Registrator.Register(this);
 
         LoadConfig();
-        pluginState = cfg.TestMode ? PluginState.Staging : PluginState.Production;
+        mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
 
         RegisterListeners();
         ResetVariables();
@@ -172,7 +161,7 @@ public sealed partial class MixScrims(ISwiftlyCore core) : BasePlugin(core)
             logger = provider.GetRequiredService<ILogger<MixScrims>>();
             cfgOptions = provider.GetRequiredService<IOptions<Config>>();
             cfg = cfgOptions.Value;
-            pluginState = cfg.TestMode ? PluginState.Staging : PluginState.Production;
+            mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
         }
         catch (Exception ex)
         {

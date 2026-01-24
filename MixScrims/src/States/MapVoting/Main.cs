@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Menus;
 using SwiftlyS2.Core.Menus.OptionsBase;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -17,7 +18,7 @@ public partial class MixScrims
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("StartMapVotingPhase");
-        matchState = MatchState.MapVoting;
+        mixScrimsService.SetMatchState(MatchState.MapVoting);
         votedMaps.Clear();
         PrintMessageToAllPlayers(Core.Localizer["stateChanged.mapVotingStarted"]);
 
@@ -26,7 +27,7 @@ public partial class MixScrims
         {
             PrintMessageToAllPlayers(Core.Localizer["error.noMapsConfigured"]);
             logger.LogError("No maps available for voting. Check your configuration.");
-            matchState = MatchState.Reset;
+            mixScrimsService.SetMatchState(MatchState.Reset);
             return;
         }
 
@@ -167,7 +168,7 @@ public partial class MixScrims
             }
         }
 
-        matchState = MatchState.MapChosen;
+        mixScrimsService.SetMatchState(MatchState.MapChosen);
 
         VotedMap pickedMap = GetMostVotedMap();
         PrintMessageToAllPlayers(Core.Localizer["map.mapChosen", pickedMap.Map.DisplayName, pickedMap.Votes]);

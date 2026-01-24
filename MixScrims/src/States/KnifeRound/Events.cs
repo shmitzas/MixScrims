@@ -3,6 +3,7 @@ using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Players;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -11,6 +12,7 @@ public partial class MixScrims
     [GameEventHandler(HookMode.Pre)]
     public HookResult HandleRoundEndOnKnifeRound(EventRoundEnd @event)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState == MatchState.KnifeRound)
         {
             if (cfg.DetailedLogging)
@@ -28,8 +30,9 @@ public partial class MixScrims
     }
 
     [GameEventHandler(HookMode.Pre)]
-    public HookResult HandleRoundPrestartPostKnifeRound(EventRoundPrestart @event)
+    public HookResult HandleRoundPrestartPreKnifeRound(EventRoundPrestart @event)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState == MatchState.PickingStartingSide)
         {
             PauseMatch();

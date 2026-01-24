@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Players;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -60,14 +61,14 @@ partial class MixScrims
 			return;
         }
 
-            var player = context.Sender;
+        var player = context.Sender;
         if (player == null || !IsPlayerValid(player))
 		{
 			logger.LogError("OnRevote: player is invalid");
 			return;
 		}
 
-        
+        var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.MapVoting)
 		{
@@ -109,7 +110,7 @@ partial class MixScrims
 			return;
         }
 
-        
+        var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState != MatchState.Match)
 		{
@@ -164,8 +165,6 @@ partial class MixScrims
 			logger.LogError("OnKviesti: player is invalid");
 			return;
 		}
-
-        
 
         var timeSinceLastInvite = DateTime.Now - lastDiscordInviteSentAt;
         var timeRemaining = TimeSpan.FromMinutes(cfg.DiscordInviteDelayMinutes) - timeSinceLastInvite;
@@ -224,7 +223,7 @@ partial class MixScrims
 			return;
 		}
 
-        
+        var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState != MatchState.PickingStartingSide)
 		{
@@ -263,6 +262,8 @@ partial class MixScrims
 			logger.LogError("OnStay: player is invalid");
 			return;
 		}
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState != MatchState.PickingStartingSide)
 		{
@@ -314,7 +315,9 @@ partial class MixScrims
             return;
         }
 
-		if (matchState == MatchState.Warmup
+        var matchState = mixScrimsService.GetCurrentMatchState();
+
+        if (matchState == MatchState.Warmup
 			|| matchState == MatchState.MapLoading
 			|| matchState == MatchState.MapChosen)
 		{

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -11,7 +12,7 @@ public partial class MixScrims
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("Starting warmup");
-        matchState = MatchState.Warmup;
+        mixScrimsService.SetMatchState(MatchState.Warmup);
 
         UnpauseMatch();
         LoadWarmupConfig();
@@ -29,6 +30,8 @@ public partial class MixScrims
         {
             Core.Engine.ExecuteCommand("exec mixscrims/warmup.cfg");
         });
+
+        var pluginState = mixScrimsService.GetCurrentPluginState();
 
         if (pluginState == PluginState.Staging)
         {

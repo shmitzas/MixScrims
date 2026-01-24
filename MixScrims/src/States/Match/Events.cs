@@ -2,6 +2,7 @@
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -13,6 +14,7 @@ public partial class MixScrims
     [GameEventHandler (HookMode.Pre)]
     public HookResult HandleMatchEnd(EventCsWinPanelMatch @event)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState == MatchState.Match)
         {
             Core.Scheduler.DelayBySeconds(10, () =>
@@ -31,6 +33,7 @@ public partial class MixScrims
     [GameEventHandler (HookMode.Pre)]
     public HookResult HandleMatchHalftime(EventRoundAnnounceLastRoundHalf @event)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState == MatchState.Match)
         {
             if (cfg.DetailedLogging)
@@ -48,6 +51,7 @@ public partial class MixScrims
     [GameEventHandler(HookMode.Post)]
     public HookResult HandleRoundStart(EventRoundStart @event)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState == MatchState.Match && isMovingPlayersToTeams)
         {
             if (cfg.DetailedLogging)

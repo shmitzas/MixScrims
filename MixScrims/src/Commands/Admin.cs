@@ -1,10 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using SwiftlyS2.Core.Menus.OptionsBase;
-using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
-using SwiftlyS2.Shared.Menus;
-using System;
-using System.Linq;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -75,7 +72,9 @@ public partial class MixScrims
 			PrintMessageToAllPlayers(Core.Localizer["command.forceReady", admin.Controller.PlayerName]);
 		}
 
-		if (matchState != MatchState.Warmup && matchState != MatchState.MapChosen)
+		var matchState = mixScrimsService.GetCurrentMatchState();
+
+        if (matchState != MatchState.Warmup && matchState != MatchState.MapChosen)
 		{
 			logger.LogWarning("OnForceReady: Invalid match state, must be MatchState.Warmup or MatchState.MapChosen");
 			if (admin != null)
@@ -108,7 +107,9 @@ public partial class MixScrims
 			return;
 		}
 
-		if (matchState == MatchState.Warmup
+        var matchState = mixScrimsService.GetCurrentMatchState();
+
+        if (matchState == MatchState.Warmup
 			|| matchState == MatchState.MapLoading
 			|| matchState == MatchState.MapChosen)
 		{

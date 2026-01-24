@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Menus;
 using SwiftlyS2.Core.Menus.OptionsBase;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -16,7 +17,7 @@ public partial class MixScrims
     /// </summary>
     private void StartKnifeRound()
     {
-        matchState = MatchState.KnifeRound;
+        mixScrimsService.SetMatchState(MatchState.KnifeRound);
         PrintMessageToAllPlayers(Core.Localizer["stateChanged.knifeRoundStarted"]);
 
         playingTPlayers = pickedTPlayers.ToList();
@@ -35,7 +36,8 @@ public partial class MixScrims
     /// </summary>
     private void PromptWinnerCaptainToChoseStartingSide(Team winnerTeam)
     {
-        matchState = MatchState.PickingStartingSide;
+
+        mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
 
         if (winnerTeam == Team.CT)
         {

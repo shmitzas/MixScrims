@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
-using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -13,7 +13,7 @@ public partial class MixScrims
     /// </summary>
     private void StartMatch()
     {
-        matchState = MatchState.Match;
+        mixScrimsService.SetMatchState(MatchState.Match);
 
         PrintMessageToAllPlayers(Core.Localizer["stateChanged.matchStarted"]);
 

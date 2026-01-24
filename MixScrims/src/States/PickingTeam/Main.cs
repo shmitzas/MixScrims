@@ -1,11 +1,7 @@
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Shared.SchemaDefinitions;
-using SwiftlyS2.Shared.Menus;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using SwiftlyS2.Core.Menus.OptionsBase;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -42,7 +38,7 @@ public partial class MixScrims
             return;
         }
 
-        matchState = MatchState.PickingTeam;
+        mixScrimsService.SetMatchState(MatchState.PickingTeam);
 
         captainsAnnouncementsTimer?.Cancel();
         playerStatusTimer?.Cancel();
@@ -71,7 +67,7 @@ public partial class MixScrims
 
     private void SkipTeamPickingPhase()
     {
-        matchState = MatchState.PickingTeam;
+        mixScrimsService.SetMatchState(MatchState.PickingTeam);
         captainsAnnouncementsTimer?.Cancel();
         playerStatusTimer?.Cancel();
         Core.Engine.ExecuteCommand("exec mixscrims/teampick.cfg");
@@ -253,6 +249,7 @@ public partial class MixScrims
     /// </summary>
     private void PickCtCaptain(IPlayer? player)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (captainCt != null)
         {
             if (matchState == MatchState.PickingTeam || matchState == MatchState.MapChosen)
@@ -305,6 +302,7 @@ public partial class MixScrims
     /// </summary>
     private void PickTCaptain(IPlayer? player)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (captainT != null)
         {
             if (matchState == MatchState.PickingTeam || matchState == MatchState.MapChosen)

@@ -1,14 +1,7 @@
 using Microsoft.Extensions.Logging;
-using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Shared.Scheduler;
-using SwiftlyS2.Shared.SchemaDefinitions;
-using SwiftlyS2.Shared.Menus;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
 using SwiftlyS2.Core.Menus.OptionsBase;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -57,7 +50,7 @@ public partial class MixScrims
         }
 
         isTimeoutActive = true;
-        matchState = MatchState.Timeout;
+        mixScrimsService.SetMatchState(MatchState.Timeout);
         PauseMatch();
 
         if (team == Team.CT)
@@ -112,7 +105,7 @@ public partial class MixScrims
         }
         else
         {
-            matchState = MatchState.Match;
+            mixScrimsService.SetMatchState(MatchState.Match);
             UnpauseMatch();
         }
     }

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -21,6 +22,7 @@ public partial class MixScrims
 
     private void HandleMapChosenNewMapLoad()
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState != MatchState.MapLoading)
         {
             logger.LogWarning($"HandleMapChosenNewMapLoad: Ignored map start event because match state is {matchState}");
@@ -32,7 +34,7 @@ public partial class MixScrims
 
         readyPlayers.Clear();
 
-        matchState = MatchState.MapChosen;
+        mixScrimsService.SetMatchState(MatchState.MapChosen);
 
         var warmupToken = Core.Scheduler.DelayBySeconds(5, LoadWarmupConfig);
         Core.Scheduler.StopOnMapChange(warmupToken);

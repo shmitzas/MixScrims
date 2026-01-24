@@ -1,12 +1,6 @@
 using Microsoft.Extensions.Logging;
-using SwiftlyS2.Shared;
-using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Shared.Plugins;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -49,16 +43,22 @@ public sealed partial class MixScrims
     /// </summary>
     private void CheckReadyPlayersToStart()
     {
-        logger.LogInformation("CheckReadyPlayersToStart: readyPlayers={ReadyCount} | Required={Required}", readyPlayers.Count, GetNumberOfPlayersRequiredToStart());
+        if (cfg.DetailedLogging)
+            logger.LogInformation("CheckReadyPlayersToStart: readyPlayers={ReadyCount} | Required={Required}", readyPlayers.Count, GetNumberOfPlayersRequiredToStart());
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
+
         if (matchState == MatchState.Warmup && readyPlayers.Count >= GetNumberOfPlayersRequiredToStart())
         {
-            logger.LogInformation("CheckReadyPlayersToStart: Starting Map Voting Phase");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CheckReadyPlayersToStart: Starting Map Voting Phase");
             StartMapVotingPhase();
         }
 
         if (matchState == MatchState.MapChosen && readyPlayers.Count >= GetNumberOfPlayersRequiredToStart())
         {
-            logger.LogInformation("CheckReadyPlayersToStart: Starting Team Picking Phase");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CheckReadyPlayersToStart: Starting Team Picking Phase");
             StartTeamPickingPhase();
         }
     }
@@ -70,6 +70,8 @@ public sealed partial class MixScrims
     {
         var name = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
         logger.LogInformation("AddPlayerToReadyList: called for {Player}", name);
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
@@ -102,6 +104,8 @@ public sealed partial class MixScrims
     {
         var name = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
         logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
@@ -136,6 +140,8 @@ public sealed partial class MixScrims
 		if (cfg.DetailedLogging)
 			logger.LogInformation("LoadSelectedMap: Loading map {Map}", map.MapName);
 
+        var matchState = mixScrimsService.GetCurrentMatchState();
+
         if (matchState == MatchState.MapLoading)
         {
             ScheduleMapLoadingAnnouncement(map);
@@ -146,7 +152,7 @@ public sealed partial class MixScrims
         var loadMapToken = Core.Scheduler.DelayBySeconds(5, () => LoadMap(map));
         Core.Scheduler.StopOnMapChange(loadMapToken);
 
-        matchState = MatchState.MapLoading;
+        mixScrimsService.SetMatchState(MatchState.MapLoading);
         PrintMessageToAllPlayers(Core.Localizer["map.changingMap", map.DisplayName]);
         ScheduleMapLoadingAnnouncement(map);
     }
@@ -179,6 +185,8 @@ public sealed partial class MixScrims
 
         var token = Core.Scheduler.DelayBySeconds(15, () =>
         {
+            var matchState = mixScrimsService.GetCurrentMatchState();
+
             if (matchState == MatchState.MapLoading)
             {
                 PrintMessageToAllPlayers(Core.Localizer["map.mapLoading", map.DisplayName]);
@@ -302,6 +310,8 @@ public sealed partial class MixScrims
                 logger.LogInformation("PunishOnLeave: player leave punishment is disabled in config");
             return;
         }
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (cfg.PlayerLeavePunishment.Sensitivity == 0)
         {

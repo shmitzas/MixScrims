@@ -5,6 +5,7 @@ using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Players;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -228,6 +229,8 @@ partial class MixScrims
                 logger.LogInformation($"HandleDisconnectedPlayer: Removed {player.Controller.PlayerName} from playingTPlayers.");
         }
 
+        var matchState = mixScrimsService.GetCurrentMatchState();
+
         if (matchState == MatchState.PickingTeam)
         {
             if (player.PlayerID == captainCt?.PlayerID)
@@ -380,6 +383,8 @@ partial class MixScrims
             return HookResult.Continue;
         }
 
+        var matchState = mixScrimsService.GetCurrentMatchState();
+
         if (matchState == MatchState.Warmup ||
             matchState == MatchState.MapVoting ||
             matchState == MatchState.MapChosen)
@@ -512,6 +517,7 @@ partial class MixScrims
     [GameEventHandler(HookMode.Pre)]
     public HookResult HandleFreezetimeEnd(EventRoundFreezeEnd @event)
     {
+        var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState == MatchState.Match || matchState == MatchState.KnifeRound)
         {
             canPlayerBeRespawned = false;

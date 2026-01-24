@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -58,6 +59,9 @@ public partial class MixScrims
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("PrintChosenCaptains");
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
+
         if (matchState != MatchState.MapChosen)
         {
             return;

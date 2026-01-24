@@ -21,7 +21,7 @@
   "commandReminders.invite": "Use [gold]!invite [default]to send an invitation to [lightblue]ExampleServer Discord!",
   "command.invalidState": "[gold]!{0} [default]can't be used at this moment",
   "command.reloadConfig": "Mix config reloaded [lime]successfully!",
-  "command.sendInvite": "[lime]{0} [default]sent an invite to [lightblue]MyServerDiscord",
+  "command.sendInvite": "[lime]{0} [default]sent an invite to [lightblue]ExampleServerDiscord",
   "command.sendInviteNoNeed": "No need to send an invite. [lime]{0}[default]/[lime]{1} [default]players are already connected!",
   "command.inviteToEarly": "Invite already sent. Next invite in [gold]{0}",
   "command.setReady": "[lime]{0} [default]is now [lime]ready!",

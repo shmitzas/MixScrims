@@ -1,16 +1,19 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <AssemblyName>MixScrims</AssemblyName>
-    <OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
-    <PublishDir>$(OutputPath)publish/MixScrims</PublishDir>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+		<AssemblyName>MixScrims</AssemblyName>
+		<OutputPath>$(MSBuildThisFileDirectory)build/</OutputPath>
+		<PublishDir>$(OutputPath)publish/MixScrims</PublishDir>
+		<PlatformTarget>x64</PlatformTarget>
+		<NoWarn>$(NoWarn);CS0436</NoWarn>
+	</PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
@@ -18,16 +21,39 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="SwiftlyS2.CS2" Version="1.0.5" ExcludeAssets="runtime" PrivateAssets="all">
+    <PackageReference Include="SwiftlyS2.CS2" Version="*" ExcludeAssets="runtime" PrivateAssets="all">
       <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="resources/gamedata/**/*;resources/templates/**/*;resources/translations/**/*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
+	<!-- Uppon building SharedAPI, exports it to "exports" directory -->
+	<ItemGroup>
+		<Content Include="resources/gamedata/**/*;resources/templates/**/*;resources/translations/**/*;resources/exports/**/*">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+	</ItemGroup>
+
+	<!-- Don't include SharedAPI project in provider plugin .dll -->
+	<ItemGroup>
+		<Compile Remove="..\MixScrims.Contract\**\*.cs" />
+	</ItemGroup>
+
+	<!-- Allows to use SharedAPI in the provider plugin and prevents SharedAPI .dll from being exported in plugin directory -->
+	<ItemGroup>
+		<ProjectReference Include="..\MixScrims.Contract\MixScrims.Contract.csproj">
+			<Private>false</Private>
+			<CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+		</ProjectReference>
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="resources\exports\" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Reference Include="MixScrims.Contract">
+	    <HintPath>resources\exports\MixScrims.Contract.dll</HintPath>
+	  </Reference>
+	</ItemGroup>
 
     <Target Name="CopyConfigFiles" AfterTargets="Build">
 	    <!-- Create configs directory and copy cfg files -->

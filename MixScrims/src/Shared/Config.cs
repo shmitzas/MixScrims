@@ -94,7 +94,7 @@ public class AnnouncementTimers
 
 public class LeavePunishment
 {
-    public string ServerCommand { get; set; } = "sw_ban {steamId} {reason} {duration}";
+    public string ServerCommand { get; set; } = "sw_ban {steamId} {duration} {reason}";
     public int BanDurationMinutes { get; set; } = 15;
     public string BanReason { get; set; } = "Leaving during a MixScrims match";
     public int Sensitivity = 2;
