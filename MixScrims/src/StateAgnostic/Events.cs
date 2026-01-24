@@ -1,11 +1,12 @@
 using Microsoft.Extensions.Logging;
+using MixScrims.Contract;
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Players;
-using MixScrims.Contract;
+using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace MixScrims;
 
@@ -349,6 +350,9 @@ partial class MixScrims
     /// </summary>
     public HookResult HandlePlayerChangeTeam(IPlayer? player, int teamTojoin)
     {
+        if (cfg.DetailedLogging)
+            logger.LogInformation($"HandlePlayerChangeTeam: Called for player {player?.Controller.PlayerName} (slot {player?.Slot}), teamTojoin={teamTojoin}");
+
         if (player == null)
         {
             if (cfg.DetailedLogging)
@@ -372,6 +376,8 @@ partial class MixScrims
 
         if (IsBot(player))
         {
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"HandlePlayerChangeTeam: {player.Controller.PlayerName} is a bot, allowing");
             return HookResult.Continue;
         }
 
@@ -384,16 +390,27 @@ partial class MixScrims
         }
 
         var matchState = mixScrimsService.GetCurrentMatchState();
+        if (cfg.DetailedLogging)
+            logger.LogInformation($"HandlePlayerChangeTeam: Current match state is {matchState}");
 
         if (matchState == MatchState.Warmup ||
             matchState == MatchState.MapVoting ||
             matchState == MatchState.MapChosen)
         {
-            if (freshlyJoinedPlayers.Any(p => p == player.Slot))
+            bool isInFreshlyJoined = freshlyJoinedPlayers.Any(p => p == player.Slot);
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"HandlePlayerChangeTeam: Player {player.Controller.PlayerName} in freshlyJoinedPlayers: {isInFreshlyJoined}");
+
+            if (isInFreshlyJoined)
             {
                 HandlePlayerChangeTeamOnJoin(player);
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"HandlePlayerChangeTeam: Match state warmup. {player.Controller.PlayerName} joined team {teamTojoin}");
+                    logger.LogInformation($"HandlePlayerChangeTeam: Match state {matchState}. {player.Controller.PlayerName} joined team {teamTojoin}");
+            }
+            else
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation($"HandlePlayerChangeTeam: Match state {matchState}. {player.Controller.PlayerName} not in freshlyJoinedPlayers, allowing team change to {teamTojoin}");
             }
             return HookResult.Continue;
         }
@@ -523,5 +540,44 @@ partial class MixScrims
             canPlayerBeRespawned = false;
         }
         return HookResult.Continue;
+    }
+
+    [EventListener<EventDelegates.OnEntityTakeDamage>]
+    public void HandleTakeDamage(IOnEntityTakeDamageEvent @event)
+    {
+        if (!cfg.FaceitLikeDamageControl)
+        {
+            return;
+        }
+
+        var victim = @event.Entity.As<CCSPlayerPawn>();
+        var attacker = @event.Info.Attacker.Value?.As<CCSPlayerPawn>();
+        var weapon = @event.Info.DamageType;
+
+        if (attacker == null)
+        {
+            logger.LogWarning("HandleTakeDamage: Attacker is null");
+            return;
+        }
+
+        if (victim == null)
+        {
+            logger.LogWarning("HandleTakeDamage: Victim is null");
+            return;
+        }
+
+        //if (cfg.DetailedLogging)
+        //    logger.LogInformation($"HandleTakeDamage: {attacker.Controller.Value?.PlayerName} damaged {victim.Controller.Value?.PlayerName} with {weapon}");
+
+        if (attacker.Team == victim.Team)
+        {
+            if (weapon == DamageTypes_t.DMG_BULLET || weapon == DamageTypes_t.DMG_SLASH)
+            {
+                if(cfg.DetailedLogging)
+                    logger.LogInformation("HandleTakeDamage: Friendly fire or knife slash detected, skipping.");
+
+                @event.Info.Damage = 0;
+            }
+        }
     }
 }

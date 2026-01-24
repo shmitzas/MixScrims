@@ -419,4 +419,25 @@ FodyWeavers.xsd
 *.msm
 *.msp
 .editorconfig
-MixScrims/llms-full.txt
+
+# Build outputs
+bin/
+obj/
+build/
+
+# Rider
+.idea/
+
+# NuGet
+.nuget/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Archived files
+*.rar
+*.zip
+*.gzip
+*.7z
+

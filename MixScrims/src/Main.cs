@@ -41,11 +41,10 @@ public partial class MixScrims : BasePlugin
         Core.Registrator.Register(this);
 
         LoadConfig();
-        mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
-
         RegisterListeners();
         ResetVariables();
         RegisterCommands();
+        mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
     }
 
     public override void Unload()
@@ -60,6 +59,7 @@ public partial class MixScrims : BasePlugin
     private void RegisterListeners()
     {
         RegisterWarmupListeners();
+        RegisterMapChosenListeners();
         RegisterStateAgnosticListeners();
     }
 
