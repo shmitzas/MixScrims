@@ -402,7 +402,7 @@ partial class MixScrims
         {
             if (player.PlayerID == captainCt?.PlayerID || player.PlayerID == captainT?.PlayerID)
             {
-                PrintMessageToPlayer(player, Core.Localizer["error.captainCannotChangeTeam"]);
+                PrintMessageToPlayer(player, Core.Localizer["error.captain.cannot_change_team"]);
                 return HookResult.Stop;
             }
         }
@@ -421,7 +421,7 @@ partial class MixScrims
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation($"HandlePlayerJoinTeam - PickingTeam: Player {player.Controller.PlayerName} attempted to join CT team without being picked.");
-                    PrintMessageToPlayer(player, Core.Localizer["error.teamJoinDeniedCt"]);
+                    PrintMessageToPlayer(player, Core.Localizer["error.team.join_denied.ct"]);
                     return HookResult.Stop;
                 }
             }
@@ -437,7 +437,7 @@ partial class MixScrims
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation($"HandlePlayerJoinTeam - PickingTeam: Player {player.Controller.PlayerName} attempted to join T team without being picked.");
-                    PrintMessageToPlayer(player, Core.Localizer["error.teamJoinDeniedT"]);
+                    PrintMessageToPlayer(player, Core.Localizer["error.team.join_denied.t"]);
                     return HookResult.Stop;
                 }
             }
@@ -468,7 +468,7 @@ partial class MixScrims
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation($"HandlePlayerJoinTeam - Match: Player {player.Controller.PlayerName} attempted to join CT team but it is full.");
-                    PrintMessageToPlayer(player, Core.Localizer["error.teamFullCt"]);
+                    PrintMessageToPlayer(player, Core.Localizer["error.team.full.ct"]);
                     return HookResult.Stop;
                 }
             }
@@ -493,7 +493,7 @@ partial class MixScrims
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation($"HandlePlayerJoinTeam - Match: Player {player.Controller.PlayerName} attempted to join T team but it is full.");
-                    PrintMessageToPlayer(player, Core.Localizer["error.teamFullT"]);
+                    PrintMessageToPlayer(player, Core.Localizer["error.team.full.t"]);
                     return HookResult.Stop;
                 }
             }

@@ -75,13 +75,13 @@ partial class MixScrims
 			if (mapVotingMenu == null)
 			{
 				logger.LogError("OnRevote: mapVotingMenu is null");
-				PrintMessageToPlayer(player, Core.Localizer["command.invalidState", "revote"]);
+				PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "revote"]);
 				return;
 			}
 			DisplayMapVotingMenu(player);
 			return;
 		}
-		PrintMessageToPlayer(player, Core.Localizer["command.invalidState", "revote"]);
+		PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "revote"]);
 	}
 
 	/// <summary>
@@ -114,13 +114,13 @@ partial class MixScrims
 
         if (matchState != MatchState.Match)
 		{
-			PrintMessageToPlayer(player, Core.Localizer["command.invalidState", "timeout"]);
+			PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "timeout"]);
 			return;
         }
 
 		if (timeoutPending != TimeoutPending.None)
 		{
-			PrintMessageToPlayer(player, Core.Localizer["error.timeoutPending"]);
+			PrintMessageToPlayer(player, Core.Localizer["error.timeout_pending"]);
 			return;
         }
 
@@ -130,7 +130,7 @@ partial class MixScrims
 		{
 			if (timeoutCountCt < 1)
 			{
-                PrintMessageToPlayer(player, Core.Localizer["error.noTimeoutsLeft", timeoutCountT, cfg.Timeouts]);
+                PrintMessageToPlayer(player, Core.Localizer["error.no_timeouts_left", timeoutCountT, cfg.Timeouts]);
                 return;
             }
 			StartTimeoutVote(player, Team.CT);
@@ -140,7 +140,7 @@ partial class MixScrims
         {
             if (timeoutCountT < 1)
             {
-                PrintMessageToPlayer(player, Core.Localizer["error.noTimeoutsLeft", timeoutCountT, cfg.Timeouts]);
+                PrintMessageToPlayer(player, Core.Localizer["error.no_timeouts_left", timeoutCountT, cfg.Timeouts]);
                 return;
             }
             StartTimeoutVote(player, Team.T);
@@ -166,6 +166,18 @@ partial class MixScrims
 			return;
 		}
 
+		if (!cfg.EnableDiscordInvites)
+		{
+			PrintMessageToPlayer(player, Core.Localizer["command.invite.disabled"]);
+			return;
+        }
+
+		if (cfg.DiscordInviteWebhooks.Count == 0)
+		{
+			PrintMessageToPlayer(player, Core.Localizer["command.invite.no_webhooks"]);
+			return;
+		}
+
         var timeSinceLastInvite = DateTime.Now - lastDiscordInviteSentAt;
         var timeRemaining = TimeSpan.FromMinutes(cfg.DiscordInviteDelayMinutes) - timeSinceLastInvite;
 
@@ -176,7 +188,7 @@ partial class MixScrims
             int seconds = timeRemaining.Seconds;
             string formattedTime = $"{minutes}min {seconds}s";
 
-            PrintMessageToPlayer(player, Core.Localizer["command.inviteToEarly", formattedTime]);
+            PrintMessageToPlayer(player, Core.Localizer["command.invite.to_early", formattedTime]);
             return;
         }
 
@@ -186,7 +198,7 @@ partial class MixScrims
 
 		if (remainingPlayers < 1)
 		{
-			PrintMessageToPlayer(player, Core.Localizer["command.sendInviteNoNeed", playingPlayers, cfg.MinimumReadyPlayers]);
+			PrintMessageToPlayer(player, Core.Localizer["command.invite.no_need", playingPlayers, cfg.MinimumReadyPlayers]);
 			return;
         }
 
@@ -201,7 +213,7 @@ partial class MixScrims
 		});
 
         lastDiscordInviteSentAt = DateTime.Now;
-        PrintMessageToAllPlayers(Core.Localizer["command.sendInvite", player.Controller.PlayerName]);
+        PrintMessageToAllPlayers(Core.Localizer["command.invite", player.Controller.PlayerName]);
 	}
 
 	/// <summary>
@@ -227,13 +239,13 @@ partial class MixScrims
 
         if (matchState != MatchState.PickingStartingSide)
 		{
-			PrintMessageToPlayer(player, Core.Localizer["command.invalidState", "sidePick"]);
+			PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "sidePick"]);
 			return;
 		}
 
 		if (player != winnerCaptain)
 		{
-			PrintMessageToPlayer(player, Core.Localizer["error.notCaptain"]);
+			PrintMessageToPlayer(player, Core.Localizer["error.not_captain"]);
 			return;
 		}
 
@@ -267,13 +279,13 @@ partial class MixScrims
 
         if (matchState != MatchState.PickingStartingSide)
 		{
-			PrintMessageToPlayer(player, Core.Localizer["command.invalidState", "sidePick"]);
+			PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "sidePick"]);
 			return;
 		}
 
 		if (player != winnerCaptain)
 		{
-			PrintMessageToPlayer(player, Core.Localizer["error.notCaptain"]);
+			PrintMessageToPlayer(player, Core.Localizer["error.not_captain"]);
 			return;
 		}
 
@@ -323,35 +335,35 @@ partial class MixScrims
 		{
 			if (context.Args.Length < 1)
 			{
-				PrintMessageToPlayer(admin, Core.Localizer["error.InvalidArgs", "!vol_cap <t/ct>"]);
+				PrintMessageToPlayer(admin, Core.Localizer["error.invalid_args", "!vol_cap <t/ct>"]);
 				return;
 			}
 
 			var team = context.Args[0].ToLower();
 			if (team != "t" && team != "ct")
 			{
-				PrintMessageToPlayer(admin, Core.Localizer["error.InvalidArgs", "!vol_cap <t/ct>"]);
+				PrintMessageToPlayer(admin, Core.Localizer["error.invalid_args", "!vol_cap <t/ct>"]);
 				return;
 			}
 
 			if (cfg.AllowVolunteerCaptains == false)
 			{
-				PrintMessageToPlayer(player, Core.Localizer["error.captainVolunteeringDisabled"]);
+				PrintMessageToPlayer(player, Core.Localizer["error.captain.volunteering_disabled"]);
 				return;
 			}
 			if (captainCt != null && captainT != null)
 			{
-				PrintMessageToPlayer(player, Core.Localizer["error.captainsAlreadyChosen"]);
+				PrintMessageToPlayer(player, Core.Localizer["error.captains_already_chosen"]);
 				return;
 			}
 			if (captainCt != null && captainCt.PlayerID == player.PlayerID)
 			{
-				PrintMessageToPlayer(player, Core.Localizer["error.alreadyCaptainCt"]);
+				PrintMessageToPlayer(player, Core.Localizer["error.already_captain.ct"]);
 				return;
 			}
 			if (captainT != null && captainT.PlayerID == player.PlayerID)
 			{
-				PrintMessageToPlayer(player, Core.Localizer["error.alreadyCaptainT"]);
+				PrintMessageToPlayer(player, Core.Localizer["error.already_captain.t"]);
 				return;
 			}
 
@@ -364,7 +376,7 @@ partial class MixScrims
 		else
 		{
             logger.LogError("OnCaptain: Invalid match state \"{matchState}\", must be MatchState.Warmup/MapChosen/MapLoading", matchState);
-            PrintMessageToPlayer(admin, Core.Localizer["command.invalidState", "captain"]);
+            PrintMessageToPlayer(admin, Core.Localizer["command.invalid_state", "captain"]);
         }
     }
 }

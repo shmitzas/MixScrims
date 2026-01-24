@@ -27,7 +27,7 @@ public partial class MixScrims
             logger.LogError($"captainT: {(captainT != null ? "null" : "null")}");
             logger.LogError($"StartTeamPickingPhase: Valid players in the server: {GetPlayers().Count}");
             logger.LogError("StartTeamPickingPhase: Aborting team picking phase.");
-            PrintMessageToAllPlayers(Core.Localizer["error.CaptainSelectionFailed"]);
+            PrintMessageToAllPlayers(Core.Localizer["error.captain.selection_failed"]);
             ResetPluginState();
             return;
         }
@@ -158,12 +158,12 @@ public partial class MixScrims
 
         if (team == Team.CT)
         {
-            PrintMessageToAllPlayers(Core.Localizer["teamPicking.turnToPickCt", captain.Controller!.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.turn_to_pick.ct", captain.Controller!.PlayerName]);
         }
 
         if (team == Team.T)
         {
-            PrintMessageToAllPlayers(Core.Localizer["teamPicking.turnToPickT", captain.Controller!.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.turn_to_pick.t", captain.Controller!.PlayerName]);
         }
 
         // Bot: auto-pick random player
@@ -184,7 +184,7 @@ public partial class MixScrims
 
         var builder = Core.MenusAPI
             .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.teamPickingTitle", team == Team.CT ? "CT" : "T"])
+            .Design.SetMenuTitle(Core.Localizer["menu.team_picking", team == Team.CT ? "CT" : "T"])
             .Design.SetMenuTitleVisible(true)
             .Design.SetMenuFooterVisible(true)
             .EnableSound()
@@ -289,7 +289,7 @@ public partial class MixScrims
 
             if (cfg.DetailedLogging)
                 logger.LogInformation($"PickCtCaptain: picked {captainCt.Controller!.PlayerName}");
-            PrintMessageToAllPlayers(Core.Localizer["teamPicking.pickedCaptainCt", captainCt.Controller!.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.captain.ct", captainCt.Controller!.PlayerName]);
         }
         else
         {
@@ -342,7 +342,7 @@ public partial class MixScrims
 
             if (cfg.DetailedLogging)
                 logger.LogInformation($"PickTCaptain: picked {captainT.Controller!.PlayerName}");
-            PrintMessageToAllPlayers(Core.Localizer["teamPicking.pickedCaptainT", captainT.Controller!.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.captain.t", captainT.Controller!.PlayerName]);
         }
         else
         {
@@ -388,7 +388,7 @@ public partial class MixScrims
         if (player == null || !IsPlayerValid(player))
         {
             logger.LogError("AssignPickedPlayerToTeamCt: picked player is invalid");
-            PrintMessageToPlayer(captain, Core.Localizer["error.invalidPlayerPicked", pickedPlayerName]);
+            PrintMessageToPlayer(captain, Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             PromptCaptainToPickPlayer(captain, Team.CT);
             return;
         }
@@ -403,7 +403,7 @@ public partial class MixScrims
 
         if (cfg.DetailedLogging)
             logger.LogInformation($"AssignPickedPlayerToTeamCt: {captain.Controller!.PlayerName} picked {player.Controller!.PlayerName} for CT team.");
-        PrintMessageToAllPlayers(Core.Localizer["teamPicking.pickedMemberCt", captain.Controller!.PlayerName, player.Controller!.PlayerName]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.member.ct", captain.Controller!.PlayerName, player.Controller!.PlayerName]);
 
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
         {
@@ -425,7 +425,7 @@ public partial class MixScrims
         if (player == null || !IsPlayerValid(player))
         {
             logger.LogError("AssignPickedPlayerToTeamT: picked player is invalid");
-            PrintMessageToPlayer(captain, Core.Localizer["error.invalidPlayerPicked", pickedPlayerName]);
+            PrintMessageToPlayer(captain, Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             PromptCaptainToPickPlayer(captain, Team.T);
             return;
         }
@@ -446,7 +446,7 @@ public partial class MixScrims
 
         if (cfg.DetailedLogging)
             logger.LogInformation($"AssignPickedPlayerToTeamT: {captain.Controller!.PlayerName} picked {player.Controller!.PlayerName} for T team.");
-        PrintMessageToAllPlayers(Core.Localizer["teamPicking.pickedMemberT", captain.Controller!.PlayerName, player.Controller!.PlayerName]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.member.t", captain.Controller!.PlayerName, player.Controller!.PlayerName]);
 
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
         {

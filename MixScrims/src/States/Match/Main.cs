@@ -15,7 +15,7 @@ public partial class MixScrims
     {
         mixScrimsService.SetMatchState(MatchState.Match);
 
-        PrintMessageToAllPlayers(Core.Localizer["stateChanged.matchStarted"]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.match"]);
 
         MovePlayersToDesignatedTeamsPreMatch();
 

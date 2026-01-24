@@ -18,7 +18,7 @@ public partial class MixScrims
     private void StartKnifeRound()
     {
         mixScrimsService.SetMatchState(MatchState.KnifeRound);
-        PrintMessageToAllPlayers(Core.Localizer["stateChanged.knifeRoundStarted"]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.knife_round"]);
 
         playingTPlayers = pickedTPlayers.ToList();
         playingCtPlayers = pickedCtPlayers.ToList();
@@ -49,8 +49,8 @@ public partial class MixScrims
 
             winnerCaptain = captainCt;
 
-            PrintMessageToAllPlayers(Core.Localizer["knifeRound.winnerCt"]);
-            PrintMessageToAllPlayers(Core.Localizer["knifeRound.waitingForSidePickCt", captainCt.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.winner.ct"]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.waiting_for_side_pick.ct", captainCt.Controller.PlayerName]);
 
             // Bot captain: auto "Switch"
             if (IsBot(captainCt))
@@ -76,8 +76,8 @@ public partial class MixScrims
 
             winnerCaptain = captainT;
 
-            PrintMessageToAllPlayers(Core.Localizer["knifeRound.winnerT"]);
-            PrintMessageToAllPlayers(Core.Localizer["knifeRound.waitingForSidePickT", captainT.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.winner.t"]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.waiting_for_side_pick.t", captainT.Controller.PlayerName]);
 
             // Bot captain: auto "Switch"
             if (IsBot(captainT))
@@ -101,7 +101,7 @@ public partial class MixScrims
     {
         var builder = Core.MenusAPI
             .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.sidePickingTitle"])
+            .Design.SetMenuTitle(Core.Localizer["menu.side_picking"])
             .Design.SetMenuTitleVisible(true)
             .Design.SetMenuFooterVisible(true)
             .EnableSound()
@@ -174,12 +174,12 @@ public partial class MixScrims
 
         if (captain.PlayerPawn.TeamNum == 3)
         {
-            PrintMessageToAllPlayers(Core.Localizer["knifeRound.captainChoseSwitchCt", captain.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.ct", captain.Controller.PlayerName]);
         }
 
         if (captain.PlayerPawn.TeamNum == 2)
         {
-            PrintMessageToAllPlayers(Core.Localizer["knifeRound.captainChoseSwitchT", captain.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.t", captain.Controller.PlayerName]);
         }
 
         if (cfg.DetailedLogging)
@@ -286,12 +286,12 @@ public partial class MixScrims
 
         if (captain.PlayerPawn.TeamNum == 3)
         {
-            PrintMessageToAllPlayers(Core.Localizer["knifeRound.captainChoseStayCt", captain.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.ct", captain.Controller.PlayerName]);
         }
 
         if (captain.PlayerPawn.TeamNum == 2)
         {
-            PrintMessageToAllPlayers(Core.Localizer["knifeRound.captainChoseStayT", captain.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.t", captain.Controller.PlayerName]);
         }
 
         StartMatch();

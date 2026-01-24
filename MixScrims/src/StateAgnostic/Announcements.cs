@@ -24,8 +24,8 @@ public partial class MixScrims
             string notReadyPlayersNames = string.Join(", ", notReadyPlayers.Select(p => p.Controller.PlayerName));
             if (cfg.DetailedLogging)
                 logger.LogInformation($"Not ready players: {notReadyPlayersNames}");
-            PrintMessageToAllPlayers(Core.Localizer["announcement.readyStatus", readyPlayers.Count, GetNumberOfPlayersRequiredToStart()]);
-            PrintMessageToAllPlayers(Core.Localizer["announcement.notReadyPlayers", notReadyPlayersNames]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.ready_status", readyPlayers.Count, GetNumberOfPlayersRequiredToStart()]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.not_ready_players", notReadyPlayersNames]);
         }
     }
 
@@ -47,7 +47,7 @@ public partial class MixScrims
 
         if (reminderToUse != null)
         {
-            PrintMessageToAllPlayers(Core.Localizer[$"commandReminders.{reminderToUse}"]);
+            PrintMessageToAllPlayers(Core.Localizer[$"command_reminders.{reminderToUse}"]);
             usedReminders.Add(reminderToUse);
         }
     }
@@ -71,26 +71,26 @@ public partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation($"Captain CT: {captainCt.Controller.PlayerName}");
-            PrintMessageToAllPlayers(Core.Localizer["announcement.captainChosenCt", captainCt.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.captain.chosen.ct", captainCt.Controller.PlayerName]);
         }
         else
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("Captain CT: Not chosen");
-            PrintMessageToAllPlayers(Core.Localizer["announcement.captainNotChosenCt"]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.captain.not_chosen.ct"]);
         }
 
         if (captainT != null)
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation($"Captain T: {captainT.Controller.PlayerName}");
-            PrintMessageToAllPlayers(Core.Localizer["announcement.captainChosenT", captainT.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.captain.chosen.t", captainT.Controller.PlayerName]);
         }
         else
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("Captain T: Not chosen");
-            PrintMessageToAllPlayers(Core.Localizer["announcement.captainNotChosenT"]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.captain.not_chosen.t"]);
         }
     }
 }

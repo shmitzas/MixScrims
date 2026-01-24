@@ -24,7 +24,7 @@ public sealed partial class MixScrims
                 return;
             }
 
-            player.SendChat(Core.Localizer["serverPrefix"] + " " + message);
+            player.SendChat(Core.Localizer["server_prefix"] + " " + message);
         });
     }
 
@@ -57,7 +57,7 @@ public sealed partial class MixScrims
 
         Core.Scheduler.NextTick(() =>
         {
-            Core.PlayerManager.SendChat(Core.Localizer["serverPrefix"] + " " + message);
+            Core.PlayerManager.SendChat(Core.Localizer["server_prefix"] + " " + message);
         });
     }
 

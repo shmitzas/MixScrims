@@ -79,7 +79,7 @@ public sealed partial class MixScrims
             {
                 if (announce)
                 {
-                    PrintMessageToPlayer(player, Core.Localizer["command.alreadyReady"]);
+                    PrintMessageToPlayer(player, Core.Localizer["command.ready.already_ready"]);
                 }
                 return;
             }
@@ -87,13 +87,13 @@ public sealed partial class MixScrims
             readyPlayers.Add(player);
             if (announce)
             {
-                PrintMessageToAllPlayers(Core.Localizer["command.setReady", name]);
+                PrintMessageToAllPlayers(Core.Localizer["command.ready", name]);
             }
             CheckReadyPlayersToStart();
         }
         else
         {
-            PrintMessageToPlayer(player, Core.Localizer["command.invalidState", "ready"]);
+            PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "ready"]);
         }
     }
 
@@ -114,7 +114,7 @@ public sealed partial class MixScrims
             {
                 if (announce)
                 {
-                    PrintMessageToAllPlayers(Core.Localizer["command.setUnready", name]);
+                    PrintMessageToAllPlayers(Core.Localizer["command.unready", name]);
                 }
                 readyPlayers.Remove(existing);
                 CheckReadyPlayersToStart();
@@ -123,12 +123,12 @@ public sealed partial class MixScrims
 
             if (announce)
             {
-                PrintMessageToPlayer(player, Core.Localizer["command.alreadyUnready"]);
+                PrintMessageToPlayer(player, Core.Localizer["command.unready.already_unready"]);
             }
         }
         else
         {
-            PrintMessageToPlayer(player, Core.Localizer["command.invalidState", "unready"]);
+            PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "unready"]);
         }
     }
 
@@ -153,7 +153,7 @@ public sealed partial class MixScrims
         Core.Scheduler.StopOnMapChange(loadMapToken);
 
         mixScrimsService.SetMatchState(MatchState.MapLoading);
-        PrintMessageToAllPlayers(Core.Localizer["map.changingMap", map.DisplayName]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.map.changing", map.DisplayName]);
         ScheduleMapLoadingAnnouncement(map);
     }
 
@@ -189,7 +189,7 @@ public sealed partial class MixScrims
 
             if (matchState == MatchState.MapLoading)
             {
-                PrintMessageToAllPlayers(Core.Localizer["map.mapLoading", map.DisplayName]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.map.loading", map.DisplayName]);
                 LoadSelectedMap(map);
             }
         });
@@ -261,11 +261,11 @@ public sealed partial class MixScrims
         {
             logger.LogError("SetCtCaptain: picked player is invalid");
             var localizer = Core.Translation.GetPlayerLocalizer(admin);
-            admin.SendChat(Core.Localizer["serverPrefix"] + " " + Core.Localizer["error.invalidPlayerPicked", pickedPlayerName]);
+            admin.SendChat(Core.Localizer["server_prefix"] + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             return;
         }
 
-        PrintMessageToAllPlayers(Core.Localizer["command.captainCt", admin.Controller?.PlayerName ?? $"#{admin.PlayerID}", player.Controller?.PlayerName ?? $"#{player.PlayerID}"]);
+        PrintMessageToAllPlayers(Core.Localizer["command.captain.ct", admin.Controller?.PlayerName ?? $"#{admin.PlayerID}", player.Controller?.PlayerName ?? $"#{player.PlayerID}"]);
         PickCtCaptain(player);
 
         CloseMenuForPlayer(admin);
@@ -282,11 +282,11 @@ public sealed partial class MixScrims
         {
             logger.LogError("SetTCaptain: picked player is invalid");
             var localizer = Core.Translation.GetPlayerLocalizer(admin);
-            admin.SendChat(Core.Localizer["serverPrefix"] + " " + Core.Localizer["error.invalidPlayerPicked", pickedPlayerName]);
+            admin.SendChat(Core.Localizer["server_prefix"] + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             return;
         }
 
-        PrintMessageToAllPlayers(Core.Localizer["command.captainT", admin.Controller?.PlayerName ?? $"#{admin.PlayerID}", player.Controller?.PlayerName ?? $"#{player.PlayerID}"]);
+        PrintMessageToAllPlayers(Core.Localizer["command.captain.t", admin.Controller?.PlayerName ?? $"#{admin.PlayerID}", player.Controller?.PlayerName ?? $"#{player.PlayerID}"]);
         PickTCaptain(player);
 
         CloseMenuForPlayer(admin);

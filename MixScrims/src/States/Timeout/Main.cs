@@ -39,11 +39,11 @@ public partial class MixScrims
                 timeoutQueue.Enqueue(team);
                 if (team == Team.CT)
                 {
-                    PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutQueuedCt"]);
+                    PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.queued.ct"]);
                 }
                 else if (team == Team.T)
                 {
-                    PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutQueuedT"]);
+                    PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.queued.t"]);
                 }
             }
             return;
@@ -56,15 +56,15 @@ public partial class MixScrims
         if (team == Team.CT)
         {
             timeoutCountCt--;
-            PrintMessageToAllPlayers(Core.Localizer["stateChanged.timeoutStartedCt"]);
-            PrintMessageToTeam(Team.CT, Core.Localizer["timeout.remainingTimeouts", timeoutCountCt, cfg.Timeouts]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.timeout.ct"]);
+            PrintMessageToTeam(Team.CT, Core.Localizer["command.timeout.remaining_timeouts", timeoutCountCt, cfg.Timeouts]);
         }
 
         if (team == Team.T)
         {
             timeoutCountT--;
-            PrintMessageToAllPlayers(Core.Localizer["stateChanged.timeoutStartedT"]);
-            PrintMessageToTeam(Team.T, Core.Localizer["timeout.remainingTimeouts", timeoutCountT, cfg.Timeouts]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.timeout.t"]);
+            PrintMessageToTeam(Team.T, Core.Localizer["command.timeout.remaining_timeouts", timeoutCountT, cfg.Timeouts]);
         }
         BroadcastRemainingTimeoutTime();
         Core.Scheduler.DelayBySeconds(cfg.TimeoutDurationSeconds, EndTimeout);
@@ -75,7 +75,7 @@ public partial class MixScrims
     /// </summary>
     private void EndTimeout()
     {
-        PrintMessageToAllPlayers(Core.Localizer["stateChanged.timeoutEnded"]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.timeout.ended"]);
         isTimeoutActive = false;
         timeoutPending = TimeoutPending.None;
 
@@ -95,11 +95,11 @@ public partial class MixScrims
                 timeoutPending = nextTeam == Team.CT ? TimeoutPending.CT : TimeoutPending.T;
                 if (nextTeam == Team.CT)
                 {
-                    PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutPendingCt"]);
+                    PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.pending.ct"]);
                 }
                 else if (nextTeam == Team.T)
                 {
-                    PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutPendingT"]);
+                    PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.pending.t"]);
                 }
             }
         }
@@ -130,7 +130,7 @@ public partial class MixScrims
 
         var builder = Core.MenusAPI
             .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.timeoutVote"])
+            .Design.SetMenuTitle(Core.Localizer["menu.timeout_vote"])
             .Design.SetMenuTitleVisible(true)
             .Design.SetMenuFooterVisible(true)
             .EnableSound()
@@ -171,7 +171,7 @@ public partial class MixScrims
         }
 
         var totalEligibleVotes = Math.Max(0, players.Count - 1);
-        PrintMessageToTeam(team, Core.Localizer["announcement.timeoutVoteProgress", timeoutVoteYesCount, timeoutVoteNoCount, totalEligibleVotes]);
+        PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, totalEligibleVotes]);
 
         timeoutVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => TimeoutVoteResult(team));
     }
@@ -209,7 +209,7 @@ public partial class MixScrims
         var teamPlayers = GetPlayersInTeam(team);
         int totalEligibleVotes = Math.Max(0, teamPlayers.Count - 1);
 
-        PrintMessageToTeam(team, Core.Localizer["announcement.timeoutVoteProgress", timeoutVoteYesCount, timeoutVoteNoCount, totalEligibleVotes]);
+        PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, totalEligibleVotes]);
 
         if (timeoutVoteYesCount + timeoutVoteNoCount >= totalEligibleVotes)
         {
@@ -241,7 +241,7 @@ public partial class MixScrims
             }
         }
 
-        PrintMessageToTeam(team, Core.Localizer["announcement.timeoutVoteTotalTeam", timeoutVoteYesCount, timeoutVoteNoCount, requiredVotes]);
+        PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.total_team", timeoutVoteYesCount, timeoutVoteNoCount, requiredVotes]);
 
         if (team == Team.CT)
         {
@@ -253,11 +253,11 @@ public partial class MixScrims
                     StartTimeout(Team.CT);
                     return;
                 }
-                PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutPendingCt"]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.pending.ct"]);
             }
             else
             {
-                PrintMessageToTeam(Team.CT, Core.Localizer["announcement.timeoutNotEnoughVotes"]);
+                PrintMessageToTeam(Team.CT, Core.Localizer["announcement.timeout.not_enough_votes"]);
             }
         }
         if (team == Team.T)
@@ -270,11 +270,11 @@ public partial class MixScrims
                     StartTimeout(Team.T);
                     return;
                 }
-                PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutPendingT"]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.pending.t"]);
             }
             else
             {
-                PrintMessageToTeam(Team.T, Core.Localizer["announcement.timeoutNotEnoughVotes"]);
+                PrintMessageToTeam(Team.T, Core.Localizer["announcement.timeout.not_enough_votes"]);
             }
         }
     }
@@ -286,25 +286,25 @@ public partial class MixScrims
     {
         if (cfg.TimeoutDurationSeconds == 120)
         {
-            Core.Scheduler.DelayBySeconds(15, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 105]));
-            Core.Scheduler.DelayBySeconds(30, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 90]));
-            Core.Scheduler.DelayBySeconds(45, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 75]));
-            Core.Scheduler.DelayBySeconds(60, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 60]));
-            Core.Scheduler.DelayBySeconds(75, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 45]));
-            Core.Scheduler.DelayBySeconds(90, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 30]));
-            Core.Scheduler.DelayBySeconds(105, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 15]));
+            Core.Scheduler.DelayBySeconds(15, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 105]));
+            Core.Scheduler.DelayBySeconds(30, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 90]));
+            Core.Scheduler.DelayBySeconds(45, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 75]));
+            Core.Scheduler.DelayBySeconds(60, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 60]));
+            Core.Scheduler.DelayBySeconds(75, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 45]));
+            Core.Scheduler.DelayBySeconds(90, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 30]));
+            Core.Scheduler.DelayBySeconds(105, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 15]));
         }
 
         if (cfg.TimeoutDurationSeconds == 60)
         {
-            Core.Scheduler.DelayBySeconds(15, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 45]));
-            Core.Scheduler.DelayBySeconds(30, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 30]));
-            Core.Scheduler.DelayBySeconds(45, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 15]));
+            Core.Scheduler.DelayBySeconds(15, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 45]));
+            Core.Scheduler.DelayBySeconds(30, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 30]));
+            Core.Scheduler.DelayBySeconds(45, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 15]));
         }
 
         if (cfg.TimeoutDurationSeconds == 30)
         {
-            Core.Scheduler.DelayBySeconds(15, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeoutRemainingTime", 45]));
+            Core.Scheduler.DelayBySeconds(15, () => PrintMessageToAllPlayers(Core.Localizer["announcement.timeout.remaining_time", 45]));
         }
     }
 }
