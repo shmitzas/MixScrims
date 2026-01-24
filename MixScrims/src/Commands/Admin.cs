@@ -95,10 +95,47 @@ public partial class MixScrims
 		}
 	}
 
-	///<summary>
-	///Prompts a list of players to choose a captain for chosen team
-	///</summary>
-	public void OnCaptain(ICommandContext context)
+    public void OnForceUnready(ICommandContext context)
+    {
+        var admin = context.Sender;
+        if (admin == null)
+        {
+            logger.LogInformation("Players were forced into unready state by force by Console");
+            PrintMessageToAllPlayers(Core.Localizer["command.forceUnready", "Console"]);
+        }
+        else
+        {
+            logger.LogInformation($"Players were forced into unready state by force by {admin.Controller.PlayerName}");
+            PrintMessageToAllPlayers(Core.Localizer["command.forceUnready", admin.Controller.PlayerName]);
+        }
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
+
+        if (matchState != MatchState.Warmup && matchState != MatchState.MapChosen)
+        {
+            logger.LogWarning("OnForceUnready: Invalid match state, must be MatchState.Warmup or MatchState.MapChosen");
+            if (admin != null)
+            {
+                PrintMessageToPlayer(admin, Core.Localizer["command.invalidState", "forceunready"]);
+            }
+            return;
+        }
+
+        var players = GetPlayers();
+        foreach (var player in players)
+        {
+            if (readyPlayers.Any(rp => rp.PlayerID == player.PlayerID))
+            {
+                logger.LogInformation("OnForceUnready: Adding players to ready list");
+                RemovePlayerFromReadyList(player, false);
+            }
+        }
+    }
+
+    ///<summary>
+    ///Prompts a list of players to choose a captain for chosen team
+    ///</summary>
+    public void OnCaptain(ICommandContext context)
 	{
 		var admin = context.Sender;
 		if (admin == null || !context.IsSentByPlayer)

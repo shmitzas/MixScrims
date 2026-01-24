@@ -2,6 +2,11 @@ namespace MixScrims;
 
 public class Config
 {
+    // Debug settings
+    public bool TestMode { get; set; } = false;
+    public bool DetailedLogging { get; set; } = true;
+
+    // Discord invite settings
     public List<DiscordInvite> DiscordInviteWebhooks { get; set; } = [
         new() {
             Message = "<&role_id> +{0} ||| `connect {1}`",
@@ -9,15 +14,23 @@ public class Config
         }
     ];
     public int DiscordInviteDelayMinutes { get; set; } = 5;
+    public bool EnableDiscordInvites { get; set; } = true;
+
+    // Match settings
     public int MinimumReadyPlayers { get; set; } = 10;
-    public bool SkipTeamPicking { get; set; } = false;
+    public bool FaceitLikeDamageControl { get; set; } = true;
     public bool MoveOverflowPlayersToSpec { get; set; } = true;
     public int DisallowVotePreviousMaps { get; set; } = 2;
     public int DefaultVoteTimeSeconds { get; set; } = 30;
     public int TimeoutDurationSeconds { get; set; } = 60;
     public int Timeouts { get; set; } = 3;
-    public bool TestMode { get; set; } = false;
-    public bool DetailedLogging { get; set; } = true;
+
+    // Niche settings
+    public bool SkipTeamPicking { get; set; } = false;
+    public bool AllowVolunteerCaptains { get; set; } = false;
+    public bool SkipMapVoting { get; set; } = false;
+
+    // Announcement timers
     public AnnouncementTimers ChatAnnouncementTimers { get; set; } = new();
     public List<string> CommandRemindersLocalization { get; set; } =
     [
@@ -25,15 +38,19 @@ public class Config
         "ready",
         "invite"
     ];
+
+    // Player leave punishment settings
     public bool PunishPlayerLeaves { get; set; } = false;
     public LeavePunishment PlayerLeavePunishment { get; set; } = new();
-    public bool AllowVolunteerCaptains { get; set; } = false;
+
+    // Commands
     public Dictionary<string, CommandInfo> Commands { get; set; } = new()
     {
         // Admin commands
         { "mix_reset", new() { Permission = "managemix", Aliases = ["reset"] } },
         { "mix_start", new() { Permission = "managemix", Aliases = ["start"] } },
         { "forceready", new() { Permission = "managemix", Aliases = ["fr"] } },
+        { "foreceunready", new() { Permission = "managemix", Aliases = ["fur"] } },
         { "captain", new() { Permission = "managemix", Aliases = ["cap", "capt"] } },
         { "map", new() { Permission = "managemix", Aliases = ["changemap"] } },
         { "maps", new() { Permission = "managemix", Aliases = ["maplist"] } },
@@ -49,6 +66,8 @@ public class Config
         { "switch", new() { Permission = "", Aliases = ["swap"] } },
         { "volunteer_captain", new() { Permission = "", Aliases = ["volcap", "selfcapt"] }   }
     };
+
+    // Map settings
     public List<MapDetails> Maps { get; set; } =
     [
         new() { MapName = "de_mirage", DisplayName = "Mirage", WorkshopId = "", CanBeVoted = true, IsWorkshopMap = false },

@@ -74,6 +74,7 @@ public partial class MixScrims : BasePlugin
             { "mix_reset", OnResetPlugin },
             { "mix_start", OnForceMatchStart },
             { "forceready", OnForceReady },
+            { "forceunready", OnForceUnready },
             { "captain", OnCaptain },
             { "map", OnGoToMap },
             { "maps", OnListVoteableMaps },
