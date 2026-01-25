@@ -18,6 +18,7 @@ public class Config
 
     // Match settings
     public int MinimumReadyPlayers { get; set; } = 10;
+    public bool RequireAllConnectedPlayersToBeReady { get; set; } = true;
     public bool FaceitLikeDamageControl { get; set; } = true;
     public bool MoveOverflowPlayersToSpec { get; set; } = true;
     public int DisallowVotePreviousMaps { get; set; } = 2;

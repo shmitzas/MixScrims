@@ -162,9 +162,14 @@ public sealed partial class MixScrims
     private int GetNumberOfPlayersRequiredToStart()
     {
         int totalPlayers = GetPlayers().Count;
-        if (totalPlayers < cfg.MinimumReadyPlayers)
-            return cfg.MinimumReadyPlayers;
-        return totalPlayers;
+        if (cfg.RequireAllConnectedPlayersToBeReady)
+        {
+            if (totalPlayers < cfg.MinimumReadyPlayers)
+                return cfg.MinimumReadyPlayers;
+            return totalPlayers;
+        }
+
+        return cfg.MinimumReadyPlayers;
     }
 
     /// <summary>
