@@ -52,6 +52,17 @@ public sealed partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("CheckReadyPlayersToStart: Starting Map Voting Phase");
+
+            if (cfg.SkipMapVoting)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("CheckReadyPlayersToStart: Skipping Map Voting Phase as per configuration");
+                StartTeamPickingPhase();
+                return;
+            }
+            
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CheckReadyPlayersToStart: Starting Map Voting Phase");
             StartMapVotingPhase();
         }
 
