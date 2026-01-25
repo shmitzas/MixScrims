@@ -234,15 +234,18 @@ partial class MixScrims
 
         if (matchState == MatchState.PickingTeam)
         {
-            if (player.PlayerID == captainCt?.PlayerID)
+            if (!cfg.DisableCaptains)
             {
-                captainCt = null;
-                StartTeamPickingPhase();
-            }
-            if (player.PlayerID == captainT?.PlayerID)
-            {
-                captainT = null;
-                StartTeamPickingPhase();
+                if (player.PlayerID == captainCt?.PlayerID)
+                {
+                    captainCt = null;
+                    StartTeamPickingPhase();
+                }
+                if (player.PlayerID == captainT?.PlayerID)
+                {
+                    captainT = null;
+                    StartTeamPickingPhase();
+                }
             }
         }
 
@@ -250,39 +253,42 @@ partial class MixScrims
             || matchState == MatchState.MapChosen
             || matchState == MatchState.Timeout)
         {
-            if (cfg.DetailedLogging)
-                logger.LogInformation($"HandleDisconnectedPlayer: MatchState is {matchState}");
-            if (player.PlayerID == captainCt?.PlayerID)
+            if (!cfg.DisableCaptains)
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"HandleDisconnectedPlayer: Disconnected player is CT captain");
+                    logger.LogInformation($"HandleDisconnectedPlayer: MatchState is {matchState}");
+                if (player.PlayerID == captainCt?.PlayerID)
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation($"HandleDisconnectedPlayer: Disconnected player is CT captain");
 
-                captainCt = null;
-                var newCaptain = playingCtPlayers.Where(p => p.PlayerID != player.PlayerID).FirstOrDefault();
+                    captainCt = null;
+                    var newCaptain = playingCtPlayers.Where(p => p.PlayerID != player.PlayerID).FirstOrDefault();
 
-                if (cfg.DetailedLogging)
-                    logger.LogInformation($"HandleDisconnectedPlayer: New CT captain is {newCaptain?.Controller.PlayerName}");
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation($"HandleDisconnectedPlayer: New CT captain is {newCaptain?.Controller.PlayerName}");
 
-                PickCtCaptain(newCaptain);
-            }
-            if (player.PlayerID == captainT?.PlayerID)
-            {
-                if (cfg.DetailedLogging)
-                    logger.LogInformation($"HandleDisconnectedPlayer: Disconnected player is T captain");
+                    PickCtCaptain(newCaptain);
+                }
+                if (player.PlayerID == captainT?.PlayerID)
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation($"HandleDisconnectedPlayer: Disconnected player is T captain");
 
-                captainT = null;
-                var newCaptain = playingTPlayers.Where(p => p.PlayerID != player.PlayerID).FirstOrDefault();
+                    captainT = null;
+                    var newCaptain = playingTPlayers.Where(p => p.PlayerID != player.PlayerID).FirstOrDefault();
 
-                if (cfg.DetailedLogging)
-                    logger.LogInformation($"HandleDisconnectedPlayer: New T captain is {newCaptain?.Controller.PlayerName}");
-                PickTCaptain(newCaptain);
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation($"HandleDisconnectedPlayer: New T captain is {newCaptain?.Controller.PlayerName}");
+                    PickTCaptain(newCaptain);
+                }
             }
         }
 
         if (matchState == MatchState.PickingStartingSide
             || matchState == MatchState.Timeout)
         {
-            if (player.PlayerID == winnerCaptain?.PlayerID)
+            if (!cfg.DisableCaptains && player.PlayerID == winnerCaptain?.PlayerID)
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation($"HandleDisconnectedPlayer: Disconnected player is winner captain");
@@ -417,7 +423,7 @@ partial class MixScrims
 
         if (matchState == MatchState.KnifeRound)
         {
-            if (player.PlayerID == captainCt?.PlayerID || player.PlayerID == captainT?.PlayerID)
+            if (!cfg.DisableCaptains && (player.PlayerID == captainCt?.PlayerID || player.PlayerID == captainT?.PlayerID))
             {
                 PrintMessageToPlayer(player, Core.Localizer["error.captain.cannot_change_team"]);
                 return HookResult.Stop;

@@ -243,6 +243,14 @@ partial class MixScrims
 			return;
 		}
 
+		if (cfg.DisableCaptains)
+		{
+			if (cfg.DetailedLogging)
+				logger.LogInformation("OnStay: Captains are disabled, side pick not available.");
+			PrintMessageToPlayer(player, Core.Localizer["error.captain.disabled"]);
+			return;
+		}
+
 		if (player != winnerCaptain)
 		{
 			PrintMessageToPlayer(player, Core.Localizer["error.not_captain"]);
@@ -280,6 +288,14 @@ partial class MixScrims
         if (matchState != MatchState.PickingStartingSide)
 		{
 			PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "sidePick"]);
+			return;
+		}
+
+		if (cfg.DisableCaptains)
+		{
+			if (cfg.DetailedLogging)
+				logger.LogInformation("OnSwitch: Captains are disabled, side pick not available.");
+			PrintMessageToPlayer(player, Core.Localizer["error.captain.disabled"]);
 			return;
 		}
 
@@ -326,6 +342,14 @@ partial class MixScrims
             logger.LogError("Console cannot set captain, only a live player can");
             return;
         }
+
+		if (cfg.DisableCaptains)
+		{
+			if (cfg.DetailedLogging)
+				logger.LogInformation("OnCaptainVolunteer: Captains are disabled in configuration.");
+			PrintMessageToPlayer(player, Core.Localizer["error.captain.disabled"]);
+			return;
+		}
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 

@@ -60,6 +60,13 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation("PrintChosenCaptains");
 
+        if (cfg.DisableCaptains)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("PrintChosenCaptains: Captains are disabled in configuration.");
+            return;
+        }
+
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState != MatchState.MapChosen)

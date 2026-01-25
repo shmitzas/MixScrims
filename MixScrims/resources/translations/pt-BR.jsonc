@@ -54,6 +54,7 @@
   "error.team.full.t": "Time [orange]T [red]está cheio!",
   "error.not_captain": "Você [red]não é [default]o capitão do time vencedor!",
   "error.captain.cannot_change_team": "Você [red]não pode [default]mudar de time durante o [red]Round Faca!",
+  "error.captain.disabled": "Capitães estão [red]desativados [default]neste servidor!",
   "error.timeout_pending": "Um timeout [red]já está pendente [default]para a próxima rodada!",
   "error.no_timeouts_left": "Seu time tem [red]{0}[default]/[green]{1} [default]timeouts restantes!",
   "error.tried_to_bypass_team_check": "Você tentou burlar os limites de time. [red]Feio feio...",

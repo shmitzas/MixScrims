@@ -81,6 +81,7 @@
   "error.not_captain": "You are [red]not [default]the victorious team captain!",
   "error.captain.cannot_change_team": "You [red]can't [default]change teams during [red]Knife round!",
   "error.captain.selection_failed": "[red]Critical error [default]- Captains cannot be assigned. Check logs for details",
+  "error.captain.disabled": "Captains are [red]disabled [default]on this server!",
   "error.captain.volunteering_disabled": "[orange]Volunteer Captains [default]are [red]disabled",
   "error.timeout_pending": "Timeout [red]is already pending [default]for the next round!",
   "error.no_timeouts_left": "Your team has [red]{0}[default]/[lime]{1} [default]timeouts remaining!",

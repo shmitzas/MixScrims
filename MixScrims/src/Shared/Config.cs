@@ -30,6 +30,7 @@ public class Config
     public bool SkipTeamPicking { get; set; } = false;
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;
+    public bool DisableCaptains { get; set; } = false;
 
     // Announcement timers
     public AnnouncementTimers ChatAnnouncementTimers { get; set; } = new();

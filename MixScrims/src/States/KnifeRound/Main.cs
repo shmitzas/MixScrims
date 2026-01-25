@@ -36,6 +36,13 @@ public partial class MixScrims
     /// </summary>
     private void PromptWinnerCaptainToChoseStartingSide(Team winnerTeam)
     {
+        if (cfg.DisableCaptains)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("PromptWinnerCaptainToChoseStartingSide: Captains are disabled, keeping current sides.");
+            StayStartingSides(null);
+            return;
+        }
 
         mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
 

@@ -53,6 +53,13 @@ public partial class MixScrims
         var warmupToken = Core.Scheduler.DelayBySeconds(5, LoadWarmupConfig);
         Core.Scheduler.StopOnMapChange(warmupToken);
 
+        if (cfg.DisableCaptains)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleMapChosenNewMapLoad: Captains are disabled in configuration.");
+            return;
+        }
+
         var captainAnnouncementToken = Core.Scheduler.DelayBySeconds(30, () =>
         {
             PickCaptains();

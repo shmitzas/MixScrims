@@ -18,18 +18,21 @@ public partial class MixScrims
     /// </summary>
     private void StartTeamPickingPhase()
     {
-        PickCaptains();
-
-        if (captainCt == null || captainT == null)
+        if (!cfg.DisableCaptains)
         {
-            logger.LogError("StartTeamPickingPhase: One or both captains are null.");
-            logger.LogError($"captainCt: {(captainCt != null ? "null" : "null")}");
-            logger.LogError($"captainT: {(captainT != null ? "null" : "null")}");
-            logger.LogError($"StartTeamPickingPhase: Valid players in the server: {GetPlayers().Count}");
-            logger.LogError("StartTeamPickingPhase: Aborting team picking phase.");
-            PrintMessageToAllPlayers(Core.Localizer["error.captain.selection_failed"]);
-            ResetPluginState();
-            return;
+            PickCaptains();
+
+            if (captainCt == null || captainT == null)
+            {
+                logger.LogError("StartTeamPickingPhase: One or both captains are null.");
+                logger.LogError($"captainCt: {(captainCt != null ? "null" : "null")}");
+                logger.LogError($"captainT: {(captainT != null ? "null" : "null")}");
+                logger.LogError($"StartTeamPickingPhase: Valid players in the server: {GetPlayers().Count}");
+                logger.LogError("StartTeamPickingPhase: Aborting team picking phase.");
+                PrintMessageToAllPlayers(Core.Localizer["error.captain.selection_failed"]);
+                ResetPluginState();
+                return;
+            }
         }
 
         if (cfg.SkipTeamPicking)
@@ -48,20 +51,29 @@ public partial class MixScrims
 
         MovePlayersToDesignatedTeamsPrePick();
 
-        SetTeamName(Team.CT, captainCt.Controller.PlayerName);
-        SetTeamName(Team.T, captainT.Controller.PlayerName);
+        if (!cfg.DisableCaptains)
+        {
+            SetTeamName(Team.CT, captainCt.Controller.PlayerName);
+            SetTeamName(Team.T, captainT.Controller.PlayerName);
 
-        Random random = new Random();
-        int teamStarting = random.Next(2, 4);
-        if (teamStarting == 3)
-        {
-            PromptCaptainToPickPlayer(captainCt, Team.CT);
-            return;
+            Random random = new Random();
+            int teamStarting = random.Next(2, 4);
+            if (teamStarting == 3)
+            {
+                PromptCaptainToPickPlayer(captainCt, Team.CT);
+                return;
+            }
+            if (teamStarting == 2)
+            {
+                PromptCaptainToPickPlayer(captainT, Team.T);
+                return;
+            }
         }
-        if (teamStarting == 2)
+        else
         {
-            PromptCaptainToPickPlayer(captainT, Team.T);
-            return;
+            if (cfg.DetailedLogging)
+                logger.LogInformation("StartTeamPickingPhase: Captains disabled, skipping to knife round.");
+            SkipTeamPickingPhase();
         }
     }
 
@@ -75,16 +87,19 @@ public partial class MixScrims
 
         var players = GetPlayingPlayers();
 
-        if (captainCt != null && captainCt.IsValid)
+        if (!cfg.DisableCaptains)
         {
-            players.RemoveAll(p => p.PlayerID == captainCt.PlayerID);
-            playingCtPlayers.Add(captainCt);
-        }
+            if (captainCt != null && captainCt.IsValid)
+            {
+                players.RemoveAll(p => p.PlayerID == captainCt.PlayerID);
+                playingCtPlayers.Add(captainCt);
+            }
 
-        if (captainT != null && captainT.IsValid)
-        {
-            players.RemoveAll(p => p.PlayerID == captainT.PlayerID);
-            playingTPlayers.Add(captainT);
+            if (captainT != null && captainT.IsValid)
+            {
+                players.RemoveAll(p => p.PlayerID == captainT.PlayerID);
+                playingTPlayers.Add(captainT);
+            }
         }
 
         foreach (var player in players)
@@ -130,8 +145,11 @@ public partial class MixScrims
         }
 
         MovePlayersToDesignatedTeamsPreMatch();
-        SetTeamName(Team.CT, captainCt!.Controller!.PlayerName);
-        SetTeamName(Team.T, captainT!.Controller!.PlayerName);
+        if (!cfg.DisableCaptains && captainCt != null && captainT != null)
+        {
+            SetTeamName(Team.CT, captainCt.Controller!.PlayerName);
+            SetTeamName(Team.T, captainT.Controller!.PlayerName);
+        }
         StartKnifeRound();
     }
 
@@ -229,6 +247,13 @@ public partial class MixScrims
     /// </summary>
     private void PickCaptains()
     {
+        if (cfg.DisableCaptains)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("PickCaptains: Captains are disabled in configuration.");
+            return;
+        }
+
         if (captainCt == null)
         {
             if (cfg.DetailedLogging)

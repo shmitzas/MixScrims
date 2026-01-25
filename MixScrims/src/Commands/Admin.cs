@@ -144,6 +144,14 @@ public partial class MixScrims
 			return;
 		}
 
+		if (cfg.DisableCaptains)
+		{
+			if (cfg.DetailedLogging)
+				logger.LogInformation("OnCaptain: Captains are disabled in configuration.");
+			PrintMessageToPlayer(admin, Core.Localizer["error.captain.disabled"]);
+			return;
+		}
+
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.Warmup
