@@ -180,8 +180,9 @@ public partial class MixScrims
     private void DisplayReadyAndNotReadyPlayersInCenterHtml(int displayLenght)
     {
         var playersToStart = GetNumberOfPlayersRequiredToStart();
-        var readyMessage = $"[<span color=\"red\">{readyPlayers.Count}</span>/<span color=\"green\">{playersToStart}</span>]";
-        var message = $"{readyMessage}<br><span class=\"fontSize-sm\">Match flow will start when at least <span color=\"green\">{playersToStart}</span> players are ready!</span>";
+        var readyMessage = Core.Localizer["info.center.ready_players_counter", readyPlayers.Count, playersToStart];
+        var matchStartRequirements = Core.Localizer["info.center.match_start_requirements"];
+        var message = $"{readyMessage}<br>{matchStartRequirements}";
         Core.PlayerManager.SendCenterHTML(message, displayLenght);
     }
 }
