@@ -2,10 +2,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MixScrims.Contract;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Plugins;
-using MixScrims.Contract;
+using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace MixScrims;
 
@@ -24,6 +25,7 @@ public partial class MixScrims : BasePlugin
     private IOptions<Config> cfgOptions = null!;
     private Config cfg = new();
     private MixScrimsService mixScrimsService = null!;
+    private CCSGameRules? gameRules = null;
 
     public MixScrims(ISwiftlyCore core) : base(core)
     {
@@ -84,6 +86,7 @@ public partial class MixScrims : BasePlugin
             { "unready", OnUnReady },
             { "revote", OnRevote },
             { "timeout", OnTimeout },
+            { "surender", OnSurrender },
             { "invite", OnInvite },
             { "stay", OnStay },
             { "switch", OnSwitch }

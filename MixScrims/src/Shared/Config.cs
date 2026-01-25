@@ -65,10 +65,11 @@ public class Config
         { "unready", new() { Permission = "", Aliases = ["u", "ur"] } },
         { "revote", new() { Permission = "", Aliases = ["rv"] } },
         { "timeout", new() { Permission = "", Aliases = ["pause"] } },
+        { "surrender", new() { Permission = "", Aliases = ["gg"] }  },
         { "invite", new() { Permission = "", Aliases = ["inv"] } },
         { "stay", new() { Permission = "", Aliases = ["st"] } },
         { "switch", new() { Permission = "", Aliases = ["swap"] } },
-        { "volunteer_captain", new() { Permission = "", Aliases = ["volcap", "selfcapt"] }   }
+        { "volunteer_captain", new() { Permission = "", Aliases = ["volcap", "selfcapt"] }   },
     };
 
     // Map settings

@@ -18,6 +18,10 @@ public partial class MixScrims
     /// </summary>
     private void StartTeamPickingPhase()
     {
+        playerStatusTimerCenterHtml?.Cancel();
+        playerStatusTimer?.Cancel();
+        captainsAnnouncementsTimer?.Cancel();
+
         if (!cfg.DisableCaptains)
         {
             PickCaptains();
@@ -41,10 +45,7 @@ public partial class MixScrims
             return;
         }
 
-        mixScrimsService.SetMatchState(MatchState.PickingTeam);
-
-        captainsAnnouncementsTimer?.Cancel();
-        playerStatusTimer?.Cancel();
+        mixScrimsService.SetMatchState(MatchState.PickingTeam);        
 
         PauseMatch();
         Core.Engine.ExecuteCommand("exec mixscrims/teampick.cfg");

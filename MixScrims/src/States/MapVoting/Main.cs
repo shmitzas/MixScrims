@@ -16,6 +16,10 @@ public partial class MixScrims
     /// </summary>
     private void StartMapVotingPhase()
     {
+        playerStatusTimerCenterHtml?.Cancel();
+        playerStatusTimer?.Cancel();
+        captainsAnnouncementsTimer?.Cancel();
+
         if (cfg.DetailedLogging)
             logger.LogInformation("StartMapVotingPhase");
         mixScrimsService.SetMatchState(MatchState.MapVoting);

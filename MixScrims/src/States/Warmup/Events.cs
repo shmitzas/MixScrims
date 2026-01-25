@@ -18,6 +18,8 @@ public partial class MixScrims
     /// </summary>
     private void WarmupHandleOnMapStart(IOnMapLoadEvent @event)
     {
+        gameRules = Core.EntitySystem.GetGameRules();
+
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState != MatchState.Warmup)
             return;

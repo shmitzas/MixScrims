@@ -44,5 +44,8 @@ public partial class MixScrims
         timeoutCountT = 3;
         timeoutPending = TimeoutPending.None;
         canPlayerBeRespawned = true;
+        surrenderVoteYesCount = 0;
+        surrenderVoteNoCount = 0;
+        surrenderVoteTeam = Team.None;
     }
 }
