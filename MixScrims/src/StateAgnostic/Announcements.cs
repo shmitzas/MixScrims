@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
+using SwiftlyS2.Shared.GameEventDefinitions;
+using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
 
@@ -26,6 +28,74 @@ public partial class MixScrims
                 logger.LogInformation($"Not ready players: {notReadyPlayersNames}");
             PrintMessageToAllPlayers(Core.Localizer["announcement.ready_status", readyPlayers.Count, GetNumberOfPlayersRequiredToStart()]);
             PrintMessageToAllPlayers(Core.Localizer["announcement.not_ready_players", notReadyPlayersNames]);
+        }
+
+        if (cfg.ShowReadyStatusInScoreboard)
+        {
+            ShowReadyAndNotReadyPlayersInScoreboard();
+        }
+    }
+
+    /// <summary>
+    /// Displays a prefix for each ready and not ready players in the scoreboard.
+    /// </summary>
+    private void ShowReadyAndNotReadyPlayersInScoreboard()
+    {
+        var notReadyPlayers = GetNotReadyPlayers();
+        var readyPlayersList = GetReadyPlayers();
+
+        foreach(var player in readyPlayers)
+        {
+            SetPlayerReadyStatusInScoreboard(player, true);
+        }
+
+        foreach(var player in notReadyPlayers)
+        {
+            SetPlayerReadyStatusInScoreboard(player, false);
+        }
+    }
+
+    /// <summary>
+    /// Updates the player's clan tag in the scoreboard to reflect their ready or not ready status.
+    /// </summary>
+    private void SetPlayerReadyStatusInScoreboard(IPlayer player, bool isReady)
+    {
+        try
+        {
+            var playerClanTag = player.Controller.Clan;
+            if (isReady)
+            {
+                if (playerClanTag.Contains(Core.Localizer["info.clan_tag.ready"]))
+                {
+                    return;
+                }
+                if (playerClanTag.Contains(Core.Localizer["info.clan_tag.not_ready"]))
+                {
+                    playerClanTag = playerClanTag.Replace(Core.Localizer["info.clan_tag.not_ready"], "").Trim();
+                }
+                playerClanTag = $"{Core.Localizer["info.clan_tag.ready"]} {playerClanTag}";
+            }
+            else
+            {
+                if (playerClanTag.Contains(Core.Localizer["info.clan_tag.not_ready"]))
+                {
+                    return;
+                }
+                if (playerClanTag.Contains(Core.Localizer["info.clan_tag.ready"]))
+                {
+                    playerClanTag = playerClanTag.Replace(Core.Localizer["info.clan_tag.ready"], "").Trim();
+                }
+                playerClanTag = $"{Core.Localizer["info.clan_tag.not_ready"]} {playerClanTag}";
+            }
+
+            player.Controller.Clan = playerClanTag;
+            player.Controller.ClanUpdated();
+            Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(player.PlayerID);
+        }
+        catch (Exception ex)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogError(ex, "SetPlayerReadyStatusInScoreboard: Failed to update clan tag for player {PlayerName}. Most likely player left the server while setting clan tag.", player?.Controller?.PlayerName ?? $"Slot: {player?.Slot}");
         }
     }
 

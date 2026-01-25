@@ -101,6 +101,9 @@ public sealed partial class MixScrims
                 PrintMessageToAllPlayers(Core.Localizer["command.ready", name]);
             }
             CheckReadyPlayersToStart();
+
+            if (cfg.ShowReadyStatusInScoreboard)
+                SetPlayerReadyStatusInScoreboard(player, true);
         }
         else
         {
@@ -121,21 +124,25 @@ public sealed partial class MixScrims
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
             var existing = readyPlayers.FirstOrDefault(p => p.PlayerID == player.PlayerID);
-            if (existing != null)
+
+            if (existing == null)
             {
                 if (announce)
                 {
-                    PrintMessageToAllPlayers(Core.Localizer["command.unready", name]);
+                    PrintMessageToPlayer(player, Core.Localizer["command.unready.not_ready"]);
                 }
-                readyPlayers.Remove(existing);
-                CheckReadyPlayersToStart();
                 return;
             }
 
             if (announce)
             {
-                PrintMessageToPlayer(player, Core.Localizer["command.unready.already_unready"]);
+                PrintMessageToAllPlayers(Core.Localizer["command.unready", name]);
             }
+            readyPlayers.Remove(existing);
+            CheckReadyPlayersToStart();
+
+            if (cfg.ShowReadyStatusInScoreboard)
+                SetPlayerReadyStatusInScoreboard(player, false);
         }
         else
         {

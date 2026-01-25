@@ -67,6 +67,8 @@
   "info.player_disconnected.picked.t": "[orange]{0} [red]desconectou [default]durante a fase de escolha",
   "info.player_disconnected.playing.ct": "[lightblue]{0} [red]desconectou [default]durante a partida",
   "info.player_disconnected.playing.t": "[orange]{0} [red]desconectou [default]durante a partida",
+  "info.clan_tag.ready": "[Pronto]",
+  "info.clan_tag.not_ready": "[Não Pronto]",
   "menu.map_voting": "Vote no mapa",
   "menu.captain_pick": "Escolha o capitão {0}",
   "menu.team_picking": "Escolha o companheiro {0}",

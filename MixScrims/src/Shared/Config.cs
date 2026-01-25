@@ -31,6 +31,7 @@ public class Config
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
+    public bool ShowReadyStatusInScoreboard { get; set; } = false;
 
     // Announcement timers
     public AnnouncementTimers ChatAnnouncementTimers { get; set; } = new();

@@ -148,6 +148,14 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
+    /// Retrieves a list of players who are currently marked as ready.
+    /// </summary>
+    private List<IPlayer> GetReadyPlayers()
+    {
+        return readyPlayers.ToList();
+    }
+
+    /// <summary>
     /// Returns a list of maps that can be voted for.
     /// </summary>
     private List<MapDetails> GetMapsToVote()
