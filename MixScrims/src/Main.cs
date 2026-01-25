@@ -45,6 +45,7 @@ public partial class MixScrims : BasePlugin
         ResetVariables();
         RegisterCommands();
         mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
+        StartWarmup();
     }
 
     public override void Unload()

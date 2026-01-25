@@ -32,6 +32,7 @@ public class Config
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
     public bool ShowReadyStatusInScoreboard { get; set; } = false;
+    public bool ShowReadyStatusInCenterHtml { get; set; } = false;
 
     // Announcement timers
     public AnnouncementTimers ChatAnnouncementTimers { get; set; } = new();
@@ -53,7 +54,7 @@ public class Config
         { "mix_reset", new() { Permission = "managemix", Aliases = ["reset"] } },
         { "mix_start", new() { Permission = "managemix", Aliases = ["start"] } },
         { "forceready", new() { Permission = "managemix", Aliases = ["fr"] } },
-        { "foreceunready", new() { Permission = "managemix", Aliases = ["fur"] } },
+        { "forceunready", new() { Permission = "managemix", Aliases = ["fur"] } },
         { "captain", new() { Permission = "managemix", Aliases = ["cap", "capt"] } },
         { "map", new() { Permission = "managemix", Aliases = ["changemap"] } },
         { "maps", new() { Permission = "managemix", Aliases = ["maplist"] } },

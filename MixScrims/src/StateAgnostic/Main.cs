@@ -7,6 +7,7 @@ namespace MixScrims;
 public sealed partial class MixScrims
 {
     private CancellationTokenSource? playerStatusTimer;
+    private CancellationTokenSource? playerStatusTimerCenterHtml;
     private CancellationTokenSource? commandRemindersTimer;
     private CancellationTokenSource? captainsAnnouncementsTimer;
 
@@ -28,6 +29,16 @@ public sealed partial class MixScrims
             task: PrintReadyAndNotReadyPlayers
         );
         Core.Scheduler.StopOnMapChange(playerStatusTimer);
+
+        // Player ready status center html
+        if (cfg.ShowReadyStatusInCenterHtml)
+        {
+            playerStatusTimerCenterHtml = Core.Scheduler.RepeatBySeconds(
+                periodSeconds: 1,
+                task: () => DisplayReadyAndNotReadyPlayersInCenterHtml(1000)
+            );
+            Core.Scheduler.StopOnMapChange(playerStatusTimerCenterHtml);
+        }
 
         // Command reminders
         commandRemindersTimer = Core.Scheduler.RepeatBySeconds(

@@ -42,7 +42,6 @@ public partial class MixScrims
     private void ShowReadyAndNotReadyPlayersInScoreboard()
     {
         var notReadyPlayers = GetNotReadyPlayers();
-        var readyPlayersList = GetReadyPlayers();
 
         foreach(var player in readyPlayers)
         {
@@ -62,6 +61,13 @@ public partial class MixScrims
     {
         try
         {
+            if (player.IsFakeClient)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("SetPlayerReadyStatusInScoreboard: Skipping bot.");
+                return;
+            }
+
             var playerClanTag = player.Controller.Clan;
             if (isReady)
             {
@@ -169,5 +175,13 @@ public partial class MixScrims
                 logger.LogInformation("Captain T: Not chosen");
             PrintMessageToAllPlayers(Core.Localizer["announcement.captain.not_chosen.t"]);
         }
+    }
+
+    private void DisplayReadyAndNotReadyPlayersInCenterHtml(int displayLenght)
+    {
+        var playersToStart = GetNumberOfPlayersRequiredToStart();
+        var readyMessage = $"[<span color=\"red\">{readyPlayers.Count}</span>/<span color=\"green\">{playersToStart}</span>]";
+        var message = $"{readyMessage}<br><span class=\"fontSize-sm\">Match flow will start when at least <span color=\"green\">{playersToStart}</span> players are ready!</span>";
+        Core.PlayerManager.SendCenterHTML(message, displayLenght);
     }
 }
