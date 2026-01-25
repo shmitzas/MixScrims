@@ -62,23 +62,25 @@
 - **Player Leave Punishment** - Automatically punish players who leave during critical match phases
 - **Discord Integration** - Send player invites via webhook
 - **Map Voting System** - Democratic map selection with revote support
-- **Captain System** - Random or manual captain assignment
+- **Captain System** - Random, manual, or volunteer captain assignment
 - **Knife Round** - Winner picks starting side (stay/switch)
 - **Auto-Configuration** - Different configs for each match phase
-- **Highly Configurable** - Extensive JSON configuration
+- **Highly Configurable** - Extensive JSON configuration with phase skipping options
 - **Multi-Language Support** - Built-in localization system
     
 ---
 
 ## 🎮 Match Flow
 
-The plugin manages matches through distinct states:
+The plugin manages matches through distinct states. Some phases can be skipped via configuration:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        1. WARMUP                            │
 │  • Players join and ready up using !ready                   │
 │  • Minimum 10 players required (configurable)               │
+│  • RequireAllConnectedPlayersToBeReady determines if ALL    │
+│    connected players must ready or just minimum count       │
 │  • Server announces ready status periodically               │
 └─────────────────────────┬───────────────────────────────────┘
                           │
@@ -89,28 +91,42 @@ The plugin manages matches through distinct states:
 │  • 30 second voting window (configurable)                   │
 │  • Players can revote using !revote                         │
 │  • Map with most votes wins                                 │
+│  • Recent maps excluded (DisallowVotePreviousMaps config)   │
+│  • Can be skipped with SkipMapVoting config                 │
 └─────────────────────────┬───────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   3. CAPTAIN SELECTION                      │
+│                   3. MAP LOADING                            │
+│  • Selected map loads with warmup config                    │
+│  • Players ready up again after map change                  │
+│  • Same ready requirements as initial warmup                │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   4. CAPTAIN SELECTION                      │
 │  • Two captains randomly selected (CT & T)                  │
 │  • Admins can manually set captains with !captain           │
+│  • Players can volunteer with !volunteer_captain if enabled │
 │  • Team names set to captain names                          │
+│  • Can be disabled with DisableCaptains config              │
 └─────────────────────────┬───────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    4. TEAM PICKING                          │
+│                    5. TEAM PICKING                          │
 │  • Captains alternate picking players                       │
 │  • Random captain starts first                              │
 │  • Players moved to spectator until picked                  │
 │  • Continues until all players assigned                     │
+│  • Can be skipped with SkipTeamPicking config               │
+│  • MoveOverflowPlayersToSpec handles extra players          │
 └─────────────────────────┬───────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     5. KNIFE ROUND                          │
+│                     6. KNIFE ROUND                          │
 │  • Knife-only warmup round                                  │
 │  • Winning team captain chooses starting side               │
 │  • Options: !stay or !switch                                │
@@ -118,10 +134,11 @@ The plugin manages matches through distinct states:
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                       6. MATCH                              │
+│                       7. MATCH                              │
 │  • Competitive match begins                                 │
 │  • Team timeouts available (!timeout)                       │
 │  • Standard CS2 competitive rules                           │
+│  • FaceitLikeDamageControl config affects friendly fire     │
 │  • Match ends naturally or via admin commands               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -141,7 +158,7 @@ All player commands support aliases defined in the configuration.
 | `!revote` | `!rv` | Change your map vote | Map Voting |
 | `!timeout` | `!pause` | Call a team timeout (requires team vote) | Match |
 | `!invite` | `!inv` | Send Discord invite to get more players | Anytime |
-| `!volunteer_captain` | `!volcap`, `!selfcapt` | Volunteer to be captain (if enabled) | Warmup, Map Chosen |
+| `!volunteer_captain` | `!volcap`, `!selfcapt` | Volunteer to be captain (if enabled) | Warmup, Map Loading, Map Chosen |
 | `!stay` | `!st` | Keep current sides after knife round | Picking Starting Side |
 | `!switch` | `!swap` | Switch sides after knife round | Picking Starting Side |
 
@@ -150,30 +167,35 @@ All player commands support aliases defined in the configuration.
 **`!ready` / `!r`**
 - Marks you as ready to participate in the match
 - Server announces when players ready up
-- Match proceeds when minimum players are ready
+- Match proceeds based on `MinimumReadyPlayers` and `RequireAllConnectedPlayersToBeReady` config
 - Periodic reminders sent to unready players
+- Available in Warmup and Map Chosen (after map loads) states
 
 **`!unready` / `!u` / `!ur`**
 - Removes your ready status
 - Use if you need to step away temporarily
+- Works in same states as !ready
 
 **`!revote` / `!rv`**
 - Opens the map voting menu again during voting phase
 - Change your vote before time expires
 - Previous vote is automatically removed
+- Only during Map Voting state
 
 **`!timeout` / `!pause`**
 - Initiates a team vote for timeout
 - Requires majority of team to agree
-- Teams have 3 timeouts by default (configurable)
-- Timeout lasts 60 seconds by default (configurable)
+- Teams have 3 timeouts by default (configurable via `Timeouts`)
+- Timeout lasts 60 seconds by default (configurable via `TimeoutDurationSeconds`)
 - Can be called at start of any round during match
+- Only during Match state
 
 **`!invite` / `!inv`**
 - Sends webhook message to configured Discord channels
-- Has cooldown to prevent spam (5 minutes default)
+- Has cooldown to prevent spam (5 minutes default via `DiscordInviteDelayMinutes`)
 - Shows how many players needed
 - Only works if server is not full
+- Requires `EnableDiscordInvites` to be true
 
 **`!volunteer_captain` / `!volcap` / `!selfcapt`**
 - Volunteer yourself as a team captain
@@ -181,16 +203,19 @@ All player commands support aliases defined in the configuration.
 - Only works if `AllowVolunteerCaptains` is enabled in config
 - Must specify which team (CT or T) you want to captain for
 - Available during Warmup, Map Loading, or Map Chosen state before automatic captain selection
+- Does not work if `DisableCaptains` is true
 
 **`!stay` / `!st`**
 - Winning knife round captain keeps current team sides
 - Only available to winning captain
 - Alternative to menu selection
+- Only during Picking Starting Side state
 
 **`!switch` / `!swap`**
 - Winning knife round captain swaps team sides
 - Only available to winning captain
 - Alternative to menu selection
+- Only during Picking Starting Side state
 
 ---
 
@@ -201,8 +226,9 @@ Admin commands require the `managemix` permission.
 | Command | Aliases | Permission | Description |
 |---------|---------|------------|-------------|
 | `!mix_reset` | `!reset` | `managemix` | Force reset entire match to warmup |
-| `!mix_start` | `!start` | `managemix` | Force start match (skip to knife round) |
+| `!mix_start` | `!start` | `managemix` | Force start match (skip to next phase) |
 | `!forceready` | `!fr` | `managemix` | Mark all players as ready |
+| `!forceunready` | `!fur` | `managemix` | Mark all players as unready |
 | `!captain <t/ct>` | `!cap`, `!capt` | `managemix` | Open menu to select team captain |
 | `!map <mapname>` | `!changemap` | `managemix` | Change to specified map |
 | `!maps` | `!maplist` | `managemix` | List all voteable maps |
@@ -214,38 +240,57 @@ Admin commands require the `managemix` permission.
 - Immediately resets the entire match state
 - Returns to warmup phase
 - Clears all team assignments and votes
-- Changes map to default (de_mirage)
+- Changes map to first map in configuration (de_mirage by default)
 - Use when match needs to restart
+- Available in any state
 
 **`!mix_start` / `!start`**
 - Bypasses warmup and ready checks
-- Immediately starts team picking/knife round
+- Advances match to next appropriate phase:
+  - From Warmup: Starts Map Voting (or Team Picking if SkipMapVoting is true)
+  - Uses same logic as CheckReadyPlayersToStart
 - Use when enough players are present but not readied
+- Works in Warmup and Map Chosen states
 
 **`!forceready` / `!fr`**
 - Marks all connected players as ready
-- Advances match to next phase
+- Advances match to next phase automatically
 - Only works in Warmup or Map Chosen states
+- Useful for testing or when players forget to ready
+
+**`!forceunready` / `!fur`**
+- Marks all players as unready
+- Clears the ready list
+- Only works in Warmup or Map Chosen states
+- Useful for resetting ready status without full match reset
 
 **`!captain <t/ct>` / `!cap` / `!capt`**
 - Opens menu to manually select captain for specified team
 - Usage: `!captain ct` or `!captain t`
-- Shows list of available players
-- Only works during Map Chosen state
+- Shows list of available players on that team
+- Only works during Warmup, Map Loading, or Map Chosen states
+- Does not work if `DisableCaptains` is true
+- Useful for selecting specific captains instead of random selection
 
 **`!map <mapname>` / `!changemap`**
 - Immediately changes to specified map
 - Usage: `!map mirage` or `!map de_mirage`
-- Map must be in configuration
+- Map must exist in configuration
 - Resets match state on map change
+- Works with both MapName and DisplayName
+- Available in any state
 
 **`!maps` / `!maplist`**
 - Shows maps that can currently be voted for
-- Excludes recently played maps (based on config)
+- Excludes recently played maps based on `DisallowVotePreviousMaps` config
+- Only shows maps with `CanBeVoted` set to true
+- Available in any state
 
 **`!maplist_all` / `!allmaps` / `!maps_all`**
 - Shows all maps in configuration
-- Includes non-voteable maps
+- Includes non-voteable maps (`CanBeVoted` false)
+- Shows all maps regardless of recent play history
+- Available in any state
 
 ---
 
@@ -258,82 +303,75 @@ Configuration is stored in `config.jsonc` (generated on first load).
 ```jsonc
 {
   "MixScrims": {
+    // Debug and Testing
+    "TestMode": false,                // Enable staging configs (adds bots, etc.)
+    "DetailedLogging": true,          // Enable verbose logging for debugging
+    
     // Discord webhook configuration for player invites
+    "EnableDiscordInvites": true,     // Enable/disable Discord invite system
     "DiscordInviteWebhooks": [
       {
         "Message": "<@&role_id> +{0} players needed ||| `connect {1}`",
         "WebhookUrl": "https://discord.com/api/webhooks/..."
       }
     ],
+    "DiscordInviteDelayMinutes": 5,   // Cooldown between invites
     
-    // Delay between Discord invites (minutes)
-    "DiscordInviteDelayMinutes": 5,
+    // Match Ready Requirements
+    "MinimumReadyPlayers": 10,        // Minimum players needed to start
+    "RequireAllConnectedPlayersToBeReady": true, // All players must ready (not just minimum)
     
-    // Minimum players required to start match
-    "MinimumReadyPlayers": 10,
+    // Match Settings
+    "FaceitLikeDamageControl": true,  // Enable FACEIT-style damage control
+    "MoveOverflowPlayersToSpec": true, // Move extra players to spectator
+    "DisallowVotePreviousMaps": 2,    // Number of recent maps to exclude from voting
+    "DefaultVoteTimeSeconds": 30,     // Map voting duration
+    "TimeoutDurationSeconds": 60,     // Duration of team timeouts
+    "Timeouts": 3,                    // Number of timeouts per team
     
-    // Skip team picking phase and use teams as they are at the start of the knife round (useful if you predefine which player plays in which team before the team picking starts)
-    "SkipTeamPicking": false,
+    // Phase Control Options
+    "SkipTeamPicking": false,         // Skip team picking phase
+    "AllowVolunteerCaptains": false,  // Allow players to volunteer as captains
+    "SkipMapVoting": false,           // Skip map voting (uses random or first map)
+    "DisableCaptains": false,         // Disable captain system entirely
     
-    // Move overflow players  to spectator. By default team limit is 5 players (calculated by MinimumReadyPlayers/2)
-    "MoveOverflowPlayersToSpec": true,
-    
-    // Number of recent maps to exclude from voting
-    "DisallowVotePreviousMaps": 2,
-    
-    // Default voting time for map votes (seconds)
-    "DefaultVoteTimeSeconds": 30,
-    
-    // Timeout duration (seconds)
-    "TimeoutDurationSeconds": 60,
-    
-    // Number of timeouts per team
-    "Timeouts": 3,
-    
-    // Enable test mode (uses staging configs)
-    "TestMode": false,
-
-    // Enable verbose (detailed) logging
-    "DetailedLogging": true,
-    
-    // Announcement timer intervals (seconds)
+    // Announcement Timers (seconds)
     "ChatAnnouncementTimers": {
-      "PlayersReadyStatus": 30,
-      "CaptainsAnnouncements": 30,
-      "CommandReminders": 320
+      "PlayersReadyStatus": 30,       // How often to announce ready status
+      "CaptainsAnnouncements": 30,    // How often to announce captains
+      "CommandReminders": 320         // How often to show command reminders
     },
     
-    // Localization keys for command reminders (reminders are configured in language files)
+    // Command Reminders (uses localization keys)
     "CommandRemindersLocalization": [
       "timeout",
       "ready",
       "invite"
     ],
     
-    // Enable punishment for players who leave during match
-    "PunishPlayerLeaves": false,
-    
-    // Player leave punishment configuration
+    // Player Leave Punishment
+    "PunishPlayerLeaves": false,      // Enable punishment system
     "PlayerLeavePunishment": {
-      "ServerCommand": "sw_ban {steamId} {reason} {duration}",
+      "ServerCommand": "sw_ban {steamId} {duration} {reason}",
       "BanDurationMinutes": 15,
       "BanReason": "Leaving during a MixScrims match",
-      "Sensitivity": 2,
-      "WaitBeforePunishmentSeconds": 300
+      "Sensitivity": 2,               // 0=Match only, 1=+Knife, 2=+TeamPicking
+      "WaitBeforePunishmentSeconds": 300  // Grace period before punishment
     },
     
-    // Allow players to volunteer as captains instead of random selection
-    "AllowVolunteerCaptains": false,
-    
-    // Command configuration (permission and aliases)
+    // Command Configuration (permission and aliases)
     "Commands": {
+      // Admin Commands
       "mix_reset": { "Permission": "managemix", "Aliases": ["reset"] },
       "mix_start": { "Permission": "managemix", "Aliases": ["start"] },
       "forceready": { "Permission": "managemix", "Aliases": ["fr"] },
+      "forceunready": { "Permission": "managemix", "Aliases": ["fur"] },
       "captain": { "Permission": "managemix", "Aliases": ["cap", "capt"] },
       "map": { "Permission": "managemix", "Aliases": ["changemap"] },
       "maps": { "Permission": "managemix", "Aliases": ["maplist"] },
       "maplist_all": { "Permission": "managemix", "Aliases": ["allmaps", "maps_all"] },
+      
+      // Player Commands
       "ready": { "Permission": "", "Aliases": ["r"] },
       "unready": { "Permission": "", "Aliases": ["u", "ur"] },
       "revote": { "Permission": "", "Aliases": ["rv"] },
@@ -344,7 +382,7 @@ Configuration is stored in `config.jsonc` (generated on first load).
       "volunteer_captain": { "Permission": "", "Aliases": ["volcap", "selfcapt"] }
     },
     
-    // Map pool configuration
+    // Map Pool Configuration
     "Maps": [
       {
         "MapName": "de_mirage",
@@ -433,7 +471,7 @@ The plugin can automatically punish players who leave during critical match phas
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `PunishPlayerLeaves` | bool | `false` | Enable/disable punishment system |
-| `ServerCommand` | string | `sw_ban {steamId} {reason} {duration}` | Command template to execute |
+| `ServerCommand` | string | `sw_ban {steamId} {duration} {reason}` | Command template to execute |
 | `BanDurationMinutes` | int | `15` | Duration of punishment in minutes |
 | `BanReason` | string | `Leaving during a MixScrims match` | Reason displayed to player |
 | `Sensitivity` | int | `2` | When punishment triggers (0-2) |
@@ -474,7 +512,7 @@ The `ServerCommand` supports these placeholders:
 **Example commands:**
 ```jsonc
 // Swiftly ban command
-"ServerCommand": "sw_ban {steamId} {reason} {duration}"
+"ServerCommand": "sw_ban {steamId} {duration} {reason}"
 
 // CSS ban command
 "ServerCommand": "css_ban {steamId} {duration} {reason}"
@@ -496,7 +534,7 @@ The Discord message supports these variables:
 ### Prerequisites
 
 - Counter-Strike 2 Dedicated Server
-- [SwiftlyS2](https://github.com/swiftly/swiftly) plugin framework installed
+- [SwiftlyS2](https://github.com/swiftly-solution/swiftly) plugin framework installed
 - .NET 10 Runtime
 
 ### Steps
@@ -519,18 +557,20 @@ The Discord message supports these variables:
 3. **Configure Plugin**
    - Start server to generate `config.jsonc`
    - Edit configuration file with your settings
-   - Add Discord webhook URLs
+   - Add Discord webhook URLs (optional)
    - Configure map pool
+   - Adjust phase control options (SkipMapVoting, SkipTeamPicking, etc.)
 
 4. **Add Server Configs**
-   - Place CS2 config files in `csgo/cfg/` directory
+   - Place CS2 config files in `csgo/cfg/mixscrims/` directory
    - Required configs:
-     - `mixscrims/warmup.cfg`
-     - `mixscrims/teampick.cfg`
-     - `mixscrims/knife_round.cfg`
-     - `mixscrims/match_start.cfg`
-     - `mixscrims/staging_overrides.cfg` (if using TestMode)
-     - `mixscrims/production_overrides.cfg`
+     - `warmup.cfg` - Initial warmup and post-map-change warmup settings
+     - `teampick.cfg` - Team picking phase settings
+     - `knife_round.cfg` - Knife round settings
+     - `match_start.cfg` - Competitive match settings
+     - `staging_overrides.cfg` - TestMode overrides (adds bots, etc.)
+     - `production_overrides.cfg` - Production environment overrides
+   - Example configs are included in the plugin build
 
 5. **Set Permissions**
    ```
@@ -563,14 +603,18 @@ The Discord message supports these variables:
    ```
 
 4. **Output**
-   - Built files located in `build/publish/`
-   - Zip package created automatically for distribution
+   - Built files located in `MixScrims/build/`
+   - Published files located in `MixScrims/build/publish/MixScrims/`
+   - Configs automatically copied to `cfg/mixscrims/`
+   - Translations copied to `resources/translations/`
+   - Contract DLL exported to `resources/exports/`
 
 ### Development
 
 - Open solution in Visual Studio 2022, Rider, or VS Code
 - Ensure .NET 10 SDK installed
 - C# 13.0 features supported
+- Hot reload supported by Swiftly
 
 ---
 
@@ -582,11 +626,12 @@ The plugin supports multiple languages through JSON localization files.
 
 Located in `resources/translations/`:
 - `en.jsonc` - English (default)
+- `pt-BR.jsonc` - Portuguese (Brazilian)
 - Add more languages by creating new files (e.g., `lt.jsonc`, `pl.jsonc`)
 
 ### Adding New Language
 
-1. Copy `en.jsonc` to new language file
+1. Copy `en.jsonc` to new language file (e.g., `de.jsonc` for German)
 2. Translate all string values
 3. Keep keys unchanged
 4. Swiftly will auto-detect available languages
@@ -602,7 +647,7 @@ Messages support color codes:
 
 Example:
 ```json
-"serverPrefix": "[ [darkred]MyServer [default]]"
+"server_prefix": "[ [darkred]MyServer [default]]"
 ```
 
 ---
@@ -632,6 +677,7 @@ Contributions are welcome! Please follow these guidelines:
 - Use meaningful variable/method names
 - Add XML documentation comments
 - Test thoroughly in TestMode before submitting
+- Verify configuration options work as expected
 
 ---
 

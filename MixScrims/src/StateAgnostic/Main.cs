@@ -375,6 +375,10 @@ public sealed partial class MixScrims
         }
     }
 
+    /// <summary>
+    /// Initiates a punishment action against the specified player if they have left the game and have not rejoined
+    /// within the configured wait period.
+    /// </summary>
     private void PunishPlayer(IPlayer? player)
     {
         if (player == null)

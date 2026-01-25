@@ -77,6 +77,10 @@ public partial class MixScrims
         }
     }
 
+    /// <summary>
+    /// Skips the team picking phase and automatically assigns players to teams based on their current state and
+    /// configuration settings.
+    /// </summary>
     private void SkipTeamPickingPhase()
     {
         mixScrimsService.SetMatchState(MatchState.PickingTeam);

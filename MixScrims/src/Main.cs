@@ -117,6 +117,10 @@ public partial class MixScrims : BasePlugin
         }
     }
 
+    /// <summary>
+    /// Unregisters all commands currently configured in the application, including the volunteer captain command if
+    /// enabled.
+    /// </summary>
     private void UnregisterCommands()
     {
         var commandNames = cfg.Commands.Keys.ToList();

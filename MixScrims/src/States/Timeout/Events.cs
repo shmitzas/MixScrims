@@ -28,6 +28,9 @@ public partial class MixScrims
         return HookResult.Continue;
     }
 
+    /// <summary>
+    /// Handles the end of the round freeze period when a timeout event occurs.
+    /// </summary>
     [GameEventHandler(HookMode.Post)]
     public HookResult HandleTimeoutEventRoundFreezeEnd(EventRoundFreezeEnd @event)
     {

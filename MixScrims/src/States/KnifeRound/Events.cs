@@ -9,6 +9,10 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
+    /// <summary>
+    /// Handles the end of a knife round and initiates the process for the winning team's captain to choose the starting
+    /// side.
+    /// </summary>
     [GameEventHandler(HookMode.Pre)]
     public HookResult HandleRoundEndOnKnifeRound(EventRoundEnd @event)
     {
@@ -29,6 +33,10 @@ public partial class MixScrims
         return HookResult.Continue;
     }
 
+    /// <summary>
+    /// Handles the prestart phase of a round before a knife round begins, allowing for match state adjustments as
+    /// needed.
+    /// </summary>
     [GameEventHandler(HookMode.Pre)]
     public HookResult HandleRoundPrestartPreKnifeRound(EventRoundPrestart @event)
     {

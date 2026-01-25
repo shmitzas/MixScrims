@@ -29,6 +29,9 @@ public partial class MixScrims
         HandleMapChosenNewMapLoad();
     }
 
+    /// <summary>
+    /// Handles the logic required when a new map is loaded after a map has been chosen in the match flow.
+    /// </summary>
     private void HandleMapChosenNewMapLoad()
     {
         var matchState = mixScrimsService.GetCurrentMatchState();

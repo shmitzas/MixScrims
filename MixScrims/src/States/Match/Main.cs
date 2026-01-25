@@ -59,6 +59,9 @@ public partial class MixScrims
         FixTeammateColors();
     }
 
+    /// <summary>
+    /// Assigns available teammate colors to all currently playing players who do not already have one.
+    /// </summary>
     private void FixTeammateColors()
     {
         var players = GetPlayingPlayers();
@@ -74,6 +77,9 @@ public partial class MixScrims
         }
     }
 
+    /// <summary>
+    /// Finds the first available player color index for the specified player based on their team affiliation.
+    /// </summary>
     private int? GetFreePlayerColor(IPlayer player)
     {
         if (player == null)
