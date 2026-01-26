@@ -245,9 +245,7 @@ partial class MixScrims
 
 		if (cfg.DisableCaptains)
 		{
-			if (cfg.DetailedLogging)
-				logger.LogInformation("OnStay: Captains are disabled, side pick not available.");
-			PrintMessageToPlayer(player, Core.Localizer["error.captain.disabled"]);
+			HandleCaptainSideChoice(player, "Stay");
 			return;
 		}
 
@@ -293,9 +291,7 @@ partial class MixScrims
 
 		if (cfg.DisableCaptains)
 		{
-			if (cfg.DetailedLogging)
-				logger.LogInformation("OnSwitch: Captains are disabled, side pick not available.");
-			PrintMessageToPlayer(player, Core.Localizer["error.captain.disabled"]);
+			HandleCaptainSideChoice(player, "Switch");
 			return;
 		}
 

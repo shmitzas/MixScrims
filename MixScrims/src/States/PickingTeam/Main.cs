@@ -18,9 +18,7 @@ public partial class MixScrims
     /// </summary>
     private void StartTeamPickingPhase()
     {
-        playerStatusTimerCenterHtml?.Cancel();
-        playerStatusTimer?.Cancel();
-        captainsAnnouncementsTimer?.Cancel();
+        StopPreMatchAnnouncementTimers();
 
         if (!cfg.DisableCaptains)
         {
@@ -45,6 +43,14 @@ public partial class MixScrims
             return;
         }
 
+        if (cfg.DisableCaptains)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("StartTeamPickingPhase: Captains disabled, auto-assigning teams based on current positions.");
+            SkipTeamPickingPhase();
+            return;
+        }
+
         mixScrimsService.SetMatchState(MatchState.PickingTeam);        
 
         PauseMatch();
@@ -52,29 +58,20 @@ public partial class MixScrims
 
         MovePlayersToDesignatedTeamsPrePick();
 
-        if (!cfg.DisableCaptains)
-        {
-            SetTeamName(Team.CT, captainCt.Controller.PlayerName);
-            SetTeamName(Team.T, captainT.Controller.PlayerName);
+        SetTeamName(Team.CT, captainCt.Controller.PlayerName);
+        SetTeamName(Team.T, captainT.Controller.PlayerName);
 
-            Random random = new Random();
-            int teamStarting = random.Next(2, 4);
-            if (teamStarting == 3)
-            {
-                PromptCaptainToPickPlayer(captainCt, Team.CT);
-                return;
-            }
-            if (teamStarting == 2)
-            {
-                PromptCaptainToPickPlayer(captainT, Team.T);
-                return;
-            }
-        }
-        else
+        Random random = new Random();
+        int teamStarting = random.Next(2, 4);
+        if (teamStarting == 3)
         {
-            if (cfg.DetailedLogging)
-                logger.LogInformation("StartTeamPickingPhase: Captains disabled, skipping to knife round.");
-            SkipTeamPickingPhase();
+            PromptCaptainToPickPlayer(captainCt, Team.CT);
+            return;
+        }
+        if (teamStarting == 2)
+        {
+            PromptCaptainToPickPlayer(captainT, Team.T);
+            return;
         }
     }
 
@@ -85,8 +82,7 @@ public partial class MixScrims
     private void SkipTeamPickingPhase()
     {
         mixScrimsService.SetMatchState(MatchState.PickingTeam);
-        captainsAnnouncementsTimer?.Cancel();
-        playerStatusTimer?.Cancel();
+
         Core.Engine.ExecuteCommand("exec mixscrims/teampick.cfg");
         PauseMatch();
 

@@ -37,9 +37,6 @@ public partial class MixScrims
         pickedCtPlayers.Clear();
         pickedTPlayers.Clear();
         votedMaps.Clear();
-        commandRemindersTimer?.Cancel();
-        playerStatusTimer?.Cancel();
-        captainsAnnouncementsTimer?.Cancel();
         timeoutCountCt = 3;
         timeoutCountT = 3;
         timeoutPending = TimeoutPending.None;
@@ -47,5 +44,6 @@ public partial class MixScrims
         surrenderVoteYesCount = 0;
         surrenderVoteNoCount = 0;
         surrenderVoteTeam = Team.None;
+        StopAllAnnouncmentTimers();
     }
 }

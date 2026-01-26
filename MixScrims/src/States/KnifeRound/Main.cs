@@ -11,6 +11,7 @@ public partial class MixScrims
     private List<IPlayer> playingCtPlayers { get; set; } = [];
     private List<IPlayer> playingTPlayers { get; set; } = [];
     private IPlayer? winnerCaptain { get; set; } = null;
+    private Dictionary<int, string> sideVotes { get; set; } = new();
 
     /// <summary>
     /// Initiates the knife round phase of the match.
@@ -20,11 +21,47 @@ public partial class MixScrims
         mixScrimsService.SetMatchState(MatchState.KnifeRound);
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.knife_round"]);
 
-        playingTPlayers = pickedTPlayers.ToList();
-        playingCtPlayers = pickedCtPlayers.ToList();
-        pickedCtPlayers.Clear();
-        pickedTPlayers.Clear();
+        if (pickedCtPlayers.Count == 0)
+        {
+            logger.LogWarning("StartKnifeRound: No players picked for CT team. Setting current CT players as playingCtPlayers");
+            var currentCtPlayers = GetPlayersInTeam(Team.CT);
+            playingCtPlayers = currentCtPlayers.ToList();
+        }
+        else
+        {
+            playingCtPlayers = pickedCtPlayers.ToList();
+            pickedCtPlayers.Clear();
+        }
+
+        if (pickedTPlayers.Count == 0)
+        {
+            logger.LogWarning("StartKnifeRound: No players picked for T team. Setting current T players as playingTPlayers");
+            var currentTPlayers = GetPlayersInTeam(Team.T);
+            playingTPlayers = currentTPlayers.ToList();
+        }
+        else
+        {
+            playingTPlayers = pickedTPlayers.ToList();
+            pickedTPlayers.Clear();
+        }
+
+        if (captainCt == null && playingCtPlayers.Count > 0)
+        {
+            captainCt = playingCtPlayers[0];
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"StartKnifeRound: CT Captain not set, assigning {captainCt.Controller.PlayerName} as CT Captain.");
+        }
+
+        if (captainT == null && playingTPlayers.Count > 0)
+        {
+            captainT = playingTPlayers[0];
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"StartKnifeRound: T Captain not set, assigning {captainT.Controller.PlayerName} as T Captain.");
+        }
+
         readyPlayers.Clear();
+
+        StopPreMatchAnnouncementTimers();
 
         UnpauseMatch();
         //MovePlayersToDesignatedTeamsPreMatch();
@@ -36,15 +73,38 @@ public partial class MixScrims
     /// </summary>
     private void PromptWinnerCaptainToChoseStartingSide(Team winnerTeam)
     {
+        mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
+
         if (cfg.DisableCaptains)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("PromptWinnerCaptainToChoseStartingSide: Captains are disabled, keeping current sides.");
-            StayStartingSides(null);
+                logger.LogInformation("PromptWinnerCaptainToChoseStartingSide: Captains disabled, initiating team vote.");
+            
+            sideVotes.Clear();
+            var winningTeamPlayers = winnerTeam == Team.CT ? playingCtPlayers : playingTPlayers;
+            var teamName = winnerTeam == Team.CT ? "CT" : "T";
+            
+            PrintMessageToAllPlayers(Core.Localizer[$"announcement.knife_round.winner.{teamName.ToLower()}"]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.team_vote_started"]);
+            
+            foreach (var player in winningTeamPlayers)
+            {
+                if (player != null && IsPlayerValid(player) && !IsBot(player))
+                {
+                    var menu = BuildSidePickingMenu();
+                    Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                }
+            }
+            
+            Core.Scheduler.DelayBySeconds(30, () =>
+            {
+                if (mixScrimsService.GetCurrentMatchState() == MatchState.PickingStartingSide)
+                {
+                    ProcessTeamSideVotes();
+                }
+            });
             return;
         }
-
-        mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
 
         if (winnerTeam == Team.CT)
         {
@@ -148,6 +208,22 @@ public partial class MixScrims
 
         CloseMenuForPlayer(captain);
 
+        if (cfg.DisableCaptains)
+        {
+            sideVotes[captain.PlayerID] = choice;
+            PrintMessageToPlayer(captain, Core.Localizer["command.side_vote.recorded", choice]);
+            
+            var winningTeam = (captain.PlayerPawn?.TeamNum == 3) ? Team.CT : Team.T;
+            var winningTeamPlayers = winningTeam == Team.CT ? playingCtPlayers : playingTPlayers;
+            var validPlayers = winningTeamPlayers.Count(p => p != null && IsPlayerValid(p) && !IsBot(p));
+            
+            if (sideVotes.Count >= validPlayers)
+            {
+                ProcessTeamSideVotes();
+            }
+            return;
+        }
+
         if (string.Equals(choice, "Switch", StringComparison.OrdinalIgnoreCase))
         {
             SwitchStartingSides(captain);
@@ -160,6 +236,44 @@ public partial class MixScrims
         }
 
         logger.LogError("HandleCaptainSideChoice: Invalid choice made by captain.");
+    }
+
+    /// <summary>
+    /// Processes team votes for side selection when captains are disabled.
+    /// </summary>
+    private void ProcessTeamSideVotes()
+    {
+        if (sideVotes.Count == 0)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("ProcessTeamSideVotes: No votes received, staying on current sides.");
+            StayStartingSides(null);
+            return;
+        }
+
+        var switchVotes = sideVotes.Values.Count(v => string.Equals(v, "Switch", StringComparison.OrdinalIgnoreCase));
+        var stayVotes = sideVotes.Values.Count(v => string.Equals(v, "Stay", StringComparison.OrdinalIgnoreCase));
+
+        if (cfg.DetailedLogging)
+            logger.LogInformation($"ProcessTeamSideVotes: Switch={switchVotes}, Stay={stayVotes}");
+
+        PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.vote_results", switchVotes, stayVotes]);
+
+        if (switchVotes > stayVotes)
+        {
+            var firstVoter = GetPlayers().FirstOrDefault(p => sideVotes.ContainsKey(p.PlayerID));
+            if (firstVoter != null)
+            {
+                SwitchStartingSides(firstVoter);
+            }
+        }
+        else
+        {
+            var firstVoter = GetPlayers().FirstOrDefault(p => sideVotes.ContainsKey(p.PlayerID));
+            StayStartingSides(firstVoter);
+        }
+
+        sideVotes.Clear();
     }
 
     /// <summary>

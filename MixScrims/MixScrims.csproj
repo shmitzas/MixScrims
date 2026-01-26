@@ -55,16 +55,20 @@
 	  </Reference>
 	</ItemGroup>
 
-    <Target Name="CopyConfigFiles" AfterTargets="Build">
+    <Target Name="CopyConfigFiles" AfterTargets="Build;Publish">
 	    <!-- Create configs directory and copy cfg files -->
-	    <MakeDir Directories="$(OutDir)cfg" />
-	    <MakeDir Directories="$(OutDir)cfg\mixscrims" />
-	    <Copy SourceFiles="$(ProjectDir)csgo_configs\warmup.cfg" DestinationFolder="$(OutDir)cfg\mixscrims" />
-	    <Copy SourceFiles="$(ProjectDir)csgo_configs\teampick.cfg" DestinationFolder="$(OutDir)cfg\mixscrims" />
-	    <Copy SourceFiles="$(ProjectDir)csgo_configs\knife_round.cfg" DestinationFolder="$(OutDir)cfg\mixscrims" />
-	    <Copy SourceFiles="$(ProjectDir)csgo_configs\match_start.cfg" DestinationFolder="$(OutDir)cfg\mixscrims" />
-	    <Copy SourceFiles="$(ProjectDir)csgo_configs\staging_overrides.cfg" DestinationFolder="$(OutDir)cfg\mixscrims" />
-	    <Copy SourceFiles="$(ProjectDir)csgo_configs\production_overrides.cfg" DestinationFolder="$(OutDir)cfg\mixscrims" />
+	    <PropertyGroup>
+	        <ConfigOutputDir Condition="'$(PublishDir)' != ''">$(PublishDir)</ConfigOutputDir>
+	        <ConfigOutputDir Condition="'$(PublishDir)' == ''">$(OutDir)</ConfigOutputDir>
+	    </PropertyGroup>
+	    <MakeDir Directories="$(ConfigOutputDir)cfg" />
+	    <MakeDir Directories="$(ConfigOutputDir)cfg\mixscrims" />
+	    <Copy SourceFiles="$(ProjectDir)csgo_configs\warmup.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
+	    <Copy SourceFiles="$(ProjectDir)csgo_configs\teampick.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
+	    <Copy SourceFiles="$(ProjectDir)csgo_configs\knife_round.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
+	    <Copy SourceFiles="$(ProjectDir)csgo_configs\match_start.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
+	    <Copy SourceFiles="$(ProjectDir)csgo_configs\staging_overrides.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
+	    <Copy SourceFiles="$(ProjectDir)csgo_configs\production_overrides.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
     </Target>
 
   <Target Name="CreateZip" AfterTargets="Publish">

@@ -19,6 +19,8 @@ public partial class MixScrims
 
         MovePlayersToDesignatedTeamsPreMatch();
 
+        StopPreMatchAnnouncementTimers();
+
         UnpauseMatch();
         Core.Engine.ExecuteCommand("exec mixscrims/match_start.cfg");
 

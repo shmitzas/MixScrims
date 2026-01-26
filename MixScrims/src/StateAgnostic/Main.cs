@@ -67,7 +67,9 @@ public sealed partial class MixScrims
             if (cfg.SkipMapVoting)
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("CheckReadyPlayersToStart: Skipping Map Voting Phase as per configuration");
+                    logger.LogInformation("CheckReadyPlayersToStart: Skipping Map Voting Phase, using current map");
+                
+                mixScrimsService.SetMatchState(MatchState.MapChosen);
                 StartTeamPickingPhase();
                 return;
             }
@@ -444,5 +446,26 @@ public sealed partial class MixScrims
                 });
             });
         }
+    }
+
+    /// <summary>
+    /// Stops all active announcement timers, preventing further scheduled announcements from occurring.
+    /// </summary>
+    private void StopAllAnnouncmentTimers()
+    {
+        commandRemindersTimer?.Cancel();
+        playerStatusTimer?.Cancel();
+        playerStatusTimerCenterHtml?.Cancel();
+        captainsAnnouncementsTimer?.Cancel();
+    }
+
+    /// <summary>
+    /// Stops and cancels all timers related to pre-match announcements.
+    /// </summary>
+    private void StopPreMatchAnnouncementTimers()
+    {
+        playerStatusTimer?.Cancel();
+        playerStatusTimerCenterHtml?.Cancel();
+        captainsAnnouncementsTimer?.Cancel();
     }
 }

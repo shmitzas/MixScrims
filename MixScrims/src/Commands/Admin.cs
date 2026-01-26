@@ -33,6 +33,22 @@ public partial class MixScrims
 	public void OnForceMatchStart(ICommandContext context)
 	{
 		var admin = context.Sender;
+		var connectedPlayers = GetPlayers().Count;
+		
+		if (connectedPlayers < cfg.MinimumReadyPlayers)
+		{
+			logger.LogWarning($"OnForceMatchStart: Not enough players connected ({connectedPlayers}/{cfg.MinimumReadyPlayers})");
+			if (admin != null)
+			{
+				PrintMessageToPlayer(admin, Core.Localizer["error.not_enough_players", connectedPlayers, cfg.MinimumReadyPlayers]);
+			}
+			else
+			{
+				logger.LogWarning("Console: Not enough players to force start match");
+			}
+			return;
+		}
+		
 		if (context.IsSentByPlayer)
 		{
 			if (admin == null)
@@ -61,6 +77,22 @@ public partial class MixScrims
 	public void OnForceReady(ICommandContext context)
 	{
 		var admin = context.Sender;
+		var connectedPlayers = GetPlayers().Count;
+		
+		if (connectedPlayers < cfg.MinimumReadyPlayers)
+		{
+			logger.LogWarning($"OnForceReady: Not enough players connected ({connectedPlayers}/{cfg.MinimumReadyPlayers})");
+			if (admin != null)
+			{
+				PrintMessageToPlayer(admin, Core.Localizer["error.not_enough_players", connectedPlayers, cfg.MinimumReadyPlayers]);
+			}
+			else
+			{
+				logger.LogWarning("Console: Not enough players to force ready");
+			}
+			return;
+		}
+		
 		if (admin == null)
 		{
 			logger.LogInformation("Players were forced into ready state by force by Console");
@@ -98,6 +130,22 @@ public partial class MixScrims
     public void OnForceUnready(ICommandContext context)
     {
         var admin = context.Sender;
+        var connectedPlayers = GetPlayers().Count;
+        
+        if (connectedPlayers < cfg.MinimumReadyPlayers)
+        {
+            logger.LogWarning($"OnForceUnready: Not enough players connected ({connectedPlayers}/{cfg.MinimumReadyPlayers})");
+            if (admin != null)
+            {
+                PrintMessageToPlayer(admin, Core.Localizer["error.not_enough_players", connectedPlayers, cfg.MinimumReadyPlayers]);
+            }
+            else
+            {
+                logger.LogWarning("Console: Not enough players to force unready");
+            }
+            return;
+        }
+        
         if (admin == null)
         {
             logger.LogInformation("Players were forced into unready state by force by Console");

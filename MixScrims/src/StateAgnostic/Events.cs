@@ -39,12 +39,19 @@ partial class MixScrims
         {
             var player = Core.PlayerManager.GetPlayer(playerSlot);
             if (cfg.DetailedLogging)
-                logger.LogInformation($"HandleClientPutInServer: Retrieved player {player?.Controller.PlayerName} from slot {playerSlot}.");
-            if (player != null)
+                logger.LogInformation($"HandleClientPutInServer: Retrieved player from slot {playerSlot}.");
+            if (player != null && player.IsValid)
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"HandleClientPutInServer: Moving player {player.Controller.PlayerName} to Spectator team.");
-                Core.Scheduler.DelayBySeconds(2, () => HandlePlayerChangeTeam(player, 0));
+                    logger.LogInformation($"HandleClientPutInServer: Moving player slot {playerSlot} to Spectator team.");
+                Core.Scheduler.DelayBySeconds(2, () =>
+                {
+                    var delayedPlayer = Core.PlayerManager.GetPlayer(playerSlot);
+                    if (delayedPlayer != null && delayedPlayer.IsValid)
+                    {
+                        HandlePlayerChangeTeam(delayedPlayer, 0);
+                    }
+                });
             }
         }
         catch (Exception ex)
@@ -359,11 +366,19 @@ partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation($"HandlePlayerChangeTeam: Called for player {player?.Controller.PlayerName} (slot {player?.Slot}), teamTojoin={teamTojoin}");
 
+
         if (player == null)
         {
             if (cfg.DetailedLogging)
                 logger.LogWarning("HandlePlayerChangeTeam: player is null");
             return HookResult.Stop;
+        }
+
+        if (player.IsFakeClient)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"HandlePlayerChangeTeam: {player.Controller.PlayerName} is a fake client, allowing");
+            return HookResult.Continue;
         }
 
         if (!player.IsValid)

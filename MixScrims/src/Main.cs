@@ -25,7 +25,6 @@ public partial class MixScrims : BasePlugin
     private IOptions<Config> cfgOptions = null!;
     private Config cfg = new();
     private MixScrimsService mixScrimsService = null!;
-    private CCSGameRules? gameRules = null;
 
     public MixScrims(ISwiftlyCore core) : base(core)
     {
