@@ -85,7 +85,7 @@ public partial class MixScrims : BasePlugin
             { "unready", OnUnReady },
             { "revote", OnRevote },
             { "timeout", OnTimeout },
-            { "surender", OnSurrender },
+            { "surrender", OnSurrender },
             { "invite", OnInvite },
             { "stay", OnStay },
             { "switch", OnSwitch }
