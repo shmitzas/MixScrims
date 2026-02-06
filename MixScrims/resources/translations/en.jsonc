@@ -1,6 +1,6 @@
 {
   // Valid colors are: [default], [darkred], [green], [lightyellow], [lightblue], [olive], [lime], [red], [purple], [grey], [yellow], [gold], [silver], [blue], [darkblue], [bluegrey], [magenta], [lightred]
-  "server_prefix": "[ [darkred]ExampleServer [default]]",
+  "server_prefix": "[ [darkred]MixScrims [default]]",
   "announcement.not_ready_players": "[red]Not ready [default]players: [grey]{0}[default]",
   "announcement.ready_status": "[[red]{0}[default]/[lime]{1}[default]] players ready",
   "announcement.captain.chosen.t": "[orange]Terrorists [default]captain is [lime]{0}",
