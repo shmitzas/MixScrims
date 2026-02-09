@@ -276,7 +276,7 @@ public class MixScrimsService : IMixScrims
         _mixScrims.PickTCaptain(player);
     }
 
-    public void KickNotPlayingPlayers(string reason)
+    public void KickNotPlayingPlayers(string? reason = "")
     {
         var players = _mixScrims.GetPlayers();
         var playingPlayers = _mixScrims.playingCtPlayers.Concat(_mixScrims.playingTPlayers).Select(p => p.SteamID).ToHashSet();
@@ -287,7 +287,7 @@ public class MixScrimsService : IMixScrims
         }
     }
 
-    public void KickNotPickedPlayers(string reason)
+    public void KickNotPickedPlayers(string? reason = "")
     {
         var players = _mixScrims.GetPlayers();
         var pickedPlayers = _mixScrims.pickedCtPlayers.Concat(_mixScrims.pickedTPlayers).Select(p => p.SteamID).ToHashSet();

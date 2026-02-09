@@ -47,12 +47,12 @@
 		</ProjectReference>
 	</ItemGroup>
 	<ItemGroup>
-	  <Folder Include="resources\exports\" />
-	</ItemGroup>
-	<ItemGroup>
 	  <Reference Include="MixScrims.Contract">
 	    <HintPath>resources\exports\MixScrims.Contract.dll</HintPath>
 	  </Reference>
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="resources\exports\" />
 	</ItemGroup>
 
     <Target Name="CopyConfigFiles" AfterTargets="Build;Publish">

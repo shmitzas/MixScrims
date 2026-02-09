@@ -8,6 +8,7 @@
 		<!-- Build directly into main project's resources/exports directory -->
 		<OutputPath>$(MSBuildThisFileDirectory)../MixScrims/resources/exports/</OutputPath>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<IsPublishable>false</IsPublishable>
 		<!-- Output only the DLL, no other files -->
 		<DebugSymbols>false</DebugSymbols>
 		<DebugType>none</DebugType>
