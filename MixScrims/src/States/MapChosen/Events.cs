@@ -9,12 +9,12 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
-    private List<MapDetails> playedMaps { get; set; } = [];
+    internal List<MapDetails> playedMaps { get; set; } = [];
 
     /// <summary>
     /// Registers listeners for events during the MapChosen state.
     /// </summary>
-    private void RegisterMapChosenListeners()
+    internal void RegisterMapChosenListeners()
     {
         Core.Event.OnMapLoad += AddPickedMapToPlayedMaps;
     }
@@ -32,7 +32,7 @@ public partial class MixScrims
     /// <summary>
     /// Handles the logic required when a new map is loaded after a map has been chosen in the match flow.
     /// </summary>
-    private void HandleMapChosenNewMapLoad()
+    internal void HandleMapChosenNewMapLoad()
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (cfg.DetailedLogging)

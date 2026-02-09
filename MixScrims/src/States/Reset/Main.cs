@@ -9,7 +9,7 @@ public partial class MixScrims
     ///<summary>
     ///Reset the plugin state to initial values
     ///</summary>
-    private void ResetPluginState()
+    internal void ResetPluginState()
     {
         Core.Scheduler.NextTick(() =>
         {
@@ -21,7 +21,7 @@ public partial class MixScrims
     /// <summary>
     /// Resets all match-related variables and state to their initial values.
     /// </summary>
-    private void ResetVariables()
+    internal void ResetVariables()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("ResetPluginState");

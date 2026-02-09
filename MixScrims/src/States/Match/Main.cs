@@ -6,12 +6,12 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
-    private Dictionary<int, int> playerColors = new();
+    internal Dictionary<int, int> playerColors = new();
 
     /// <summary>
     /// Starts the match by updating the match state, notifying players, and executing the match_start cvar configuration.
     /// </summary>
-    private void StartMatch()
+    internal void StartMatch()
     {
         mixScrimsService.SetMatchState(MatchState.Match);
 
@@ -59,12 +59,13 @@ public partial class MixScrims
         playedMaps.Add(mapDetails);
 
         FixTeammateColors();
+        mixScrimsService.KickNotPlayingPlayers(Core.Localizer["info.kick_reason.not_picked"]);
     }
 
     /// <summary>
     /// Assigns available teammate colors to all currently playing players who do not already have one.
     /// </summary>
-    private void FixTeammateColors()
+    internal void FixTeammateColors()
     {
         var players = GetPlayingPlayers();
         foreach(var player in players)
@@ -82,7 +83,7 @@ public partial class MixScrims
     /// <summary>
     /// Finds the first available player color index for the specified player based on their team affiliation.
     /// </summary>
-    private int? GetFreePlayerColor(IPlayer player)
+    internal int? GetFreePlayerColor(IPlayer player)
     {
         if (player == null)
             return null;

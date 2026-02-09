@@ -12,7 +12,7 @@ public partial class MixScrims
     /// <summary>
     /// Prints ready and not ready players to in-game chat.
     /// </summary>
-    private void PrintReadyAndNotReadyPlayers()
+    internal void PrintReadyAndNotReadyPlayers()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("PrintReadyAndNotReadyPlayers");
@@ -39,7 +39,7 @@ public partial class MixScrims
     /// <summary>
     /// Displays a prefix for each ready and not ready players in the scoreboard.
     /// </summary>
-    private void ShowReadyAndNotReadyPlayersInScoreboard()
+    internal void ShowReadyAndNotReadyPlayersInScoreboard()
     {
         var notReadyPlayers = GetNotReadyPlayers();
 
@@ -57,7 +57,7 @@ public partial class MixScrims
     /// <summary>
     /// Updates the player's clan tag in the scoreboard to reflect their ready or not ready status.
     /// </summary>
-    private void SetPlayerReadyStatusInScoreboard(IPlayer player, bool isReady)
+    internal void SetPlayerReadyStatusInScoreboard(IPlayer player, bool isReady)
     {
         try
         {
@@ -108,7 +108,7 @@ public partial class MixScrims
     /// <summary>
     /// Prints command reminders to all players, cycling through all available reminders.
     /// </summary>
-    private void PrintCommandReminders()
+    internal void PrintCommandReminders()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("PrintCommandReminders");
@@ -131,7 +131,7 @@ public partial class MixScrims
     /// <summary>
     /// Announces the chosen captains for both teams to all players, if applicable.
     /// </summary>
-    private void PrintChosenCaptains()
+    internal void PrintChosenCaptains()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("PrintChosenCaptains");
@@ -177,7 +177,7 @@ public partial class MixScrims
         }
     }
 
-    private void DisplayReadyAndNotReadyPlayersInCenterHtml(int displayLenght)
+    internal void DisplayReadyAndNotReadyPlayersInCenterHtml(int displayLenght)
     {
         var playersToStart = GetNumberOfPlayersRequiredToStart();
         var readyMessage = Core.Localizer["info.center.ready_players_counter", readyPlayers.Count, playersToStart];

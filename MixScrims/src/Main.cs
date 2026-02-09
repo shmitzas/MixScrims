@@ -20,15 +20,17 @@ namespace MixScrims;
 
 public partial class MixScrims : BasePlugin
 {
-    public static new ISwiftlyCore Core { get; private set; } = null!;
-    private ILogger<MixScrims> logger = null!;
-    private IOptions<Config> cfgOptions = null!;
-    private Config cfg = new();
-    private MixScrimsService mixScrimsService = null!;
+    public static new ISwiftlyCore Core { get; internal set; } = null!;
+    internal ILogger<MixScrims> logger = null!;
+    internal IOptions<Config> cfgOptions = null!;
+    internal Config cfg = new();
+    internal MixScrimsService mixScrimsService = null!;
+    internal MatchState MatchState { get; set; } = MatchState.Warmup;
+    internal PluginState PluginState { get; set; } = PluginState.Production;
 
     public MixScrims(ISwiftlyCore core) : base(core)
     {
-        mixScrimsService = new MixScrimsService();
+        mixScrimsService = new MixScrimsService(this);
     }
 
     public override void ConfigureSharedInterface(IInterfaceManager interfaceManager)
@@ -58,7 +60,7 @@ public partial class MixScrims : BasePlugin
     /// <summary>
     /// Registers all listeners used by the plugin.
     /// </summary>
-    private void RegisterListeners()
+    internal void RegisterListeners()
     {
         RegisterWarmupListeners();
         RegisterMapChosenListeners();
@@ -68,7 +70,7 @@ public partial class MixScrims : BasePlugin
     /// <summary>
     /// Registers available command handlers and their aliases with the command system.
     /// </summary>
-    private void RegisterCommands()
+    internal void RegisterCommands()
     {
         // Define command mappings
         var commandHandlers = new Dictionary<string, ICommandService.CommandListener>
@@ -124,7 +126,7 @@ public partial class MixScrims : BasePlugin
     /// Unregisters all commands currently configured in the application, including the volunteer captain command if
     /// enabled.
     /// </summary>
-    private void UnregisterCommands()
+    internal void UnregisterCommands()
     {
         var commandNames = cfg.Commands.Keys.ToList();
         if (cfg.AllowVolunteerCaptains)
@@ -140,7 +142,7 @@ public partial class MixScrims : BasePlugin
     /// <summary>
     /// Loads the configuration and initializes dependency injection services
     /// </summary>
-    private void LoadConfig()
+    internal void LoadConfig()
     {
         try
         {
@@ -170,6 +172,7 @@ public partial class MixScrims : BasePlugin
             cfgOptions = provider.GetRequiredService<IOptions<Config>>();
             cfg = cfgOptions.Value;
             mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
+            preventNotPickedPlayersFromJoiningOngoingMatch = cfg.PreventNotPickedPlayersFromJoiningOngoingMatch;
         }
         catch (Exception ex)
         {

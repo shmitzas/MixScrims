@@ -1,27 +1,29 @@
 using Microsoft.Extensions.Logging;
-using SwiftlyS2.Shared.Players;
 using MixScrims.Contract;
+using SwiftlyS2.Shared.Players;
+using SwiftlyS2.Shared.ProtobufDefinitions;
+using SwiftlyS2.Shared.SteamAPI;
 
 namespace MixScrims;
 
 public sealed partial class MixScrims
 {
-    private CancellationTokenSource? playerStatusTimer;
-    private CancellationTokenSource? playerStatusTimerCenterHtml;
-    private CancellationTokenSource? commandRemindersTimer;
-    private CancellationTokenSource? captainsAnnouncementsTimer;
+    internal CancellationTokenSource? playerStatusTimer;
+    internal CancellationTokenSource? playerStatusTimerCenterHtml;
+    internal CancellationTokenSource? commandRemindersTimer;
+    internal CancellationTokenSource? captainsAnnouncementsTimer;
 
-    private readonly List<IPlayer> readyPlayers = [];
-    private readonly List<int> freshlyJoinedPlayers = new();
-    private readonly List<int> recentlyDisconnectedPlayers = new();
-    private Team previousAutoJoinedTeam = Team.None;
-    private bool canPlayerBeRespawned = true;
-    private bool isMovingPlayersToTeams = false;
+    internal readonly List<IPlayer> readyPlayers = [];
+    internal readonly List<int> freshlyJoinedPlayers = new();
+    internal readonly List<int> recentlyDisconnectedPlayers = new();
+    internal Team previousAutoJoinedTeam = Team.None;
+    internal bool canPlayerBeRespawned = true;
+    internal bool isMovingPlayersToTeams = false;
+    internal bool preventNotPickedPlayersFromJoiningOngoingMatch = false;
+    internal DateTime lastDiscordInviteSentAt = DateTime.MinValue;
+    internal List<ulong> playersWaitingForPunishment = [];
 
-    private DateTime lastDiscordInviteSentAt = DateTime.MinValue;
-
-
-    private void StartAnnouncementTimers()
+    internal void StartAnnouncementTimers()
     {
         // Players ready status
         playerStatusTimer = Core.Scheduler.RepeatBySeconds(
@@ -52,7 +54,7 @@ public sealed partial class MixScrims
     /// Checks whether the required number of players are ready to begin the next phase of the match, and advances the
     /// match state if conditions are met.
     /// </summary>
-    private void CheckReadyPlayersToStart()
+    internal void CheckReadyPlayersToStart()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("CheckReadyPlayersToStart: readyPlayers={ReadyCount} | Required={Required}", readyPlayers.Count, GetNumberOfPlayersRequiredToStart());
@@ -90,7 +92,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Adds the specified player to the ready list if the match is in a state that allows players to become ready.
     /// </summary>
-    private void AddPlayerToReadyList(IPlayer player, bool announce = false)
+    internal void AddPlayerToReadyList(IPlayer player, bool announce = false)
     {
         var name = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
         logger.LogInformation("AddPlayerToReadyList: called for {Player}", name);
@@ -127,7 +129,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Removes the specified player from the ready list, optionally announcing the change.
     /// </summary>
-    private void RemovePlayerFromReadyList(IPlayer player, bool announce = false)
+    internal void RemovePlayerFromReadyList(IPlayer player, bool announce = false)
     {
         var name = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
         logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
@@ -166,7 +168,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Initiates the process of loading the specified map and updates the match state accordingly.
     /// </summary>
-    private void LoadSelectedMap(MapDetails map)
+    internal void LoadSelectedMap(MapDetails map)
     {
 		if (cfg.DetailedLogging)
 			logger.LogInformation("LoadSelectedMap: Loading map {Map}", map.MapName);
@@ -191,7 +193,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Loads the specified map into the game engine, switching the current level to the provided map.
     /// </summary>
-    private void LoadMap(MapDetails map)
+    internal void LoadMap(MapDetails map)
     {
 		if (cfg.DetailedLogging)
 			logger.LogInformation("LoadMap: Executing map change to {Map}", map.MapName);
@@ -209,7 +211,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Schedules a chat announcement to notify players that the specified map is loading after a 15-second delay.
     /// </summary>
-    private void ScheduleMapLoadingAnnouncement(MapDetails map)
+    internal void ScheduleMapLoadingAnnouncement(MapDetails map)
     {
 		if (cfg.DetailedLogging)
 			logger.LogInformation("ScheduleMapLoadingAnnouncement: Scheduling map loading announcement in 15 seconds");
@@ -231,7 +233,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Selects a random map from the list of available maps that can be nominated for voting.
     /// </summary>
-    private MapDetails GetRandomMap()
+    internal MapDetails GetRandomMap()
     {
         var maps = cfg.Maps.Where(m => m.CanBeVoted).ToList();
         if (maps.Count == 0)
@@ -247,7 +249,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Sets the display name for the specified team.
     /// </summary>
-    private void SetTeamName(Team team, string? name = null)
+    internal void SetTeamName(Team team, string? name = null)
     {
         var teamName = (name is null || string.IsNullOrWhiteSpace(name)) ? null : name.Trim();
 
@@ -284,7 +286,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Assigns the Counter-Terrorist (CT) captain role to the specified player.
     /// </summary>
-    private void SetCtCaptain(IPlayer admin, string pickedPlayerName)
+    internal void SetCtCaptain(IPlayer admin, string pickedPlayerName)
     {
         var player = GetPlayerByName(pickedPlayerName);
 
@@ -305,7 +307,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Assigns the Terrorist team captain to the specified player, as selected by an administrator.
     /// </summary>
-    private void SetTCaptain(IPlayer admin, string pickedPlayerName)
+    internal void SetTCaptain(IPlayer admin, string pickedPlayerName)
     {
         var player = GetPlayerByName(pickedPlayerName);
 
@@ -326,7 +328,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Applies a configured punishment to a player who leaves the game, if enabled.
     /// </summary>
-    private void PunishOnLeave(IPlayer? player)
+    internal void PunishOnLeave(IPlayer? player)
     {
         if (player == null)
         {
@@ -342,6 +344,7 @@ public sealed partial class MixScrims
             return;
         }
 
+        var steamId = player.SteamID;
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (cfg.PlayerLeavePunishment.Sensitivity == 0)
@@ -349,7 +352,7 @@ public sealed partial class MixScrims
             if (matchState == MatchState.Match
                 || matchState == MatchState.Timeout)
             {
-                PunishPlayer(player);
+                QueuePlayerPunishment(steamId);
             }
             else
             {
@@ -366,7 +369,7 @@ public sealed partial class MixScrims
                 || matchState == MatchState.Match
                 || matchState == MatchState.Timeout)
             {
-                PunishPlayer(player);
+                QueuePlayerPunishment(steamId);
             }
             else
             {
@@ -384,7 +387,7 @@ public sealed partial class MixScrims
                 || matchState == MatchState.Match
                 || matchState == MatchState.Timeout)
             {
-                PunishPlayer(player);
+                QueuePlayerPunishment(steamId);
             }
             else
             {
@@ -396,62 +399,105 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Initiates a punishment action against the specified player if they have left the game and have not rejoined
-    /// within the configured wait period.
+    /// Queues a player for punishment based on their Steam ID, scheduling the punishment to be applied after a
+    /// configured delay if the player does not rejoin.
     /// </summary>
-    private void PunishPlayer(IPlayer? player)
+    internal void QueuePlayerPunishment(ulong steamId)
     {
-        if (player == null)
+        if (playersWaitingForPunishment.Contains(steamId))
         {
             if (cfg.DetailedLogging)
-                logger.LogWarning("PunishPlayer: player is null");
+                logger.LogInformation("QueuePlayerPunishment: player with SteamID {SteamId} is already queued for punishment", steamId);
+            return;
+        }
+        playersWaitingForPunishment.Add(steamId);
+
+        var banCommand = FormatBanCommand(steamId);
+        if (string.IsNullOrWhiteSpace(banCommand))
+        {
+            logger.LogError("ExecutePunishmentCommand: formatted ban command is null or whitespace for SteamID {SteamId}", steamId);
             return;
         }
 
-        var banCommand = FormatBanCommand(player);
-        var steamId = player.SteamID.ToString();
-        if (!string.IsNullOrWhiteSpace(banCommand))
+        Core.Scheduler.DelayBySeconds(cfg.PlayerLeavePunishment.WaitBeforePunishmentSeconds, () =>
         {
-            Core.Scheduler.DelayBySeconds(cfg.PlayerLeavePunishment.WaitBeforePunishmentSeconds, () =>
-            {
-                Core.Scheduler.NextWorldUpdate(() =>
-                { 
-                    var players = GetPlayers();
-                    if (players == null)
-                    {
-                        if (cfg.DetailedLogging)
-                            logger.LogWarning("PunishPlayer: players list is null, cannot verify rejoin status");
-                        return;
-                    }
+            Core.Scheduler.NextTick(() =>
+            { 
+                var players = GetPlayers();
+                if (players == null)
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogWarning("PunishPlayer: players list is null, cannot verify rejoin status");
+                    return;
+                }
 
-                    if (players.Count == 0)
-                    {
-                        if (cfg.DetailedLogging)
-                            logger.LogWarning("PunishPlayer: players list is empty, cannot verify rejoin status");
-                        return;
-                    }
+                if (players.Count == 0)
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogWarning("PunishPlayer: players list is empty, cannot verify rejoin status");
+                    return;
+                }
 
-                    if (players.Any(p => p.SteamID.ToString() == steamId))
-                    {
-                        if (cfg.DetailedLogging)
-                            logger.LogInformation("PunishPlayer: Player {PlayerName} has rejoined, skipping punishment", player.Controller?.PlayerName ?? $"#{player.PlayerID}");
-                        return;
-                    }
-                    else
-                    {
-                        if (cfg.DetailedLogging)
-                            logger.LogInformation("PunishOnLeave: punishing player {PlayerName} for leaving", player.Controller?.PlayerName ?? $"#{player.PlayerID}");
-                        Core.Engine.ExecuteCommand(banCommand);
-                    }
-                });
+                if (players.Any(p => p.SteamID.ToString() == steamId.ToString()))
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("PunishPlayer: Player {PlayerName} has rejoined, skipping punishment", steamId);
+                    return;
+                }
+                else
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("PunishOnLeave: punishing player {PlayerName} for leaving", steamId);
+                    ExecutePunishmentCommand(steamId);
+                }
             });
+        });
+    }
+
+    /// <summary>
+    /// Executes the punishment command for the specified player, removing them from the punishment queue after
+    /// execution.
+    /// </summary>
+    internal void ExecutePunishmentCommand(ulong steamId)
+    {
+        if (playersWaitingForPunishment.Any(s => s == steamId) == false)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogWarning("ExecutePunishmentCommand: player with SteamID {SteamId} is no longer queued for punishment", steamId);
+            return;
         }
+
+        var banCommand = FormatBanCommand(steamId);
+        if (string.IsNullOrWhiteSpace(banCommand))
+        {
+            logger.LogError("ExecutePunishmentCommand: formatted ban command is null or whitespace for SteamID {SteamId}", steamId);
+            return;
+        }
+        Core.Engine.ExecuteCommand(banCommand);
+        playersWaitingForPunishment.Remove(steamId);
+    }
+
+    internal void KickPlayer(ulong steamId, string? reason)
+    {
+        var player = GetPlayerBySteamId(steamId);
+        if (player == null)
+        {
+            logger.LogError("KickPlayer: player with SteamID {SteamId} not found", steamId);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(reason))
+        {
+            reason = Core.Localizer["info.kick_reason.generic"];
+        }
+
+        player.Kick(reason, ENetworkDisconnectionReason.NETWORK_DISCONNECT_DISCONNECT_BY_SERVER);
     }
 
     /// <summary>
     /// Stops all active announcement timers, preventing further scheduled announcements from occurring.
     /// </summary>
-    private void StopAllAnnouncmentTimers()
+    internal void StopAllAnnouncmentTimers()
     {
         commandRemindersTimer?.Cancel();
         playerStatusTimer?.Cancel();
@@ -462,7 +508,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Stops and cancels all timers related to pre-match announcements.
     /// </summary>
-    private void StopPreMatchAnnouncementTimers()
+    internal void StopPreMatchAnnouncementTimers()
     {
         playerStatusTimer?.Cancel();
         playerStatusTimerCenterHtml?.Cancel();

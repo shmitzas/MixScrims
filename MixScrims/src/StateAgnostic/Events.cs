@@ -12,7 +12,10 @@ namespace MixScrims;
 
 partial class MixScrims
 {
-    private void RegisterStateAgnosticListeners()
+    /// <summary>
+    /// Registers event listeners that operate independently of the current server state.
+    /// </summary>
+    internal void RegisterStateAgnosticListeners()
     {
         Core.Event.OnClientPutInServer += HandleClientPutInServer;
         Core.Event.OnClientDisconnected += OnPlayerDisconnect;
@@ -21,7 +24,7 @@ partial class MixScrims
     /// <summary>
     /// Handles the event when a client is put into the server.
     /// </summary>
-    private void HandleClientPutInServer(IOnClientPutInServerEvent clientKind)
+    internal void HandleClientPutInServer(IOnClientPutInServerEvent clientKind)
     {
         var playerSlot = clientKind.PlayerId;
 
@@ -42,8 +45,27 @@ partial class MixScrims
                 logger.LogInformation($"HandleClientPutInServer: Retrieved player from slot {playerSlot}.");
             if (player != null && player.IsValid)
             {
+                if (MatchState != MatchState.Warmup && MatchState != MatchState.MapVoting && MatchState != MatchState.MapChosen && MatchState != MatchState.PickingTeam)
+                {
+                    if (preventNotPickedPlayersFromJoiningOngoingMatch)
+                    {
+                        if (playingCtPlayers.Any(p => p.PlayerID == player.PlayerID) || playingTPlayers.Any(p => p.PlayerID == player.PlayerID) || pickedCtPlayers.Any(p => p.PlayerID == player.PlayerID) || pickedTPlayers.Any(p => p.PlayerID == player.PlayerID))
+                        {
+                            if (cfg.DetailedLogging)
+                                logger.LogInformation($"HandlePlayerJoinTeam: Player {player.Controller.PlayerName} is already in a team, allowing.");
+                        }
+                        else
+                        {
+                            if (cfg.DetailedLogging)
+                                logger.LogInformation($"HandlePlayerJoinTeam: Player {player.Controller.PlayerName} attempted to join a team but is not in playingCtPlayers or playingTPlayers or pickedCtPlayers or pickedTPlayers, kicking.");
+                            KickPlayer(player.SteamID, Core.Localizer["info.kick_reason.not_picked"]);
+                        }
+                    }
+                }
+
                 if (cfg.DetailedLogging)
                     logger.LogInformation($"HandleClientPutInServer: Moving player slot {playerSlot} to Spectator team.");
+                
                 Core.Scheduler.DelayBySeconds(2, () =>
                 {
                     var delayedPlayer = Core.PlayerManager.GetPlayer(playerSlot);
@@ -96,7 +118,7 @@ partial class MixScrims
     /// <summary>
     /// Assigns a newly joined player to a team based on current team balance and respawns the player.
     /// </summary>
-    private void HandlePlayerChangeTeamOnJoin(IPlayer player)
+    internal void HandlePlayerChangeTeamOnJoin(IPlayer player)
     {
         int playerSlot = player.Slot;
         if (!freshlyJoinedPlayers.Any(p => p == playerSlot))
@@ -201,7 +223,7 @@ partial class MixScrims
     /// <summary>
     /// Handles the removal and cleanup of a player who has disconnected from the match.
     /// </summary>
-    private void HandleDisconnectedPlayer(IPlayer? player)
+    internal void HandleDisconnectedPlayer(IPlayer? player)
     {
         if (player == null)
         {
@@ -316,11 +338,7 @@ partial class MixScrims
         {
             if (IsPlayerValid(player))
             {
-                var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
-                if (currentMenu != null)
-                {
-                    Core.MenusAPI.CloseMenuForPlayer(player, currentMenu);
-                }
+                Core.MenusAPI.CloseActiveMenu(player);
             }
         }
         catch (Exception ex)

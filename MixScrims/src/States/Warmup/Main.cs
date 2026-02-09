@@ -8,7 +8,7 @@ public partial class MixScrims
     /// <summary>
     /// Executes warmup configuration and restarts the game. Execued when a new match needs to be started.
     /// </summary>
-    private void StartWarmup()
+    internal void StartWarmup()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("Starting warmup");
@@ -21,7 +21,7 @@ public partial class MixScrims
     /// <summary>
     /// Loads the warmup configuration for the server and executes overrides based on the current plugin state
     /// state.
-    private void LoadWarmupConfig()
+    internal void LoadWarmupConfig()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("Loading warmup configuration");

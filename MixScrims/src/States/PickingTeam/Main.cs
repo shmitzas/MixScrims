@@ -7,16 +7,16 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
-    private List<IPlayer> pickedCtPlayers = [];
-    private List<IPlayer> pickedTPlayers = [];
-    private IPlayer? captainCt { get; set; }
-    private IPlayer? captainT { get; set; }
+    internal List<IPlayer> pickedCtPlayers = [];
+    internal List<IPlayer> pickedTPlayers = [];
+    internal IPlayer? captainCt { get; set; }
+    internal IPlayer? captainT { get; set; }
 
     /// <summary>
     /// Initiates the team-picking phase of the match, assigning captains to teams and prompting the first captain to
     /// pick a player.
     /// </summary>
-    private void StartTeamPickingPhase()
+    internal void StartTeamPickingPhase()
     {
         StopPreMatchAnnouncementTimers();
 
@@ -58,19 +58,19 @@ public partial class MixScrims
 
         MovePlayersToDesignatedTeamsPrePick();
 
-        SetTeamName(Team.CT, captainCt.Controller.PlayerName);
-        SetTeamName(Team.T, captainT.Controller.PlayerName);
+        SetTeamName(Team.CT, captainCt == null ? null : captainCt.Controller.PlayerName);
+        SetTeamName(Team.T, captainT == null ? null :  captainT.Controller.PlayerName);
 
         Random random = new Random();
         int teamStarting = random.Next(2, 4);
         if (teamStarting == 3)
         {
-            PromptCaptainToPickPlayer(captainCt, Team.CT);
+            PromptTCaptainoPickPlayer(captainCt, Team.CT);
             return;
         }
         if (teamStarting == 2)
         {
-            PromptCaptainToPickPlayer(captainT, Team.T);
+            PromptTCaptainoPickPlayer(captainT, Team.T);
             return;
         }
     }
@@ -79,7 +79,7 @@ public partial class MixScrims
     /// Skips the team picking phase and automatically assigns players to teams based on their current state and
     /// configuration settings.
     /// </summary>
-    private void SkipTeamPickingPhase()
+    internal void SkipTeamPickingPhase()
     {
         mixScrimsService.SetMatchState(MatchState.PickingTeam);
 
@@ -157,11 +157,11 @@ public partial class MixScrims
     /// <summary>
     /// Prompts the specified team captain to select a player for their team.
     /// </summary>
-    private void PromptCaptainToPickPlayer(IPlayer? captain, Team team)
+    internal void PromptTCaptainoPickPlayer(IPlayer? captain, Team team)
     {
         if (captain == null)
         {
-            logger.LogError("PromptCaptainToPickPlayer: Captain is null.");
+            logger.LogError("PromptTCaptainoPickPlayer: Captain is null.");
             return;
         }
 
@@ -170,7 +170,7 @@ public partial class MixScrims
 
         if (players.Count == 0)
         {
-            logger.LogWarning("PromptCaptainToPickPlayer: No players available to pick.");
+            logger.LogWarning("PromptTCaptainoPickPlayer: No players available to pick.");
             StartKnifeRound();
             return;
         }
@@ -246,7 +246,7 @@ public partial class MixScrims
     /// <summary>
     /// Assigns captains for the teams if they have not already been selected.
     /// </summary>
-    private void PickCaptains()
+    internal void PickCaptains()
     {
         if (cfg.DisableCaptains)
         {
@@ -273,7 +273,7 @@ public partial class MixScrims
     /// <summary>
     /// Assigns a Counter-Terrorist team captain.
     /// </summary>
-    private void PickCtCaptain(IPlayer? player)
+    internal void PickCtCaptain(IPlayer? player)
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (captainCt != null)
@@ -326,7 +326,7 @@ public partial class MixScrims
     /// <summary>
     /// Assigns a Counter-Terrorist team captain.
     /// </summary>
-    private void PickTCaptain(IPlayer? player)
+    internal void PickTCaptain(IPlayer? player)
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (captainT != null)
@@ -380,7 +380,7 @@ public partial class MixScrims
     /// <summary>
     /// Selects a random player to serve as a captain from the list of currently playing players.
     /// </summary>
-    private IPlayer? PickRandomCaptain(Team? team = null)
+    internal IPlayer? PickRandomCaptain(Team? team = null)
     {
         List<IPlayer> players = new();
 
@@ -407,7 +407,7 @@ public partial class MixScrims
     /// <summary>
     /// Assigns the player selected by the CT captain to the CT team.
     /// </summary>
-    private void AssignPickedPlayerToTeamCt(IPlayer captain, string pickedPlayerName)
+    internal void AssignPickedPlayerToTeamCt(IPlayer captain, string pickedPlayerName)
     {
         var player = GetPlayerByName(pickedPlayerName);
 
@@ -415,7 +415,7 @@ public partial class MixScrims
         {
             logger.LogError("AssignPickedPlayerToTeamCt: picked player is invalid");
             PrintMessageToPlayer(captain, Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
-            PromptCaptainToPickPlayer(captain, Team.CT);
+            PromptTCaptainoPickPlayer(captain, Team.CT);
             return;
         }
 
@@ -437,14 +437,14 @@ public partial class MixScrims
             return;
         }
 
-        PromptCaptainToPickPlayer(captainT, Team.T);
+        PromptTCaptainoPickPlayer(captainT, Team.T);
         CloseMenuForPlayer(captain);
     }
 
     /// <summary>
     /// Assigns the player selected by the T captain to the T team.
     /// </summary>
-    private void AssignPickedPlayerToTeamT(IPlayer captain, string pickedPlayerName)
+    internal void AssignPickedPlayerToTeamT(IPlayer captain, string pickedPlayerName)
     {
         var player = GetPlayerByName(pickedPlayerName);
 
@@ -452,7 +452,7 @@ public partial class MixScrims
         {
             logger.LogError("AssignPickedPlayerToTeamT: picked player is invalid");
             PrintMessageToPlayer(captain, Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
-            PromptCaptainToPickPlayer(captain, Team.T);
+            PromptTCaptainoPickPlayer(captain, Team.T);
             return;
         }
 
@@ -480,14 +480,14 @@ public partial class MixScrims
             return;
         }
 
-        PromptCaptainToPickPlayer(captainCt, Team.CT);
+        PromptTCaptainoPickPlayer(captainCt, Team.CT);
         CloseMenuForPlayer(captain);
     }
 
     /// <summary>
     /// Moves players to their designated teams before the picking phase begins.
     /// </summary>
-    private void MovePlayersToDesignatedTeamsPrePick()
+    internal void MovePlayersToDesignatedTeamsPrePick()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("MovePlayersToDesignatedTeamsPrePick");

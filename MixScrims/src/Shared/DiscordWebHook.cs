@@ -47,7 +47,7 @@ partial class MixScrims
     /// Formats payload to be sent to Discord webhook.
     /// </summary>
     /// <returns>Formatted payload as StringContent</returns>
-    private static StringContent FormatPayload(string message)
+    internal static StringContent FormatPayload(string message)
     {
         var payload = new
         {

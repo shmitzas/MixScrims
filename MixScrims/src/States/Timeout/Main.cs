@@ -7,29 +7,29 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
-    private int timeoutCountCt { get; set; } = 3;
-    private int timeoutCountT { get; set; } = 3;
+    internal int timeoutCountCt { get; set; } = 3;
+    internal int timeoutCountT { get; set; } = 3;
 
-    private enum TimeoutPending
+    internal enum TimeoutPending
     {
         None,
         CT,
         T
     }
 
-    private TimeoutPending timeoutPending = TimeoutPending.None;
-    private Queue<Team> timeoutQueue = new Queue<Team>();
-    private bool isTimeoutActive = false;
-    private int timeoutVoteYesCount = 0;
-    private int timeoutVoteNoCount = 0;
-    private CancellationTokenSource? timeoutVoteTimer = null;
+    internal TimeoutPending timeoutPending = TimeoutPending.None;
+    internal Queue<Team> timeoutQueue = new Queue<Team>();
+    internal bool isTimeoutActive = false;
+    internal int timeoutVoteYesCount = 0;
+    internal int timeoutVoteNoCount = 0;
+    internal CancellationTokenSource? timeoutVoteTimer = null;
 
-    private bool isFreezeTime = false;
+    internal bool isFreezeTime = false;
 
     /// <summary>
     /// Starts a timeout for the specified team
     /// </summary>
-    private void StartTimeout(Team team)
+    internal void StartTimeout(Team team)
     {
         // If a timeout is already active, queue this one
         if (isTimeoutActive)
@@ -73,7 +73,7 @@ public partial class MixScrims
     /// <summary>
     /// Ends timeout and starts the next one in queue if available
     /// </summary>
-    private void EndTimeout()
+    internal void EndTimeout()
     {
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.timeout.ended"]);
         isTimeoutActive = false;
@@ -113,7 +113,7 @@ public partial class MixScrims
     /// <summary>
     /// Initiates a timeout vote for the specified team.
     /// </summary>
-    private void StartTimeoutVote(IPlayer caller, Team team)
+    internal void StartTimeoutVote(IPlayer caller, Team team)
     {
         // reset tallies
         timeoutVoteYesCount = 0;
@@ -179,7 +179,7 @@ public partial class MixScrims
     /// <summary>
     /// Handles a player's vote in a timeout voting process.
     /// </summary>
-    private void HandleTimeoutVote(IPlayer player, string choice)
+    internal void HandleTimeoutVote(IPlayer player, string choice)
     {
         if (!IsPlayerValid(player))
             return;
@@ -224,7 +224,7 @@ public partial class MixScrims
     /// Processes the result of a timeout vote for the specified team.
     /// Prints totals to team and broadcasts the final result to all players.
     /// </summary>
-    private void TimeoutVoteResult(Team team)
+    internal void TimeoutVoteResult(Team team)
     {
         int requiredVotes = Math.Max(0, GetPlayersInTeam(team).Count - 1);
 
@@ -282,7 +282,7 @@ public partial class MixScrims
     /// <summary>
     /// Broadcasts announcements to all players about the remaining timeout time at specific intervals.
     /// </summary>
-    private void BroadcastRemainingTimeoutTime()
+    internal void BroadcastRemainingTimeoutTime()
     {
         if (cfg.TimeoutDurationSeconds == 120)
         {

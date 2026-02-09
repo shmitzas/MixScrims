@@ -28,6 +28,7 @@ public class Config
     public int Timeouts { get; set; } = 3;
 
     // Niche settings
+    public bool PreventNotPickedPlayersFromJoiningOngoingMatch { get; set; } = false;
     public bool SkipTeamPicking { get; set; } = false;
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;

@@ -23,11 +23,11 @@ public partial class MixScrims
                 logger.LogInformation("HandleRoundEndOnKnifeRound: Knife round ended, transitioning to PickingStartingSide state.");
             if (@event.Winner == 2)
             {
-                PromptWinnerCaptainToChoseStartingSide(Team.T);
+                PromptWinnerTCaptainoChoseStartingSide(Team.T);
             }
             else if (@event.Winner == 3)
             {
-                PromptWinnerCaptainToChoseStartingSide(Team.CT);
+                PromptWinnerTCaptainoChoseStartingSide(Team.CT);
             }
         }
         return HookResult.Continue;

@@ -8,13 +8,13 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
-    private List<VotedMap> votedMaps { get; set; } = [];
-    private IMenuAPI? mapVotingMenu { get; set; } = null;
+    internal List<VotedMap> votedMaps { get; set; } = [];
+    internal IMenuAPI? mapVotingMenu { get; set; } = null;
 
     /// <summary>
     /// Presents map voting options to players and starts the map voting phase
     /// </summary>
-    private void StartMapVotingPhase()
+    internal void StartMapVotingPhase()
     {
         StopPreMatchAnnouncementTimers();
 
@@ -80,7 +80,7 @@ public partial class MixScrims
     /// <summary>
     /// Registers a player's vote by map display name.
     /// </summary>
-    private void RegisterMapVoteByName(IPlayer player, string mapDisplayName)
+    internal void RegisterMapVoteByName(IPlayer player, string mapDisplayName)
     {
         var playerName = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
 
@@ -127,7 +127,7 @@ public partial class MixScrims
     /// <summary>
     /// Displays a map voting menu to the specified player, allowing them to revote on a list of maps.
     /// </summary>
-    private void DisplayMapVotingMenu(IPlayer player)
+    internal void DisplayMapVotingMenu(IPlayer player)
     {
         if (mapVotingMenu == null)
         {
@@ -151,7 +151,7 @@ public partial class MixScrims
     /// <summary>
     /// Announces the map selected for the match and updates the match state accordingly.
     /// </summary>
-    private void AnnouncePickedMap()
+    internal void AnnouncePickedMap()
     {
         var players = GetPlayingPlayers();
 
@@ -180,7 +180,7 @@ public partial class MixScrims
     /// <summary>
     /// Return the map with the most votes. If there is an error, a random map is selected.
     /// </summary>
-    private VotedMap GetMostVotedMap()
+    internal VotedMap GetMostVotedMap()
     {
         var mostVotedMap = votedMaps.OrderByDescending(m => m.Votes).FirstOrDefault();
 

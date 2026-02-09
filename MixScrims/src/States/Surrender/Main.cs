@@ -10,15 +10,15 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
-    private int surrenderVoteYesCount = 0;
-    private int surrenderVoteNoCount = 0;
-    private CancellationTokenSource? surrenderVoteTimer = null;
-    private Team surrenderVoteTeam = Team.None;
+    internal int surrenderVoteYesCount = 0;
+    internal int surrenderVoteNoCount = 0;
+    internal CancellationTokenSource? surrenderVoteTimer = null;
+    internal Team surrenderVoteTeam = Team.None;
 
     /// <summary>
     /// Initiates a surrender vote for the specified team.
     /// </summary>
-    private void StartSurrenderVote(IPlayer caller, Team team)
+    internal void StartSurrenderVote(IPlayer caller, Team team)
     {
         // reset tallies
         surrenderVoteYesCount = 0;
@@ -85,7 +85,7 @@ public partial class MixScrims
     /// <summary>
     /// Handles a player's vote in a surrender voting process.
     /// </summary>
-    private void HandleSurrenderVote(IPlayer player, string choice)
+    internal void HandleSurrenderVote(IPlayer player, string choice)
     {
         if (!IsPlayerValid(player))
             return;
@@ -130,10 +130,9 @@ public partial class MixScrims
     /// Processes the result of a surrender vote for the specified team.
     /// Prints totals to team and broadcasts the final result to all players.
     /// </summary>
-    private void SurrenderVoteResult(Team team)
+    internal void SurrenderVoteResult(Team team)
     {
         int requiredVotes = Math.Max(0, GetPlayersInTeam(team).Count - 1);
-        int matchResetDelay = 10;
 
         var players = GetPlayersInTeam(team);
         foreach (var player in players)
@@ -152,28 +151,7 @@ public partial class MixScrims
 
         if (surrenderVoteYesCount >= requiredVotes)
         {
-            // Vote passed - trigger match canceled and reset
-            if (team == Team.CT)
-            {
-                Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.ct", matchResetDelay], matchResetDelay * 1000);
-                logger.LogInformation("SurrenderVoteResult: CT voted for surrender, terminating round");
-            }
-            else if (team == Team.T)
-            {
-                Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.t", matchResetDelay], matchResetDelay * 1000);
-                logger.LogInformation("SurrenderVoteResult: T voted for surrender, terminating round");
-            }
-
-            // Trigger match canceled event
-            PauseMatch();
-
-            // Schedule reset
-            Core.Scheduler.DelayBySeconds(matchResetDelay - 5, () =>
-            {
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("Match surrendered by team {Team}, resetting plugin state.", team);
-                ResetPluginState();
-            });
+            Surrender(team);
         }
         else
         {
@@ -187,5 +165,32 @@ public partial class MixScrims
                 PrintMessageToTeam(Team.T, Core.Localizer["announcement.surrender.failed"]);
             }
         }
+    }
+
+    internal void Surrender(Team team)
+    {
+        int matchResetDelay = 10;
+
+        if (team == Team.CT)
+        {
+            Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.ct", matchResetDelay], matchResetDelay * 1000);
+            logger.LogInformation("SurrenderVoteResult: CT voted for surrender, terminating round");
+        }
+        else if (team == Team.T)
+        {
+            Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.t", matchResetDelay], matchResetDelay * 1000);
+            logger.LogInformation("SurrenderVoteResult: T voted for surrender, terminating round");
+        }
+
+        // Trigger match canceled event
+        PauseMatch();
+
+        // Schedule reset
+        Core.Scheduler.DelayBySeconds(matchResetDelay - 5, () =>
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("Match surrendered by team {Team}, resetting plugin state.", team);
+            ResetPluginState();
+        });
     }
 }

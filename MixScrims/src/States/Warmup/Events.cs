@@ -8,7 +8,7 @@ public partial class MixScrims
     /// <summary>
     /// Registers listeners for events during the Warmup state.
     /// </summary>
-    private void RegisterWarmupListeners()
+    internal void RegisterWarmupListeners()
     {
         Core.Event.OnMapLoad += WarmupHandleOnMapStart;
     }
@@ -16,7 +16,7 @@ public partial class MixScrims
     /// <summary>
     /// Handles map start events during Warmup state by clearing player lists.
     /// </summary>
-    private void WarmupHandleOnMapStart(IOnMapLoadEvent @event)
+    internal void WarmupHandleOnMapStart(IOnMapLoadEvent @event)
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState != MatchState.Warmup)

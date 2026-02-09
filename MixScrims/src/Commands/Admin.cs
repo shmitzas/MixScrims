@@ -116,16 +116,21 @@ public partial class MixScrims
 			return;
 		}
 
-		var players = GetPlayers();
-		foreach (var player in players)
-		{
-			if (!readyPlayers.Any(rp => rp.PlayerID == player.PlayerID))
-			{
-				logger.LogInformation("OnForceReady: Adding players to ready list");
-				AddPlayerToReadyList(player, false);
-			}
-		}
+		ForceReadyAllPlayers();
 	}
+
+	internal void ForceReadyAllPlayers()
+	{
+        var players = GetPlayers();
+        foreach (var player in players)
+        {
+            if (!readyPlayers.Any(rp => rp.PlayerID == player.PlayerID))
+            {
+                logger.LogInformation("OnForceReady: Adding players to ready list");
+                AddPlayerToReadyList(player, false);
+            }
+        }
+    }
 
     public void OnForceUnready(ICommandContext context)
     {
@@ -169,12 +174,17 @@ public partial class MixScrims
             return;
         }
 
+		ForceUnreadyAllPlayers();
+    }
+
+	internal void ForceUnreadyAllPlayers()
+	{
         var players = GetPlayers();
         foreach (var player in players)
         {
             if (readyPlayers.Any(rp => rp.PlayerID == player.PlayerID))
             {
-                logger.LogInformation("OnForceUnready: Adding players to ready list");
+                logger.LogInformation("ForceUnreadyAllPlayers: Removing players from ready list");
                 RemovePlayerFromReadyList(player, false);
             }
         }

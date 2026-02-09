@@ -8,15 +8,15 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
-    private List<IPlayer> playingCtPlayers { get; set; } = [];
-    private List<IPlayer> playingTPlayers { get; set; } = [];
-    private IPlayer? winnerCaptain { get; set; } = null;
-    private Dictionary<int, string> sideVotes { get; set; } = new();
+    internal List<IPlayer> playingCtPlayers { get; set; } = [];
+    internal List<IPlayer> playingTPlayers { get; set; } = [];
+    internal IPlayer? winnerCaptain { get; set; } = null;
+    internal Dictionary<int, string> sideVotes { get; set; } = new();
 
     /// <summary>
     /// Initiates the knife round phase of the match.
     /// </summary>
-    private void StartKnifeRound()
+    internal void StartKnifeRound()
     {
         mixScrimsService.SetMatchState(MatchState.KnifeRound);
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.knife_round"]);
@@ -66,19 +66,20 @@ public partial class MixScrims
         UnpauseMatch();
         //MovePlayersToDesignatedTeamsPreMatch();
         Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");
+        mixScrimsService.KickNotPickedPlayers(Core.Localizer["info.kick_reason.not_picked"]);
     }
 
     /// <summary>
     /// Prompts the winning team's captain to choose the starting side for the match.
     /// </summary>
-    private void PromptWinnerCaptainToChoseStartingSide(Team winnerTeam)
+    internal void PromptWinnerTCaptainoChoseStartingSide(Team winnerTeam)
     {
         mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
 
         if (cfg.DisableCaptains)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("PromptWinnerCaptainToChoseStartingSide: Captains disabled, initiating team vote.");
+                logger.LogInformation("PromptWinnerTCaptainoChoseStartingSide: Captains disabled, initiating team vote.");
             
             sideVotes.Clear();
             var winningTeamPlayers = winnerTeam == Team.CT ? playingCtPlayers : playingTPlayers;
@@ -110,7 +111,7 @@ public partial class MixScrims
         {
             if (captainCt == null)
             {
-                logger.LogError("PromptWinnerCaptainToChoseStartingSide: CT Captain is null.");
+                logger.LogError("PromptWinnerTCaptainoChoseStartingSide: CT Captain is null.");
                 return;
             }
 
@@ -137,7 +138,7 @@ public partial class MixScrims
         {
             if (captainT == null)
             {
-                logger.LogError("PromptWinnerCaptainToChoseStartingSide: T Captain is null.");
+                logger.LogError("PromptWinnerTCaptainoChoseStartingSide: T Captain is null.");
                 return;
             }
 
@@ -164,7 +165,7 @@ public partial class MixScrims
     /// <summary>
     /// Builds and returns a menu that allows the user to choose between switching or staying on their current side.
     /// </summary>
-    private IMenuAPI BuildSidePickingMenu()
+    internal IMenuAPI BuildSidePickingMenu()
     {
         var builder = Core.MenusAPI
             .CreateBuilder()
@@ -198,7 +199,7 @@ public partial class MixScrims
     /// <summary>
     /// Handles the captain's choice regarding starting sides in the game.
     /// </summary>
-    private void HandleCaptainSideChoice(IPlayer captain, string choice)
+    internal void HandleCaptainSideChoice(IPlayer captain, string choice)
     {
         if (captain == null)
         {
@@ -241,7 +242,7 @@ public partial class MixScrims
     /// <summary>
     /// Processes team votes for side selection when captains are disabled.
     /// </summary>
-    private void ProcessTeamSideVotes()
+    internal void ProcessTeamSideVotes()
     {
         if (sideVotes.Count == 0)
         {
@@ -279,7 +280,7 @@ public partial class MixScrims
     /// <summary>
     /// Switches the starting sides of the Counter-Terrorist and Terrorist teams, including their players and captains.
     /// </summary>
-    private void SwitchStartingSides(IPlayer captain)
+    internal void SwitchStartingSides(IPlayer captain)
     {
         if (captain == null)
         {
@@ -391,7 +392,7 @@ public partial class MixScrims
     /// <summary>
     /// Keeps the teams on their starting sides based on the captain's current team.
     /// </summary>
-    private void StayStartingSides(IPlayer? captain)
+    internal void StayStartingSides(IPlayer? captain)
     {
         if (captain == null)
         {
@@ -421,7 +422,7 @@ public partial class MixScrims
     /// <summary>
     /// Assigns players to their designated teams before the match begins.
     /// </summary>
-    private void MovePlayersToDesignatedTeamsPreMatch()
+    internal void MovePlayersToDesignatedTeamsPreMatch()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("MovePlayersToDesignatedTeamsPreMatch");
