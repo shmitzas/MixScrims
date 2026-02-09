@@ -433,6 +433,8 @@ partial class MixScrims
                 if (cfg.DetailedLogging)
                     logger.LogInformation($"HandlePlayerChangeTeam: Match state {matchState}. {player.Controller.PlayerName} not in freshlyJoinedPlayers, allowing team change to {teamTojoin}");
             }
+
+            SetPlayerReadyStatusInScoreboard(player, false);
             return HookResult.Continue;
         }
 
