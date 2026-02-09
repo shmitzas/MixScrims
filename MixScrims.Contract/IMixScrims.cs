@@ -154,7 +154,11 @@ public interface IMixScrims : IDisposable
     /// <summary>
     /// Kicks players who are not actively participating in the game.
     /// </summary>
-    void KickNotPlayingPlayers();
+    void KickNotPlayingPlayers(string? reason);
+    /// <summary>
+    /// Removes all players who have not been picked from the game session.
+    /// </summary>
+    void KickNotPickedPlayers(string? reason);
     /// <summary>
     /// Prevents additional players from joining the ongoing match. This is automatically disabled when the match ends.
     /// </summary>
