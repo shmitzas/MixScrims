@@ -6,6 +6,19 @@ namespace MixScrims;
 public sealed partial class MixScrims
 {
     /// <summary>
+    /// Retrieves the server prefix to be used for command recognition or display.
+    /// </summary>
+    private string GetServerPrefix()
+    {
+        var serverPrefix = cfg.GlobalServerPrefix;
+        if (string.IsNullOrEmpty(serverPrefix))
+        {
+            serverPrefix = Core.Localizer["server_prefix"];
+        }
+        return serverPrefix;
+    }
+
+    /// <summary>
     /// Prints a message to a specified player.
     /// </summary>
     private void PrintMessageToPlayer(IPlayer? player, string message)
@@ -18,13 +31,12 @@ public sealed partial class MixScrims
 
         Core.Scheduler.NextTick(() =>
         {
-             if (player == null || !player.IsValid)
+            if (player == null || !player.IsValid)
             {
                 logger.LogDebug("PrintMessageToPlayer: target is not a player entity anymore");
                 return;
             }
-
-            player.SendChat(Core.Localizer["server_prefix"] + " " + message);
+            player.SendChat(GetServerPrefix() + " " + message);
         });
     }
 
@@ -57,7 +69,7 @@ public sealed partial class MixScrims
 
         Core.Scheduler.NextTick(() =>
         {
-            Core.PlayerManager.SendChat(Core.Localizer["server_prefix"] + " " + message);
+            Core.PlayerManager.SendChat(GetServerPrefix() + " " + message);
         });
     }
 
@@ -83,7 +95,7 @@ public sealed partial class MixScrims
     {
         if (player != null && player.IsValid)
             return true;
-        
+
         return false;
     }
 
@@ -272,7 +284,7 @@ public sealed partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogWarning("FormatBanCommand: player is null");
-            
+
             return string.Empty;
         }
 

@@ -292,7 +292,7 @@ public sealed partial class MixScrims
         {
             logger.LogError("SetCtCaptain: picked player is invalid");
             var localizer = Core.Translation.GetPlayerLocalizer(admin);
-            admin.SendChat(Core.Localizer["server_prefix"] + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
+            admin.SendChat(GetServerPrefix() + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             return;
         }
 
@@ -313,7 +313,7 @@ public sealed partial class MixScrims
         {
             logger.LogError("SetTCaptain: picked player is invalid");
             var localizer = Core.Translation.GetPlayerLocalizer(admin);
-            admin.SendChat(Core.Localizer["server_prefix"] + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
+            admin.SendChat(GetServerPrefix() + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             return;
         }
 
