@@ -106,6 +106,50 @@ public partial class MixScrims
     }
 
     /// <summary>
+    /// Removes ready and not ready clan tags from all players.
+    /// </summary>
+    internal void RemoveReadyClanTagsFromAllPlayers()
+    {
+        var allPlayers = Core.PlayerManager.GetAllValidPlayers();
+        
+        foreach (var player in allPlayers)
+        {
+            if (!IsPlayerValid(player) || player.IsFakeClient)
+                continue;
+
+            try
+            {
+                var playerClanTag = player.Controller.Clan;
+                var modified = false;
+
+                if (playerClanTag.Contains(Core.Localizer["info.clan_tag.ready"]))
+                {
+                    playerClanTag = playerClanTag.Replace(Core.Localizer["info.clan_tag.ready"], "").Trim();
+                    modified = true;
+                }
+
+                if (playerClanTag.Contains(Core.Localizer["info.clan_tag.not_ready"]))
+                {
+                    playerClanTag = playerClanTag.Replace(Core.Localizer["info.clan_tag.not_ready"], "").Trim();
+                    modified = true;
+                }
+
+                if (modified)
+                {
+                    player.Controller.Clan = playerClanTag;
+                    player.Controller.ClanUpdated();
+                    Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(player.PlayerID);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogError(ex, "RemoveReadyClanTagsFromAllPlayers: Failed to remove clan tag for player {PlayerName}.", player?.Controller?.PlayerName ?? $"Slot: {player?.Slot}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Prints command reminders to all players, cycling through all available reminders.
     /// </summary>
     internal void PrintCommandReminders()
