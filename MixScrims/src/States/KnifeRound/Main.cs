@@ -45,6 +45,27 @@ public partial class MixScrims
             pickedTPlayers.Clear();
         }
 
+        // Ensure manually-set captains are in playing lists
+        if (captainCt != null && IsPlayerValid(captainCt))
+        {
+            if (!playingCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID))
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation($"StartKnifeRound: Adding manually-set CT Captain {captainCt.Controller.PlayerName} to playingCtPlayers.");
+                playingCtPlayers.Add(captainCt);
+            }
+        }
+
+        if (captainT != null && IsPlayerValid(captainT))
+        {
+            if (!playingTPlayers.Any(p => p.PlayerID == captainT.PlayerID))
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation($"StartKnifeRound: Adding manually-set T Captain {captainT.Controller.PlayerName} to playingTPlayers.");
+                playingTPlayers.Add(captainT);
+            }
+        }
+
         if (captainCt == null && playingCtPlayers.Count > 0)
         {
             captainCt = playingCtPlayers[0];
@@ -61,12 +82,20 @@ public partial class MixScrims
 
         readyPlayers.Clear();
 
+        RemoveReadyClanTagsFromAllPlayers();
+
         StopPreMatchAnnouncementTimers();
 
         UnpauseMatch();
         //MovePlayersToDesignatedTeamsPreMatch();
         Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");
-        mixScrimsService.KickNotPickedPlayers(Core.Localizer["info.kick_reason.not_picked"]);
+        
+        // Note: Don't call KickNotPickedPlayers here - pickedCtPlayers/pickedTPlayers 
+        // have already been cleared (lines 33, 45). Use KickNotPlayingPlayers instead.
+        if (cfg.KickPlayersNotInMatch)
+        {
+            mixScrimsService.KickNotPlayingPlayers(Core.Localizer["info.kick_reason.not_picked"]);
+        }
     }
 
     /// <summary>
@@ -367,7 +396,7 @@ public partial class MixScrims
 
                         try
                         {
-                            player.ChangeTeam(Team.T);
+                            player.ChangeTeam(Team.CT);
                         }
                         catch (Exception ex)
                         {
@@ -430,7 +459,8 @@ public partial class MixScrims
         isMovingPlayersToTeams = true;
         
         var players = GetPlayingPlayers();
-        players.RemoveAll(p => playingCtPlayers.Contains(p) || playingTPlayers.Contains(p));
+        var playingPlayerIds = new HashSet<int>(playingCtPlayers.Select(p => p.PlayerID).Concat(playingTPlayers.Select(p => p.PlayerID)));
+        players.RemoveAll(p => playingPlayerIds.Contains(p.PlayerID));
 
         foreach (var player in players)
         {
@@ -446,8 +476,12 @@ public partial class MixScrims
             player.ChangeTeam(Team.Spectator);
         }
 
-        foreach (var player in playingCtPlayers)
+        var playingCtPlayerIds = new HashSet<int>(playingCtPlayers.Select(p => p.PlayerID));
+        foreach (var player in GetPlayingPlayers())
         {
+            if (!playingCtPlayerIds.Contains(player.PlayerID))
+                continue;
+
             if (cfg.DetailedLogging)
                 logger.LogInformation($"Moving {player.Controller.PlayerName} to CT");
             if (IsBot(player))
@@ -461,8 +495,12 @@ public partial class MixScrims
         }
         
 
-        foreach (var player in playingTPlayers)
+        var playingTPlayerIds = new HashSet<int>(playingTPlayers.Select(p => p.PlayerID));
+        foreach (var player in GetPlayingPlayers())
         {
+            if (!playingTPlayerIds.Contains(player.PlayerID))
+                continue;
+
             if (cfg.DetailedLogging)
                 logger.LogInformation($"Moving {player.Controller.PlayerName} to T");
             if (IsBot(player))

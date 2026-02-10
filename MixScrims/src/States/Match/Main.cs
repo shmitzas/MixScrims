@@ -59,7 +59,11 @@ public partial class MixScrims
         playedMaps.Add(mapDetails);
 
         FixTeammateColors();
-        mixScrimsService.KickNotPlayingPlayers(Core.Localizer["info.kick_reason.not_picked"]);
+        
+        if (cfg.KickPlayersNotInMatch)
+        {
+            mixScrimsService.KickNotPlayingPlayers(Core.Localizer["info.kick_reason.not_picked"]);
+        }
     }
 
     /// <summary>

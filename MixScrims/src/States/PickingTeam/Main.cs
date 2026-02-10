@@ -22,6 +22,9 @@ public partial class MixScrims
 
         if (!cfg.DisableCaptains)
         {
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"StartTeamPickingPhase: Current captains - CT: {captainCt?.Controller?.PlayerName ?? "null"}, T: {captainT?.Controller?.PlayerName ?? "null"}");
+
             PickCaptains();
 
             if (captainCt == null || captainT == null)
@@ -34,6 +37,39 @@ public partial class MixScrims
                 PrintMessageToAllPlayers(Core.Localizer["error.captain.selection_failed"]);
                 ResetPluginState();
                 return;
+            }
+
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation($"StartTeamPickingPhase: Before validation - pickedCtPlayers count: {pickedCtPlayers.Count}, pickedTPlayers count: {pickedTPlayers.Count}");
+                logger.LogInformation($"StartTeamPickingPhase: CT captain in picked list: {pickedCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID)}");
+                logger.LogInformation($"StartTeamPickingPhase: T captain in picked list: {pickedTPlayers.Any(p => p.PlayerID == captainT.PlayerID)}");
+            }
+
+            // Ensure captains are in picked lists (handles captains set during Warmup state)
+            if (captainCt != null && IsPlayerValid(captainCt))
+            {
+                if (!pickedCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID))
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation($"StartTeamPickingPhase: Adding CT Captain {captainCt.Controller.PlayerName} to pickedCtPlayers.");
+                    pickedCtPlayers.Add(captainCt);
+                }
+            }
+
+            if (captainT != null && IsPlayerValid(captainT))
+            {
+                if (!pickedTPlayers.Any(p => p.PlayerID == captainT.PlayerID))
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation($"StartTeamPickingPhase: Adding T Captain {captainT.Controller.PlayerName} to pickedTPlayers.");
+                    pickedTPlayers.Add(captainT);
+                }
+            }
+
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation($"StartTeamPickingPhase: After validation - pickedCtPlayers count: {pickedCtPlayers.Count}, pickedTPlayers count: {pickedTPlayers.Count}");
             }
         }
 
@@ -493,7 +529,8 @@ public partial class MixScrims
             logger.LogInformation("MovePlayersToDesignatedTeamsPrePick");
 
         var players = GetPlayingPlayers();
-        players.RemoveAll(p => pickedCtPlayers.Contains(p) || pickedTPlayers.Contains(p));
+        var pickedPlayerIds = new HashSet<int>(pickedCtPlayers.Select(p => p.PlayerID).Concat(pickedTPlayers.Select(p => p.PlayerID)));
+        players.RemoveAll(p => pickedPlayerIds.Contains(p.PlayerID));
 
         isMovingPlayersToTeams = true;
 
@@ -511,8 +548,12 @@ public partial class MixScrims
             player.ChangeTeam(Team.Spectator);
         }
 
-        foreach (var player in pickedCtPlayers)
+        var pickedCtPlayerIds = new HashSet<int>(pickedCtPlayers.Select(p => p.PlayerID));
+        foreach (var player in GetPlayingPlayers())
         {
+            if (!pickedCtPlayerIds.Contains(player.PlayerID))
+                continue;
+
             if (cfg.DetailedLogging)
                 logger.LogInformation($"Moving {player.Controller!.PlayerName} to CT");
             if (IsBot(player))
@@ -522,8 +563,12 @@ public partial class MixScrims
             player.ChangeTeam(Team.CT);
         }
 
-        foreach (var player in pickedTPlayers)
+        var pickedTPlayerIds = new HashSet<int>(pickedTPlayers.Select(p => p.PlayerID));
+        foreach (var player in GetPlayingPlayers())
         {
+            if (!pickedTPlayerIds.Contains(player.PlayerID))
+                continue;
+
             if (cfg.DetailedLogging)
                 logger.LogInformation($"Moving {player.Controller!.PlayerName} to T");
             if (IsBot(player))
