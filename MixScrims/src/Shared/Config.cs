@@ -29,12 +29,13 @@ public class Config
 
     // Niche settings
     public bool PreventNotPickedPlayersFromJoiningOngoingMatch { get; set; } = false;
+    public bool KickPlayersNotInMatch { get; set; } = false;
     public bool SkipTeamPicking { get; set; } = false;
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
-    public bool ShowReadyStatusInScoreboard { get; set; } = false;
-    public bool ShowReadyStatusInCenterHtml { get; set; } = false;
+    public bool ShowReadyStatusInScoreboard { get; set; } = true;
+    public bool ShowReadyStatusInCenterHtml { get; set; } = true;
 
     // Announcement timers
     public AnnouncementTimers ChatAnnouncementTimers { get; set; } = new();
