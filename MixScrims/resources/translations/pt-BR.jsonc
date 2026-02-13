@@ -107,7 +107,7 @@
   "info.clan_tag.ready": "[READY]",
   "info.clan_tag.not_ready": "[NOTREADY]",
   "info.center.ready_players_counter": "[<span color=\"red\">{0}</span>/<span color=\"green\">{1}</span>]",
-  "info.center.match_start_requirements": "<span class=\"fontSize-sm\">O fluxo da partida começará quando todos os jogadores estiverem prontos!</span>",
+  "info.center.match_start_requirements": "<span class=\"fontSize-sm\">Partida começará quando todos os jogadores estiverem prontos! Digite: !pronto</span>",
   "menu.map_voting": "Vote no mapa",
   "menu.captain_pick": "Escolha o capitão {0}",
   "menu.team_picking": "Escolha o companheiro {0}",
