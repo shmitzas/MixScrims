@@ -12,17 +12,37 @@ public partial class MixScrims
 {
     internal int surrenderVoteYesCount = 0;
     internal int surrenderVoteNoCount = 0;
+    internal int surrenderTotalEligibleVotes = 0;
     internal CancellationTokenSource? surrenderVoteTimer = null;
     internal Team surrenderVoteTeam = Team.None;
+    internal bool isSurrenderVoteInProgress = false;
 
     /// <summary>
     /// Initiates a surrender vote for the specified team.
     /// </summary>
     internal void StartSurrenderVote(IPlayer caller, Team team)
     {
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("StartSurrenderVote: Called by {Caller} for team {Team}. isSurrenderVoteInProgress: {InProgress}",
+                caller.Controller?.PlayerName, team, isSurrenderVoteInProgress);
+        }
+
+        // Prevent duplicate vote processing
+        if (isSurrenderVoteInProgress)
+        {
+            if (cfg.DetailedLogging)
+            {
+                logger.LogWarning("StartSurrenderVote: Vote already in progress, ignoring duplicate call");
+            }
+            return;
+        }
+
         // reset tallies
-        surrenderVoteYesCount = 0;
+        surrenderVoteYesCount = 1; // Caller's automatic yes vote
         surrenderVoteNoCount = 0;
+        surrenderTotalEligibleVotes = 0;
+        isSurrenderVoteInProgress = true;
         surrenderVoteTimer?.Cancel();
         surrenderVoteTimer = null;
         surrenderVoteTeam = team;
@@ -31,7 +51,33 @@ public partial class MixScrims
         if (players.Count == 0)
         {
             logger.LogWarning("StartSurrenderVote: Surrender vote was called for {Team} team, but there are no players", team);
+            isSurrenderVoteInProgress = false;
             return;
+        }
+
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("StartSurrenderVote: Total players in team: {Count}. Caller will be removed from voting list", players.Count);
+        }
+
+        // If team has 2 or fewer players, auto-pass the vote without showing menus
+        if (players.Count <= 2)
+        {
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation("StartSurrenderVote: Team has {Count} players, auto-passing vote", players.Count);
+            }
+            isSurrenderVoteInProgress = false;
+            Surrender(team);
+            return;
+        }
+
+        players.Remove(caller);
+        surrenderTotalEligibleVotes = players.Count; // Store for consistent use across methods
+
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("StartSurrenderVote: After removing caller, {Count} players need to vote", surrenderTotalEligibleVotes);
         }
 
         var builder = Core.MenusAPI
@@ -62,24 +108,38 @@ public partial class MixScrims
         var menu = builder.Build();
 
         // Open menu for eligible players; bots auto-vote yes
+        int botCount = 0;
+        int menuOpenCount = 0;
         foreach (var player in players)
         {
             if (IsBot(player))
             {
                 surrenderVoteYesCount++;
+                botCount++;
                 continue;
             }
 
             if (IsPlayerValid(player))
             {
                 Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                menuOpenCount++;
             }
         }
 
-        var totalEligibleVotes = Math.Max(0, players.Count - 1);
-        PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, totalEligibleVotes]);
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("StartSurrenderVote: Opened menu for {MenuCount} players, {BotCount} bots auto-voted yes. Current votes: {Yes} yes, {No} no out of {Total}",
+                menuOpenCount, botCount, surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes);
+        }
+
+        PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes]);
 
         surrenderVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => SurrenderVoteResult(team));
+
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("StartSurrenderVote: Vote timer scheduled for {Seconds} seconds", cfg.DefaultVoteTimeSeconds);
+        }
     }
 
     /// <summary>
@@ -89,6 +149,12 @@ public partial class MixScrims
     {
         if (!IsPlayerValid(player))
             return;
+
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("HandleSurrenderVote: Player {Name} voted {Choice}. Current votes before: {Yes} yes, {No} no out of {Total}",
+                player.Controller?.PlayerName, choice, surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes);
+        }
 
         var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
         if (currentMenu != null)
@@ -112,13 +178,23 @@ public partial class MixScrims
         }
 
         var team = (Team)player.PlayerPawn.TeamNum;
-        var teamPlayers = GetPlayersInTeam(team);
-        int totalEligibleVotes = Math.Max(0, teamPlayers.Count - 1);
 
-        PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, totalEligibleVotes]);
-
-        if (surrenderVoteYesCount + surrenderVoteNoCount >= totalEligibleVotes)
+        if (cfg.DetailedLogging)
         {
+            logger.LogInformation("HandleSurrenderVote: After vote - {Yes} yes, {No} no out of {Total}. Total voted: {TotalVoted}",
+                surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes, surrenderVoteYesCount + surrenderVoteNoCount);
+        }
+
+        PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes]);
+
+        // Check if all eligible players have voted
+        if (surrenderVoteYesCount + surrenderVoteNoCount >= surrenderTotalEligibleVotes)
+        {
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation("HandleSurrenderVote: All eligible votes received ({Voted} >= {Total}), cancelling timer and processing result",
+                    surrenderVoteYesCount + surrenderVoteNoCount, surrenderTotalEligibleVotes);
+            }
             surrenderVoteTimer?.Cancel();
             SurrenderVoteResult(team);
         }
@@ -132,7 +208,24 @@ public partial class MixScrims
     /// </summary>
     internal void SurrenderVoteResult(Team team)
     {
-        int requiredVotes = Math.Max(0, GetPlayersInTeam(team).Count - 1);
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("SurrenderVoteResult: Called for team {Team}. isSurrenderVoteInProgress: {InProgress}. Votes: {Yes} yes, {No} no out of {Total}",
+                team, isSurrenderVoteInProgress, surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes);
+        }
+
+        // Prevent duplicate processing
+        if (!isSurrenderVoteInProgress)
+        {
+            if (cfg.DetailedLogging)
+            {
+                logger.LogWarning("SurrenderVoteResult: No vote in progress, ignoring duplicate call");
+            }
+            return;
+        }
+
+        isSurrenderVoteInProgress = false;
+        int requiredVotes = surrenderTotalEligibleVotes;
 
         var players = GetPlayersInTeam(team);
         foreach (var player in players)
@@ -149,13 +242,25 @@ public partial class MixScrims
 
         PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.total_team", surrenderVoteYesCount, surrenderVoteNoCount, requiredVotes]);
 
-        if (surrenderVoteYesCount >= requiredVotes)
+        bool votePassed = surrenderVoteYesCount >= requiredVotes;
+
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("SurrenderVoteResult: Vote {Result} for team {Team}. {Yes} >= {Required}? {Passed}",
+                votePassed ? "PASSED" : "FAILED", team, surrenderVoteYesCount, requiredVotes, votePassed);
+        }
+
+        if (votePassed)
         {
             Surrender(team);
         }
         else
         {
             // Vote failed
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation("SurrenderVoteResult: {Team} vote failed - not enough votes", team);
+            }
             if (team == Team.CT)
             {
                 PrintMessageToTeam(Team.CT, Core.Localizer["announcement.surrender.failed"]);
