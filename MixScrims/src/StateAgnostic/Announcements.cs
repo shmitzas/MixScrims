@@ -227,6 +227,20 @@ public partial class MixScrims
         var readyMessage = Core.Localizer["info.center.ready_players_counter", readyPlayers.Count, playersToStart];
         var matchStartRequirements = Core.Localizer["info.center.match_start_requirements"];
         var message = $"{readyMessage}<br>{matchStartRequirements}";
+
+        if (cfg.HideReadyStatusInCenterWhenReady)
+        {
+            var playersToShow = GetNotReadyPlayers();
+            if (playersToShow.Count > 0)
+            {
+                foreach (var player in playersToShow)
+                {
+                    player.SendCenterHTML(message, displayLenght);
+                }
+            }
+            return;
+        }
+
         Core.PlayerManager.SendCenterHTML(message, displayLenght);
     }
 }

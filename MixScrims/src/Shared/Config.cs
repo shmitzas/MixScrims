@@ -36,6 +36,7 @@ public class Config
     public bool DisableCaptains { get; set; } = false;
     public bool ShowReadyStatusInScoreboard { get; set; } = true;
     public bool ShowReadyStatusInCenterHtml { get; set; } = true;
+    public bool HideReadyStatusInCenterWhenReady { get; set; } = false;
 
     // Announcement timers
     public AnnouncementTimers ChatAnnouncementTimers { get; set; } = new();
