@@ -45,7 +45,6 @@ public partial class MixScrims
             pickedTPlayers.Clear();
         }
 
-        // Ensure manually-set captains are in playing lists
         if (captainCt != null && IsPlayerValid(captainCt))
         {
             if (!playingCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID))
@@ -82,16 +81,16 @@ public partial class MixScrims
 
         readyPlayers.Clear();
 
-        RemoveReadyClanTagsFromAllPlayers();
+        var timer = Core.Scheduler.RepeatBySeconds(1, RemoveReadyClanTagsFromAllPlayers);
+        timer.CancelAfter(3000);
+
 
         StopPreMatchAnnouncementTimers();
 
         UnpauseMatch();
-        //MovePlayersToDesignatedTeamsPreMatch();
+
         Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");
         
-        // Note: Don't call KickNotPickedPlayers here - pickedCtPlayers/pickedTPlayers 
-        // have already been cleared (lines 33, 45). Use KickNotPlayingPlayers instead.
         if (cfg.KickPlayersNotInMatch)
         {
             mixScrimsService.KickNotPlayingPlayers(Core.Localizer["info.kick_reason.not_picked"]);
