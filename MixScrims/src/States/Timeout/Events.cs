@@ -1,4 +1,5 @@
-﻿using SwiftlyS2.Shared.GameEventDefinitions;
+﻿using Microsoft.Extensions.Logging;
+using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Players;
@@ -15,13 +16,27 @@ public partial class MixScrims
     {
         isFreezeTime = true;
 
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("HandleTimeoutEventRoundPrestart: Freeze time started. timeoutPending: {Pending}, isTimeoutActive: {IsActive}",
+                timeoutPending, isTimeoutActive);
+        }
+
         if (timeoutPending == TimeoutPending.CT)
         {
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation("HandleTimeoutEventRoundPrestart: CT timeout is pending, calling StartTimeout");
+            }
             StartTimeout(Team.CT);
         }
 
         if (timeoutPending == TimeoutPending.T)
         {
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation("HandleTimeoutEventRoundPrestart: T timeout is pending, calling StartTimeout");
+            }
             StartTimeout(Team.T);
         }
 
