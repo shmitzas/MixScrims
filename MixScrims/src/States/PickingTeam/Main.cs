@@ -459,9 +459,9 @@ public partial class MixScrims
 
         if (IsBot(player))
         {
-            player.SwitchTeam(Team.CT);
+            player.SwitchTeamAsync(Team.CT);
         }
-        player.ChangeTeam(Team.CT);
+        player.ChangeTeamAsync(Team.CT);
 
         if (cfg.DetailedLogging)
             logger.LogInformation($"AssignPickedPlayerToTeamCt: {captain.Controller!.PlayerName} picked {player.Controller!.PlayerName} for CT team.");
@@ -496,9 +496,9 @@ public partial class MixScrims
 
         if (IsBot(player))
         {
-            player.SwitchTeam(Team.T);
+            player.SwitchTeamAsync(Team.T);
         }
-        player.ChangeTeam(Team.T);
+        player.ChangeTeamAsync(Team.T);
 
         var currentMenu = Core.MenusAPI.GetCurrentMenu(captain);
         if (currentMenu != null)
@@ -545,7 +545,7 @@ public partial class MixScrims
 
             if (cfg.DetailedLogging)
                 logger.LogInformation($"Moving {player.Controller!.PlayerName} to SPEC");
-            player.ChangeTeam(Team.Spectator);
+            player.ChangeTeamAsync(Team.Spectator);
         }
 
         var pickedCtPlayerIds = new HashSet<int>(pickedCtPlayers.Select(p => p.PlayerID));
@@ -558,9 +558,9 @@ public partial class MixScrims
                 logger.LogInformation($"Moving {player.Controller!.PlayerName} to CT");
             if (IsBot(player))
             {
-                player.SwitchTeam(Team.CT);
+                player.SwitchTeamAsync(Team.CT);
             }
-            player.ChangeTeam(Team.CT);
+            player.ChangeTeamAsync(Team.CT);
         }
 
         var pickedTPlayerIds = new HashSet<int>(pickedTPlayers.Select(p => p.PlayerID));
@@ -573,9 +573,9 @@ public partial class MixScrims
                 logger.LogInformation($"Moving {player.Controller!.PlayerName} to T");
             if (IsBot(player))
             {
-                player.SwitchTeam(Team.T);
+                player.SwitchTeamAsync(Team.T);
             }
-            player.ChangeTeam(Team.T);
+            player.ChangeTeamAsync(Team.T);
         }
 
         isMovingPlayersToTeams = false;
