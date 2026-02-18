@@ -272,6 +272,7 @@ partial class MixScrims
 	/// <summary>
 	/// Additional way of chosing wheter to stay or switch teams after knife round
 	/// </summary>
+	[Command("switch")]
 	public void OnSwitch(ICommandContext context)
 	{
 		var player = context.Sender;
