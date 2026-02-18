@@ -81,11 +81,30 @@ public partial class MixScrims
 
         readyPlayers.Clear();
 
-        var timer = Core.Scheduler.RepeatBySeconds(1, RemoveReadyClanTagsFromAllPlayers);
-        timer.CancelAfter(3000);
-
-
         StopPreMatchAnnouncementTimers();
+
+        // Close any open team picking menus for captains
+        if (captainCt != null && IsPlayerValid(captainCt))
+        {
+            var ctMenu = Core.MenusAPI.GetCurrentMenu(captainCt);
+            if (ctMenu != null)
+            {
+                Core.MenusAPI.CloseMenuForPlayer(captainCt, ctMenu);
+                if (cfg.DetailedLogging)
+                    logger.LogInformation($"StartKnifeRound: Closed open menu for CT captain {captainCt.Controller.PlayerName}");
+            }
+        }
+
+        if (captainT != null && IsPlayerValid(captainT))
+        {
+            var tMenu = Core.MenusAPI.GetCurrentMenu(captainT);
+            if (tMenu != null)
+            {
+                Core.MenusAPI.CloseMenuForPlayer(captainT, tMenu);
+                if (cfg.DetailedLogging)
+                    logger.LogInformation($"StartKnifeRound: Closed open menu for T captain {captainT.Controller.PlayerName}");
+            }
+        }
 
         UnpauseMatch();
 
