@@ -11,7 +11,6 @@
   "announcement.timeout.vote.total_team": "Resultado da votação de timeout - Sim: [green]{0} [default]| Não: [red]{1} [default]: Necessário: [green]{2}",
   "announcement.timeout.pending.ct": "[lightblue]Contra-Terroristas [default]votaram por um timeout no início da próxima rodada!",
   "announcement.timeout.pending.t": "[orange]Terroristas [default]votaram por um timeout no início da próxima rodada!",
-  "announcement.timeout.remaining_time": "Tempo restante: [gold]{0}s",
   "announcement.timeout.not_enough_votes": "[red]Jogadores insuficientes [default]votaram.",
   "announcement.timeout.queued.ct": "[lightblue]Contra-Terroristas [default]vai começar após o timeout atual acabar!",
   "announcement.timeout.queued.t": "[orange]Terroristas [default]vai começar após o timeout atual acabar!",

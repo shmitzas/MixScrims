@@ -11,7 +11,6 @@
   "announcement.timeout.vote.total_team": "Timeout vote results - Yes: [lime]{0} [default]| No: [red]{1} [default]: Required: [lime]{2}",
   "announcement.timeout.pending.ct": "[lightblue]Counter-Terrorists [default]voted for a timeout at the start of next round!",
   "announcement.timeout.pending.t": "[orange]Terrorists [default]voted for a timeout at the start of next round!",
-  "announcement.timeout.remaining_time": "Remaining time: [gold]{0}s",
   "announcement.timeout.not_enough_votes": "[red]Not enough [default]players voted.",
   "announcement.timeout.queued.ct": "[lightblue]Counter-Terrorists [default]will start after current timeout is over!",
   "announcement.timeout.queued.t": "[orange]Terrorists [default]will start after current timeout is over!",
