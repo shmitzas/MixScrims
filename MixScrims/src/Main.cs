@@ -12,7 +12,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.4.0",
+    Version = "1.5.0",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -22,8 +22,8 @@ public partial class MixScrims : BasePlugin
 {
     public static new ISwiftlyCore Core { get; internal set; } = null!;
     internal ILogger<MixScrims> logger = null!;
-    internal IOptions<Config> cfgOptions = null!;
-    internal Config cfg = new();
+    internal MainConfig cfg = new();
+    internal DiscordConfig discordConfig = new();
     internal MixScrimsService mixScrimsService = null!;
     internal MatchState MatchState { get; set; } = MatchState.Warmup;
     internal PluginState PluginState { get; set; } = PluginState.Production;
@@ -43,7 +43,8 @@ public partial class MixScrims : BasePlugin
         Core = base.Core;
         Core.Registrator.Register(this);
 
-        LoadConfig();
+        LoadMainConfig();
+        LoadDiscordConfig();
         RegisterListeners();
         ResetVariables();
         RegisterCommands();
@@ -142,7 +143,7 @@ public partial class MixScrims : BasePlugin
     /// <summary>
     /// Loads the configuration and initializes dependency injection services
     /// </summary>
-    internal void LoadConfig()
+    internal void LoadMainConfig()
     {
         try
         {
@@ -150,7 +151,7 @@ public partial class MixScrims : BasePlugin
             const string section = "MixScrims";
 
             Core.Configuration
-                .InitializeJsonWithModel<Config>(fileName, section)
+                .InitializeJsonWithModel<MainConfig>(fileName, section)
                 .Configure(builder =>
                 {
                     builder.AddJsonFile(
@@ -163,16 +164,51 @@ public partial class MixScrims : BasePlugin
             ServiceCollection services = new();
             services
                 .AddSwiftly(Core, addLogger: true, addConfiguration: true)
-                .AddOptionsWithValidateOnStart<Config>()
+                .AddOptionsWithValidateOnStart<MainConfig>()
                 .BindConfiguration(section);
 
             var provider = services.BuildServiceProvider();
 
             logger = provider.GetRequiredService<ILogger<MixScrims>>();
-            cfgOptions = provider.GetRequiredService<IOptions<Config>>();
+            var cfgOptions = provider.GetRequiredService<IOptions<MainConfig>>();
             cfg = cfgOptions.Value;
             mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
             preventNotPickedPlayersFromJoiningOngoingMatch = cfg.PreventNotPickedPlayersFromJoiningOngoingMatch;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to load MixScrims configuration/services.");
+        }
+    }
+
+    internal void LoadDiscordConfig()
+    {
+        try
+        {
+            const string fileName = "discord_config.jsonc";
+            const string section = "DiscordConfig";
+
+            Core.Configuration
+                .InitializeJsonWithModel<DiscordConfig>(fileName, section)
+                .Configure(builder =>
+                {
+                    builder.AddJsonFile(
+                        Core.Configuration.GetConfigPath(fileName),
+                        optional: false,
+                        reloadOnChange: true
+                    );
+                });
+
+            ServiceCollection services = new();
+            services
+                .AddSwiftly(Core, addConfiguration: true)
+                .AddOptionsWithValidateOnStart<DiscordConfig>()
+                .BindConfiguration(section);
+
+            var provider = services.BuildServiceProvider();
+
+            var cfgOptions = provider.GetRequiredService<IOptions<DiscordConfig>>();
+            discordConfig = cfgOptions.Value;
         }
         catch (Exception ex)
         {

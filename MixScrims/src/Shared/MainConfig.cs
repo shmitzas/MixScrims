@@ -1,23 +1,12 @@
 namespace MixScrims;
 
-public class Config
+public class MainConfig
 {
     // Debug settings
     public bool TestMode { get; set; } = false;
     public bool DetailedLogging { get; set; } = true;
-    public string GlobalServerPrefix { get; set; } = "[ [darkred]MixScrims [default]]";
-
-    // Discord invite settings
-    public List<DiscordInvite> DiscordInviteWebhooks { get; set; } = [
-        new() {
-            Message = "<&role_id> +{0} ||| `connect {1}`",
-            WebhookUrl = "https://discord.com/api/webhooks/webhook_token"
-        }
-    ];
-    public int DiscordInviteDelayMinutes { get; set; } = 5;
-    public bool EnableDiscordInvites { get; set; } = true;
-
     // Match settings
+    public string GlobalServerPrefix { get; set; } = "[ [darkred]MixScrims [default]]";
     public int MinimumReadyPlayers { get; set; } = 10;
     public bool RequireAllConnectedPlayersToBeReady { get; set; } = true;
     public bool FaceitLikeDamageControl { get; set; } = true;
@@ -106,13 +95,6 @@ public class VotedMap
     public List<int> VotedBy { get; set; } = [];
     public int Votes { get; set; } = 0;
 }
-
-public class DiscordInvite
-{
-    public string Message { get; set; } = string.Empty;
-    public string WebhookUrl { get; set; } = string.Empty;
-}
-
 public class AnnouncementTimers
 {
     public int PlayersReadyStatus { get; set; } = 30;

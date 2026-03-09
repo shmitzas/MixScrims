@@ -155,65 +155,63 @@ partial class MixScrims
 	{
 		if (!context.IsSentByPlayer)
 		{
-			logger.LogError("OnKviesti: command can only be used by players");
-            return;
-		}
-
-        var player = context.Sender;
-        if (player == null || !IsPlayerValid(player))
-		{
-			logger.LogError("OnKviesti: player is invalid");
+			logger.LogError("OnInvite: command can only be used by players");
 			return;
 		}
 
-		if (!cfg.EnableDiscordInvites)
+		var player = context.Sender;
+		if (player == null || !IsPlayerValid(player))
+		{
+			logger.LogError("OnInvite: player is invalid");
+			return;
+		}
+
+		if (!discordConfig.EnableDiscordInvites)
 		{
 			PrintMessageToPlayer(player, Core.Localizer["command.invite.disabled"]);
 			return;
-        }
+		}
 
-		if (cfg.DiscordInviteWebhooks.Count == 0)
+		if (discordConfig.Invites.Count == 0)
 		{
 			PrintMessageToPlayer(player, Core.Localizer["command.invite.no_webhooks"]);
 			return;
 		}
 
-        var timeSinceLastInvite = DateTime.Now - lastDiscordInviteSentAt;
-        var timeRemaining = TimeSpan.FromMinutes(cfg.DiscordInviteDelayMinutes) - timeSinceLastInvite;
+		var timeSinceLastInvite = DateTime.Now - lastDiscordInviteSentAt;
+		var timeRemaining = TimeSpan.FromMinutes(discordConfig.DiscordInviteDelayMinutes) - timeSinceLastInvite;
 
-        if (timeRemaining > TimeSpan.Zero)
-        {
-            // Format as "X minutes Y seconds"
-            int minutes = (int)timeRemaining.TotalMinutes;
-            int seconds = timeRemaining.Seconds;
-            string formattedTime = $"{minutes}min {seconds}s";
+		if (timeRemaining > TimeSpan.Zero)
+		{
+			int minutes = (int)timeRemaining.TotalMinutes;
+			int seconds = timeRemaining.Seconds;
+			string formattedTime = $"{minutes}min {seconds}s";
 
-            PrintMessageToPlayer(player, Core.Localizer["command.invite.to_early", formattedTime]);
-            return;
-        }
+			PrintMessageToPlayer(player, Core.Localizer["command.invite.to_early", formattedTime]);
+			return;
+		}
 
-        int playingPlayers = GetPlayers().Count;
+		int playingPlayers = GetPlayers().Count;
 
-        int remainingPlayers = cfg.MinimumReadyPlayers - playingPlayers;
+		int remainingPlayers = cfg.MinimumReadyPlayers - playingPlayers;
 
 		if (remainingPlayers < 1)
 		{
 			PrintMessageToPlayer(player, Core.Localizer["command.invite.no_need", playingPlayers, cfg.MinimumReadyPlayers]);
 			return;
-        }
+		}
 
-        _ = Task.Run(async () =>
+		_ = Task.Run(async () =>
 		{
-			foreach (var webhook in cfg.DiscordInviteWebhooks)
+			foreach (var invite in discordConfig.Invites)
 			{
-				string message = webhook.Message
-					.Replace("{0}", remainingPlayers.ToString());
-				await SendToDiscord(message, webhook.WebhookUrl);
+				var inviteWithReplacements = ReplaceInvitePlaceholders(invite, remainingPlayers);
+				await SendToDiscord(inviteWithReplacements);
 			}
 		});
 
-        lastDiscordInviteSentAt = DateTime.Now;
-        PrintMessageToAllPlayers(Core.Localizer["command.invite", player.Controller.PlayerName]);
+		lastDiscordInviteSentAt = DateTime.Now;
+		PrintMessageToAllPlayers(Core.Localizer["command.invite", player.Controller.PlayerName]);
 	}
 
 	/// <summary>
