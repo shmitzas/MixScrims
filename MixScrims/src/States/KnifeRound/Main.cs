@@ -83,6 +83,9 @@ public partial class MixScrims
 
         StopPreMatchAnnouncementTimers();
 
+        if (cfg.ShowReadyStatusInScoreboard)
+            RemoveReadyClanTagsFromAllPlayers();
+
         // Close any open team picking menus for captains
         if (captainCt != null && IsPlayerValid(captainCt))
         {

@@ -21,6 +21,9 @@ public partial class MixScrims
 
         StopPreMatchAnnouncementTimers();
 
+        if (cfg.ShowReadyStatusInScoreboard)
+            RemoveReadyClanTagsFromAllPlayers();
+
         UnpauseMatch();
         Core.Engine.ExecuteCommand("exec mixscrims/match_start.cfg");
 
