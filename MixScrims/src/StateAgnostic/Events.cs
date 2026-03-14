@@ -346,7 +346,10 @@ partial class MixScrims
             logger.LogError(ex, $"HandleDisconnectedPlayer: Error closing active menu for captain \"{player?.Controller.PlayerName}\"");
         }
 
-        CheckReadyPlayersToStart();
+        if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
+        {
+            CheckReadyPlayersToStart();
+        }
     }
 
     /// <summary>
