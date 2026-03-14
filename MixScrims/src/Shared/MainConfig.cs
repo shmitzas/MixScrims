@@ -23,6 +23,7 @@ public class MainConfig
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
+    public bool ShowReadyStatusInChat { get; set; } = true;
     public bool ShowReadyStatusInScoreboard { get; set; } = true;
     public bool ShowReadyStatusInCenterHtml { get; set; } = true;
     public bool HideReadyStatusInCenterWhenReady { get; set; } = false;

@@ -17,6 +17,22 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation("PrintReadyAndNotReadyPlayers");
 
+        if (cfg.ShowReadyStatusInChat)
+        {
+            ShowReadyAndNotReadyPlayersInChat();
+        }
+       
+        if (cfg.ShowReadyStatusInScoreboard)
+        {
+            ShowReadyAndNotReadyPlayersInScoreboard();
+        }
+    }
+
+    internal void ShowReadyAndNotReadyPlayersInChat()
+    {
+        if (cfg.DetailedLogging)
+            logger.LogInformation("ShowReadyAndNotReadyPlayersInChat");
+
         var notReadyPlayers = GetNotReadyPlayers();
         if (cfg.DetailedLogging)
             logger.LogInformation($"Not ready players count: {notReadyPlayers.Count}");
@@ -28,11 +44,6 @@ public partial class MixScrims
                 logger.LogInformation($"Not ready players: {notReadyPlayersNames}");
             PrintMessageToAllPlayers(Core.Localizer["announcement.ready_status", readyPlayers.Count, GetNumberOfPlayersRequiredToStart()]);
             PrintMessageToAllPlayers(Core.Localizer["announcement.not_ready_players", notReadyPlayersNames]);
-        }
-
-        if (cfg.ShowReadyStatusInScoreboard)
-        {
-            ShowReadyAndNotReadyPlayersInScoreboard();
         }
     }
 
