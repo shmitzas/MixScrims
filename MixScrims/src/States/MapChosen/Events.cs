@@ -40,7 +40,8 @@ public partial class MixScrims
 
         if (matchState != MatchState.MapLoading)
         {
-            logger.LogWarning($"HandleMapChosenNewMapLoad: Ignored map start event because match state is {matchState}");
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"HandleMapChosenNewMapLoad: Ignored map start event because match state is {matchState}");
             return;
         }
 

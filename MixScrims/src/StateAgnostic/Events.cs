@@ -567,6 +567,8 @@ partial class MixScrims
                 playingTPlayers.RemoveAll(p => p.PlayerID == player.PlayerID);
                 return HookResult.Continue;
             }
+
+            FixTeammateColors();
         }
 
         return HookResult.Stop;

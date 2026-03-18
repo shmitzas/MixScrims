@@ -85,6 +85,9 @@ public partial class MixScrims
                 playerColors[player.PlayerID] = freeColor.Value;
             }
         }
+
+        FixColorDuplicatesForTeam(Team.CT);
+        FixColorDuplicatesForTeam(Team.T);
     }
 
     /// <summary>
@@ -128,5 +131,43 @@ public partial class MixScrims
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Fixes color duplicates for a specific team by identifying players with the same color and reassigning free colors.
+    /// </summary>
+    private void FixColorDuplicatesForTeam(Team team)
+    {
+        var teamPlayers = GetPlayersInTeam(team)
+            .Where(p => playerColors.ContainsKey(p.PlayerID))
+            .ToList();
+
+        var colorGroups = teamPlayers
+            .GroupBy(p => playerColors[p.PlayerID])
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        foreach (var duplicateGroup in colorGroups)
+        {
+            var playersWithDuplicateColor = duplicateGroup.Skip(1).ToList();
+
+            foreach (var player in playersWithDuplicateColor)
+            {
+                var freeColor = GetFreePlayerColor(player);
+                if (freeColor != null)
+                {
+                    player.Controller.CompTeammateColor = freeColor.Value;
+                    player.Controller.CompTeammateColorUpdated();
+                    playerColors[player.PlayerID] = freeColor.Value;
+
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation($"FixColorDuplicates: Reassigned player {player.Name} (ID: {player.PlayerID}) from color {duplicateGroup.Key} to {freeColor.Value} on {team}");
+                }
+                else
+                {
+                    logger.LogWarning($"FixColorDuplicates: Could not find free color for player {player.Name} (ID: {player.PlayerID}) on {team}");
+                }
+            }
+        }
     }
 }
