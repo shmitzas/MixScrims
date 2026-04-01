@@ -67,7 +67,9 @@ public partial class MixScrims
         var captainAnnouncementToken = Core.Scheduler.DelayBySeconds(30, () =>
         {
             PickCaptains();
-            captainsAnnouncementsTimer = Core.Scheduler.DelayBySeconds(cfg.ChatAnnouncementTimers.CaptainsAnnouncements, PrintChosenCaptains);
+            captainsAnnouncementsTimer?.Cancel();
+            captainsAnnouncementsTimer = Core.Scheduler.RepeatBySeconds(cfg.ChatAnnouncementTimers.CaptainsAnnouncements, PrintChosenCaptains);
+            Core.Scheduler.StopOnMapChange(captainsAnnouncementsTimer);
         });
         Core.Scheduler.StopOnMapChange(captainAnnouncementToken);
 

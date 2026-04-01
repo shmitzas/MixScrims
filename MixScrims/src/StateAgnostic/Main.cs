@@ -99,7 +99,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal void AddPlayerToReadyList(IPlayer player, bool announce = false)
     {
-        var name = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
+        var name = player.Name ?? $"#{player.PlayerID}";
         logger.LogInformation("AddPlayerToReadyList: called for {Player}", name);
 
         var matchState = mixScrimsService.GetCurrentMatchState();
@@ -136,7 +136,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal void RemovePlayerFromReadyList(IPlayer player, bool announce = false)
     {
-        var name = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
+        var name = player.Name ?? $"#{player.PlayerID}";
         logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
 
         var matchState = mixScrimsService.GetCurrentMatchState();
@@ -149,7 +149,7 @@ public sealed partial class MixScrims
             {
                 if (announce)
                 {
-                    PrintMessageToPlayer(player, Core.Localizer["command.unready.not_ready"]);
+                    PrintMessageToPlayer(player, Core.Localizer["command.unready.already_unready"]);
                 }
                 return;
             }
@@ -303,7 +303,7 @@ public sealed partial class MixScrims
             return;
         }
 
-        PrintMessageToAllPlayers(Core.Localizer["command.captain.ct", admin.Controller?.PlayerName ?? $"#{admin.PlayerID}", player.Controller?.PlayerName ?? $"#{player.PlayerID}"]);
+        PrintMessageToAllPlayers(Core.Localizer["command.captain.ct", admin.Name ?? $"#{admin.PlayerID}", player.Name ?? $"#{player.PlayerID}"]);
         PickCtCaptain(player);
 
         CloseMenuForPlayer(admin);
@@ -324,7 +324,7 @@ public sealed partial class MixScrims
             return;
         }
 
-        PrintMessageToAllPlayers(Core.Localizer["command.captain.t", admin.Controller?.PlayerName ?? $"#{admin.PlayerID}", player.Controller?.PlayerName ?? $"#{player.PlayerID}"]);
+        PrintMessageToAllPlayers(Core.Localizer["command.captain.t", admin.Name ?? $"#{admin.PlayerID}", player.Name ?? $"#{player.PlayerID}"]);
         PickTCaptain(player);
 
         CloseMenuForPlayer(admin);

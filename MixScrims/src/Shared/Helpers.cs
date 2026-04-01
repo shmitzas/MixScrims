@@ -190,7 +190,7 @@ public sealed partial class MixScrims
     internal IPlayer? GetPlayerByName(string playerName)
     {
         return GetPlayers().FirstOrDefault(p =>
-            string.Equals(p.Controller?.PlayerName, playerName, StringComparison.OrdinalIgnoreCase));
+            string.Equals(p.Name, playerName, StringComparison.OrdinalIgnoreCase));
     }
 
     internal IPlayer? GetPlayerBySteamId(ulong steamId)
@@ -264,12 +264,12 @@ public sealed partial class MixScrims
             }
             else
             {
-                logger.LogWarning("RespawnPlayer: Player {PlayerName} is no longer valid, skipping respawn.", player.Controller?.PlayerName ?? "Unknown");
+                logger.LogWarning("RespawnPlayer: Player {PlayerName} is no longer valid, skipping respawn.", player.Name ?? "Unknown");
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "RespawnPlayer: Error while respawning player {PlayerName}", player.Controller?.PlayerName ?? "Unknown");
+            logger.LogError(ex, "RespawnPlayer: Error while respawning player {PlayerName}", player.Name ?? "Unknown");
         }
 
     }
@@ -281,11 +281,7 @@ public sealed partial class MixScrims
     {
         if (!IsBot(player) && IsPlayerValid(player))
         {
-            var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
-            if (currentMenu != null)
-            {
-                Core.MenusAPI.CloseMenuForPlayer(player, currentMenu);
-            }
+            Core.MenusAPI.CloseActiveMenu(player);
         }
     }
 

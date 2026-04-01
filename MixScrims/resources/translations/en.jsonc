@@ -86,6 +86,7 @@
   "error.team.full.ct": "[lightblue]CT team [red]is full!",
   "error.team.full.t": "[orange]T team [red]is full!",
   "error.not_captain": "You are [red]not [default]the victorious team captain!",
+  "error.not_winner_team": "You are [red]not [default]on the winning team!",
   "error.captain.cannot_change_team": "You [red]can't [default]change teams during [red]Knife round!",
   "error.captain.selection_failed": "[red]Critical error [default]- Captains cannot be assigned. Check logs for details",
   "error.captain.disabled": "Captains are [red]disabled [default]on this server!",

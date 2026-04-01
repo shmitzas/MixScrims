@@ -13,8 +13,8 @@ public partial class MixScrims
     {
         Core.Scheduler.NextTick(() =>
         {
-            LoadSelectedMap(cfg.Maps.First());
             ResetVariables();
+            StartWarmup();
         });
     }
 
@@ -32,18 +32,34 @@ public partial class MixScrims
         playingTPlayers.Clear();
         captainCt = null;
         captainT = null;
+        winnerCaptain = null;
         SetTeamName(Team.CT);
         SetTeamName(Team.T);
         pickedCtPlayers.Clear();
         pickedTPlayers.Clear();
         votedMaps.Clear();
-        timeoutCountCt = 3;
-        timeoutCountT = 3;
+        sideVotes.Clear();
+        sideVoteWinnerTeam = Team.None;
+        timeoutCountCt = cfg.Timeouts;
+        timeoutCountT = cfg.Timeouts;
         timeoutPending = TimeoutPending.None;
-        canPlayerBeRespawned = true;
+        timeoutQueue.Clear();
+        isTimeoutActive = false;
+        isTimeoutVoteInProgress = false;
+        timeoutVoteTimer?.Cancel();
+        timeoutVoteTimer = null;
+        isSurrenderVoteInProgress = false;
+        surrenderVoteTimer?.Cancel();
+        surrenderVoteTimer = null;
         surrenderVoteYesCount = 0;
         surrenderVoteNoCount = 0;
         surrenderVoteTeam = Team.None;
+        canPlayerBeRespawned = true;
+        isMovingPlayersToTeams = false;
+        isFreezeTime = false;
+        playerColors.Clear();
+        recentlyDisconnectedPlayers.Clear();
+        freshlyJoinedPlayers.Clear();
         StopAllAnnouncmentTimers();
     }
 }

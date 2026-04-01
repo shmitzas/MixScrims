@@ -12,6 +12,7 @@ public partial class MixScrims
     internal List<IPlayer> playingTPlayers { get; set; } = [];
     internal IPlayer? winnerCaptain { get; set; } = null;
     internal Dictionary<int, string> sideVotes { get; set; } = new();
+    internal Team sideVoteWinnerTeam { get; set; } = Team.None;
 
     /// <summary>
     /// Initiates the knife round phase of the match.
@@ -130,14 +131,15 @@ public partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("PromptWinnerTCaptainoChoseStartingSide: Captains disabled, initiating team vote.");
-            
+
             sideVotes.Clear();
+            sideVoteWinnerTeam = winnerTeam;
             var winningTeamPlayers = winnerTeam == Team.CT ? playingCtPlayers : playingTPlayers;
             var teamName = winnerTeam == Team.CT ? "CT" : "T";
-            
+
             PrintMessageToAllPlayers(Core.Localizer[$"announcement.knife_round.winner.{teamName.ToLower()}"]);
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.team_vote_started"]);
-            
+
             foreach (var player in winningTeamPlayers)
             {
                 if (player != null && IsPlayerValid(player) && !IsBot(player))
@@ -146,14 +148,15 @@ public partial class MixScrims
                     Core.MenusAPI.OpenMenuForPlayer(player, menu);
                 }
             }
-            
-            Core.Scheduler.DelayBySeconds(30, () =>
+
+            var sideVoteToken = Core.Scheduler.DelayBySeconds(30, () =>
             {
                 if (mixScrimsService.GetCurrentMatchState() == MatchState.PickingStartingSide)
                 {
                     ProcessTeamSideVotes();
                 }
             });
+            Core.Scheduler.StopOnMapChange(sideVoteToken);
             return;
         }
 
@@ -261,13 +264,21 @@ public partial class MixScrims
 
         if (cfg.DisableCaptains)
         {
+            var playerTeam = (captain.PlayerPawn?.TeamNum == 3) ? Team.CT : Team.T;
+            if (sideVoteWinnerTeam != Team.None && playerTeam != sideVoteWinnerTeam)
+            {
+                PrintMessageToPlayer(captain, Core.Localizer["error.not_winner_team"]);
+                return;
+            }
+
             sideVotes[captain.PlayerID] = choice;
             PrintMessageToPlayer(captain, Core.Localizer["command.side_vote.recorded", choice]);
-            
-            var winningTeam = (captain.PlayerPawn?.TeamNum == 3) ? Team.CT : Team.T;
-            var winningTeamPlayers = winningTeam == Team.CT ? playingCtPlayers : playingTPlayers;
+
+            var winningTeamPlayers = sideVoteWinnerTeam != Team.None
+                ? (sideVoteWinnerTeam == Team.CT ? playingCtPlayers : playingTPlayers)
+                : (playerTeam == Team.CT ? playingCtPlayers : playingTPlayers);
             var validPlayers = winningTeamPlayers.Count(p => p != null && IsPlayerValid(p) && !IsBot(p));
-            
+
             if (sideVotes.Count >= validPlayers)
             {
                 ProcessTeamSideVotes();
@@ -294,14 +305,6 @@ public partial class MixScrims
     /// </summary>
     internal void ProcessTeamSideVotes()
     {
-        if (sideVotes.Count == 0)
-        {
-            if (cfg.DetailedLogging)
-                logger.LogInformation("ProcessTeamSideVotes: No votes received, staying on current sides.");
-            StayStartingSides(null);
-            return;
-        }
-
         var switchVotes = sideVotes.Values.Count(v => string.Equals(v, "Switch", StringComparison.OrdinalIgnoreCase));
         var stayVotes = sideVotes.Values.Count(v => string.Equals(v, "Stay", StringComparison.OrdinalIgnoreCase));
 
@@ -310,17 +313,14 @@ public partial class MixScrims
 
         PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.vote_results", switchVotes, stayVotes]);
 
+        var firstVoter = GetPlayers().FirstOrDefault(p => sideVotes.ContainsKey(p.PlayerID));
+
         if (switchVotes > stayVotes)
         {
-            var firstVoter = GetPlayers().FirstOrDefault(p => sideVotes.ContainsKey(p.PlayerID));
-            if (firstVoter != null)
-            {
-                SwitchStartingSides(firstVoter);
-            }
+            SwitchStartingSides(firstVoter);
         }
         else
         {
-            var firstVoter = GetPlayers().FirstOrDefault(p => sideVotes.ContainsKey(p.PlayerID));
             StayStartingSides(firstVoter);
         }
 
@@ -330,26 +330,20 @@ public partial class MixScrims
     /// <summary>
     /// Switches the starting sides of the Counter-Terrorist and Terrorist teams, including their players and captains.
     /// </summary>
-    internal void SwitchStartingSides(IPlayer captain)
+    internal void SwitchStartingSides(IPlayer? captain)
     {
-        if (captain == null)
-        {
-            logger.LogError("SwitchStartingSides: Captain is null.");
-            return;
-        }
-
-        if (captain.PlayerPawn == null)
+        if (captain != null && captain.PlayerPawn == null)
         {
             logger.LogError("SwitchStartingSides: Captain PlayerPawn is null.");
             return;
         }
 
-        if (captain.PlayerPawn.TeamNum == 3)
+        if (captain?.PlayerPawn?.TeamNum == 3)
         {
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.ct", captain.Controller.PlayerName]);
         }
 
-        if (captain.PlayerPawn.TeamNum == 2)
+        if (captain?.PlayerPawn?.TeamNum == 2)
         {
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.t", captain.Controller.PlayerName]);
         }
@@ -444,24 +438,11 @@ public partial class MixScrims
     /// </summary>
     internal void StayStartingSides(IPlayer? captain)
     {
-        if (captain == null)
-        {
-            logger.LogError("StayStartingSides: Captain is null.");
-            return;
-        }
-
-        if (captain.PlayerPawn == null)
-        {
-            logger.LogError("StayStartingSides: Captain PlayerPawn is null.");
-            return;
-        }
-
-        if (captain.PlayerPawn.TeamNum == 3)
+        if (captain?.PlayerPawn?.TeamNum == 3)
         {
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.ct", captain.Controller.PlayerName]);
         }
-
-        if (captain.PlayerPawn.TeamNum == 2)
+        else if (captain?.PlayerPawn?.TeamNum == 2)
         {
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.t", captain.Controller.PlayerName]);
         }

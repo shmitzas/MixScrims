@@ -86,6 +86,7 @@
   "error.team.full.ct": "Time [lightblue]CT [red]está cheio!",
   "error.team.full.t": "Time [orange]T [red]está cheio!",
   "error.not_captain": "Você [red]não é [default]o capitão do time vencedor!",
+  "error.not_winner_team": "Você [red]não está [default]no time vencedor!",
   "error.captain.cannot_change_team": "Você [red]não pode [default]mudar de time durante o [red]Round Faca!",
   "error.captain.selection_failed": "[red]Erro crítico [default]- Não foi possível definir os capitães. Verifique os logs",
   "error.captain.disabled": "Capitães estão [red]desativados [default]neste servidor!",

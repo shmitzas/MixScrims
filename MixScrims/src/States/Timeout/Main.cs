@@ -148,7 +148,7 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("StartTimeoutVote: Called by {Caller} for team {Team}. isTimeoutVoteInProgress: {InProgress}",
-                caller.Controller?.PlayerName, team, isTimeoutVoteInProgress);
+                caller.Name, team, isTimeoutVoteInProgress);
         }
 
         // Prevent duplicate vote processing
@@ -288,7 +288,7 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("HandleTimeoutVote: Player {Name} voted {Choice}. Current votes before: {Yes} yes, {No} no out of {Total}",
-                player.Controller?.PlayerName, choice, timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes);
+                player.Name, choice, timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes);
         }
 
         var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
@@ -299,7 +299,7 @@ public partial class MixScrims
 
         if (player.PlayerPawn == null)
         {
-            logger.LogError("HandleTimeoutVote: PlayerPawn is null for player {PlayerName}", player.Controller?.PlayerName);
+            logger.LogError("HandleTimeoutVote: PlayerPawn is null for player {PlayerName}", player.Name);
             return;
         }
 

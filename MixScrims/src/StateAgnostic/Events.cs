@@ -71,7 +71,9 @@ partial class MixScrims
                     var delayedPlayer = Core.PlayerManager.GetPlayer(playerSlot);
                     if (delayedPlayer != null && delayedPlayer.IsValid)
                     {
-                        HandlePlayerChangeTeam(delayedPlayer, 0);
+                        var currentState = mixScrimsService.GetCurrentMatchState();
+                        if (currentState == MatchState.Warmup || currentState == MatchState.MapVoting || currentState == MatchState.MapChosen)
+                            HandlePlayerChangeTeam(delayedPlayer, 0);
                     }
                 });
             }
@@ -231,6 +233,14 @@ partial class MixScrims
             return;
         }
 
+        if (recentlyDisconnectedPlayers.Contains(player.Slot))
+            return;
+        recentlyDisconnectedPlayers.Add(player.Slot);
+        var disconnectingPlayerSlot = player.Slot;
+        Core.Scheduler.DelayBySeconds(1, () => recentlyDisconnectedPlayers.Remove(disconnectingPlayerSlot));
+
+        freshlyJoinedPlayers.Remove(player.Slot);
+
         if (pickedCtPlayers.Any(p => p.PlayerID == player.PlayerID))
         {
             pickedCtPlayers.RemoveAll(p => p.PlayerID == player.PlayerID);
@@ -314,8 +324,7 @@ partial class MixScrims
             }
         }
 
-        if (matchState == MatchState.PickingStartingSide
-            || matchState == MatchState.Timeout)
+        if (matchState == MatchState.PickingStartingSide)
         {
             if (!cfg.DisableCaptains && player.PlayerID == winnerCaptain?.PlayerID)
             {

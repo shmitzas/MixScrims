@@ -25,7 +25,7 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("StartSurrenderVote: Called by {Caller} for team {Team}. isSurrenderVoteInProgress: {InProgress}",
-                caller.Controller?.PlayerName, team, isSurrenderVoteInProgress);
+                caller.Name, team, isSurrenderVoteInProgress);
         }
 
         // Prevent duplicate vote processing
@@ -153,7 +153,7 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("HandleSurrenderVote: Player {Name} voted {Choice}. Current votes before: {Yes} yes, {No} no out of {Total}",
-                player.Controller?.PlayerName, choice, surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes);
+                player.Name, choice, surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes);
         }
 
         var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
@@ -164,7 +164,7 @@ public partial class MixScrims
 
         if (player.PlayerPawn == null)
         {
-            logger.LogError("HandleSurrenderVote: PlayerPawn is null for player {PlayerName}", player.Controller?.PlayerName);
+            logger.LogError("HandleSurrenderVote: PlayerPawn is null for player {PlayerName}", player.Name);
             return;
         }
 

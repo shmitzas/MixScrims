@@ -251,7 +251,7 @@ public partial class MixScrims
 
 			foreach (var player in players)
 			{
-				var displayName = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
+				var displayName = player.Name ?? $"#{player.PlayerID}";
 				var button = new ButtonMenuOption(displayName);
 
 				if (team == "t")

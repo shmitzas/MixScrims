@@ -100,14 +100,14 @@ public class MixScrimsService : IMixScrims
 
     public void ChangeMap(string mapName = "", string workshopId = "")
     {
-        if (string.IsNullOrEmpty(mapName))
+        if (string.IsNullOrEmpty(mapName) && string.IsNullOrEmpty(workshopId))
         {
-            if (string.IsNullOrEmpty(workshopId))
-            {
-                _mixScrims.logger.LogError("ChangeMap: Both mapName and workshopId cannot be empty. Please provide at least one.");
-                return;
-            }
+            _mixScrims.logger.LogError("ChangeMap: Both mapName and workshopId cannot be empty. Please provide at least one.");
+            return;
+        }
 
+        if (!string.IsNullOrEmpty(workshopId))
+        {
             var map = _mixScrims.GetMapByWorkshopId(workshopId);
             if (map == null)
             {
@@ -115,24 +115,16 @@ public class MixScrimsService : IMixScrims
                 return;
             }
             _mixScrims.LoadSelectedMap(map);
+            return;
         }
 
-        if (string.IsNullOrEmpty(workshopId))
+        var mapByName = _mixScrims.GetMapByName(mapName);
+        if (mapByName == null)
         {
-            if (string.IsNullOrEmpty(mapName))
-            {
-                _mixScrims.logger.LogError("ChangeMap: Both mapName and workshopId cannot be empty. Please provide at least one.");
-                return;
-            }
-
-            var map = _mixScrims.GetMapByName(mapName);
-            if (map == null)
-            {
-                _mixScrims.logger.LogError("ChangeMap: Map with workshop ID {WorkshopId} was not found in the config.", workshopId);
-                return;
-            }
-            _mixScrims.LoadSelectedMap(map);
+            _mixScrims.logger.LogError("ChangeMap: Map with name {MapName} was not found in the config.", mapName);
+            return;
         }
+        _mixScrims.LoadSelectedMap(mapByName);
     }
 
     public void ForceAllPlayersToReady()

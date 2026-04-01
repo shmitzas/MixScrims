@@ -82,7 +82,7 @@ public partial class MixScrims
     /// </summary>
     internal void RegisterMapVoteByName(IPlayer player, string mapDisplayName)
     {
-        var playerName = player.Controller?.PlayerName ?? $"#{player.PlayerID}";
+        var playerName = player.Name ?? $"#{player.PlayerID}";
 
         if (cfg.DetailedLogging)
             logger.LogInformation("Player {Player} voted for map {Map}", playerName, mapDisplayName);
@@ -144,7 +144,7 @@ public partial class MixScrims
         }
         catch (Exception ex)
         {
-            logger.LogError("Error displaying map voting menu to {Player}: {Error}", player.Controller?.PlayerName, ex);
+            logger.LogError("Error displaying map voting menu to {Player}: {Error}", player.Name, ex);
         }
     }
 

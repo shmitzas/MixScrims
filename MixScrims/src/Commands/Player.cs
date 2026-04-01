@@ -106,7 +106,7 @@ partial class MixScrims
 
 		if (player.PlayerPawn == null)
 		{
-			logger.LogError("OnTimeout: PlayerPawn is null for player {PlayerName}", player.Controller?.PlayerName);
+			logger.LogError("OnTimeout: PlayerPawn is null for player {PlayerName}", player.Name);
 			return;
         }
 
@@ -247,22 +247,22 @@ partial class MixScrims
 			return;
 		}
 
-		if (player != winnerCaptain)
+		if (player.PlayerID != winnerCaptain?.PlayerID)
 		{
 			PrintMessageToPlayer(player, Core.Localizer["error.not_captain"]);
 			return;
 		}
 
-        if (!IsBot(player) && IsPlayerValid(player))
-        {
-            var menu = Core.MenusAPI.GetCurrentMenu(player);
-			if (menu != null)
+			if (!IsBot(player) && IsPlayerValid(player))
 			{
-                Core.MenusAPI.CloseMenuForPlayer(player, menu);
-            }
-        }
+				var menu = Core.MenusAPI.GetCurrentMenu(player);
+				if (menu != null)
+				{
+					Core.MenusAPI.CloseMenuForPlayer(player, menu);
+				}
+			}
 
-        var token = Core.Scheduler.DelayBySeconds(1, () => StayStartingSides(player));
+			var token = Core.Scheduler.DelayBySeconds(1, () => StayStartingSides(player));
         Core.Scheduler.StopOnMapChange(token);
         logger.LogInformation($"OnStay: Captain {player.Controller.PlayerName} chose to !stay");
 	}
@@ -273,6 +273,12 @@ partial class MixScrims
 	[Command("switch")]
 	public void OnSwitch(ICommandContext context)
 	{
+		if (!context.IsSentByPlayer)
+		{
+			logger.LogError("OnSwitch: command can only be used by players");
+			return;
+		}
+
 		var player = context.Sender;
         if (player == null || !IsPlayerValid(player))
 		{
@@ -294,24 +300,24 @@ partial class MixScrims
 			return;
 		}
 
-		if (player != winnerCaptain)
+		if (player.PlayerID != winnerCaptain?.PlayerID)
 		{
 			PrintMessageToPlayer(player, Core.Localizer["error.not_captain"]);
 			return;
 		}
 
-        if (!IsBot(player) && IsPlayerValid(player))
-        {
-            var menu = Core.MenusAPI.GetCurrentMenu(player);
-            if (menu != null)
-            {
-                Core.MenusAPI.CloseMenuForPlayer(player, menu);
+			if (!IsBot(player) && IsPlayerValid(player))
+			{
+				var menu = Core.MenusAPI.GetCurrentMenu(player);
+				if (menu != null)
+				{
+					Core.MenusAPI.CloseMenuForPlayer(player, menu);
             }
         }
 
         var token = Core.Scheduler.DelayBySeconds(1, () => SwitchStartingSides(player));
 		Core.Scheduler.StopOnMapChange(token);
-        logger.LogInformation($"OnStay: Captain {player.Controller.PlayerName} chose to !switch");
+        logger.LogInformation($"OnSwitch: Captain {player.Controller.PlayerName} chose to !switch");
     }
 
 	/// <summary>
@@ -419,7 +425,7 @@ partial class MixScrims
 
 		if (player.PlayerPawn == null)
 		{
-			logger.LogError("OnSurrender: PlayerPawn is null for player {PlayerName}", player.Controller?.PlayerName);
+			logger.LogError("OnSurrender: PlayerPawn is null for player {PlayerName}", player.Name);
 			return;
 		}
 
