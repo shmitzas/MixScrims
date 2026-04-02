@@ -252,12 +252,6 @@ public partial class MixScrims
 
         builder.DisableExit();
 
-        if (players.Count == 0)
-        {
-            logger.LogWarning("PromptCaptainToPickPlayer: No players available to pick after filtering.");
-            return;
-        }
-
         foreach (var player in players)
         {
             var displayName = player.Name ?? $"#{player.PlayerID}";
@@ -276,14 +270,16 @@ public partial class MixScrims
                     AssignPickedPlayerToTeamT(captain, displayName);
                 };
             }
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"PromptCaptainToPickPlayer: Added menu option for player {displayName} to be picked by {captain.Name} for team {(team == Team.CT ? "CT" : "T")}");
             builder.AddOption(button);
-            logger.LogInformation($"PromptCaptainToPickPlayer: Added menu option for player {displayName} to be picked by {captain.Name} for team {(team == Team.CT ? "CT" : "T")}");
         }
 
         var menu = builder.Build();
         if (IsPlayerValid(captain))
         {
-            logger.LogInformation($"PromptCaptainToPickPlayer: Displaying team picking menu to {captain.Name} for team {(team == Team.CT ? "CT" : "T")}");
+            if (cfg.DetailedLogging)
+                logger.LogInformation($"PromptCaptainToPickPlayer: Displaying team picking menu to {captain.Name} for team {(team == Team.CT ? "CT" : "T")}");
             Core.MenusAPI.OpenMenuForPlayer(captain, menu);
         }
     }
