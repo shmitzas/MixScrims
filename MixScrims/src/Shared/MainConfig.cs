@@ -27,6 +27,7 @@ public class MainConfig
     public bool ShowReadyStatusInScoreboard { get; set; } = true;
     public bool ShowReadyStatusInCenterHtml { get; set; } = true;
     public bool HideReadyStatusInCenterWhenReady { get; set; } = false;
+    public bool MovePlayersToSpecDuringTeamPicking { get; set; } = true;
 
     // Announcement timers
     public AnnouncementTimers ChatAnnouncementTimers { get; set; } = new();

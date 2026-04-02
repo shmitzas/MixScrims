@@ -1,7 +1,8 @@
 using Microsoft.Extensions.Logging;
-using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Core.Menus.OptionsBase;
 using MixScrims.Contract;
+using SwiftlyS2.Core.Menus.OptionsBase;
+using SwiftlyS2.Shared.Players;
+using System.Numerics;
 
 namespace MixScrims;
 
@@ -77,6 +78,8 @@ public partial class MixScrims
 
         if (cfg.SkipTeamPicking)
         {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("StartTeamPickingPhase: Team picking is disabled in configuration.");
             SkipTeamPickingPhase();
             return;
         }
@@ -84,7 +87,7 @@ public partial class MixScrims
         if (cfg.DisableCaptains)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("StartTeamPickingPhase: Captains disabled, auto-assigning teams based on current positions.");
+                logger.LogInformation("StartTeamPickingPhase: Captains is disabled in configuration, auto-assigning teams based on current positions.");
             SkipTeamPickingPhase();
             return;
         }
@@ -536,6 +539,13 @@ public partial class MixScrims
         var players = GetPlayingPlayers();
         var pickedPlayerIds = new HashSet<int>(pickedCtPlayers.Select(p => p.PlayerID).Concat(pickedTPlayers.Select(p => p.PlayerID)));
         players.RemoveAll(p => pickedPlayerIds.Contains(p.PlayerID));
+
+        if (!cfg.MovePlayersToSpecDuringTeamPicking)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("MovePlayersToDesignatedTeamsPrePick: Moving players to spec during team picking is disabled in configuration.");
+            return;
+        }
 
         isMovingPlayersToTeams = true;
 
