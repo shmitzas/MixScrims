@@ -204,7 +204,6 @@ public sealed partial class MixScrims
 			logger.LogInformation("LoadMap: Executing map change to {Map}", map.MapName);
         if (map.IsWorkshopMap && !string.IsNullOrWhiteSpace(map.WorkshopId))
         {
-            Core.Engine.ExecuteCommand($"ds_workshop_changelevel {map.MapName}");
             Core.Engine.ExecuteCommand($"host_workshop_map {map.WorkshopId}");
         }
         else
