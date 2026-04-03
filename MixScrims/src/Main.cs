@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.5.5",
+    Version = "1.6",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -97,6 +97,11 @@ public partial class MixScrims : BasePlugin
             commandHandlers["volunteer_captain"] = OnCaptainVolunteer;
         }
 
+        if (cfg.VoteKick.Enabled)
+        {
+            commandHandlers["votekick"] = OnVoteKick;
+        }
+
         if (cfg.DetailedLogging)
             logger.LogInformation("Registering commands and aliases...");
 
@@ -131,6 +136,11 @@ public partial class MixScrims : BasePlugin
         if (cfg.AllowVolunteerCaptains)
         {
             commandNames.Add("volunteer_captain");
+        }
+
+        if (cfg.VoteKick.Enabled)
+        {
+            commandNames.Add("votekick");
         }
         foreach (var commandName in commandNames)
         {

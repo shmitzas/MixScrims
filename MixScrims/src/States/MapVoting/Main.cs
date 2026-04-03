@@ -153,7 +153,7 @@ public partial class MixScrims
     /// </summary>
     internal void AnnouncePickedMap()
     {
-        var players = GetPlayingPlayers();
+        var players = GetPlayers();
 
         foreach (var player in players)
         {

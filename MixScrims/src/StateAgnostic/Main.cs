@@ -239,7 +239,11 @@ public sealed partial class MixScrims
     /// </summary>
     internal MapDetails GetRandomMap()
     {
-        var maps = cfg.Maps.Where(m => m.CanBeVoted).ToList();
+        var maps = GetMapsToVote();
+        if (maps.Count == 0)
+        {
+            maps = cfg.Maps.Where(m => m.CanBeVoted).ToList();
+        }
         if (maps.Count == 0)
         {
             logger.LogError("GetRandomMap: No maps available for voting. Check configuration.");

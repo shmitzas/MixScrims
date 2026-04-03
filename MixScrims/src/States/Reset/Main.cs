@@ -46,6 +46,7 @@ public partial class MixScrims
         timeoutQueue.Clear();
         isTimeoutActive = false;
         isTimeoutVoteInProgress = false;
+        timeoutVoteTeam = Team.None;
         timeoutVoteTimer?.Cancel();
         timeoutVoteTimer = null;
         isSurrenderVoteInProgress = false;
@@ -54,6 +55,8 @@ public partial class MixScrims
         surrenderVoteYesCount = 0;
         surrenderVoteNoCount = 0;
         surrenderVoteTeam = Team.None;
+        ResetVoteKickState(Team.CT);
+        ResetVoteKickState(Team.T);
         canPlayerBeRespawned = true;
         isMovingPlayersToTeams = false;
         isFreezeTime = false;

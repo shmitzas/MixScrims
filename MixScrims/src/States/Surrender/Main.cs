@@ -72,7 +72,7 @@ public partial class MixScrims
             return;
         }
 
-        players.Remove(caller);
+        players.RemoveAll(p => p.PlayerID == caller.PlayerID);
         surrenderTotalEligibleVotes = players.Count; // Store for consistent use across methods
 
         if (cfg.DetailedLogging)
@@ -177,15 +177,13 @@ public partial class MixScrims
             surrenderVoteNoCount++;
         }
 
-        var team = (Team)player.PlayerPawn.TeamNum;
-
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("HandleSurrenderVote: After vote - {Yes} yes, {No} no out of {Total}. Total voted: {TotalVoted}",
                 surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes, surrenderVoteYesCount + surrenderVoteNoCount);
         }
 
-        PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes]);
+        PrintMessageToTeam(surrenderVoteTeam, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes]);
 
         // Check if all eligible players have voted
         if (surrenderVoteYesCount + surrenderVoteNoCount >= surrenderTotalEligibleVotes)
@@ -196,7 +194,7 @@ public partial class MixScrims
                     surrenderVoteYesCount + surrenderVoteNoCount, surrenderTotalEligibleVotes);
             }
             surrenderVoteTimer?.Cancel();
-            SurrenderVoteResult(team);
+            SurrenderVoteResult(surrenderVoteTeam);
         }
 
         CloseMenuForPlayer(player);

@@ -520,7 +520,8 @@ partial class MixScrims
         {
             if (teamTojoin == 3)
             {
-                if (playingCtPlayers.Count < cfg.MinimumReadyPlayers / 2)
+                if (playingCtPlayers.Count < cfg.MinimumReadyPlayers / 2
+                    && !playingCtPlayers.Any(p => p.PlayerID == player.PlayerID))
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation($"HandlePlayerJoinTeam - Match: Player {player.Controller.PlayerName} joined CT team.");
@@ -545,7 +546,8 @@ partial class MixScrims
 
             if (teamTojoin == 2)
             {
-                if (playingTPlayers.Count < cfg.MinimumReadyPlayers / 2)
+                if (playingTPlayers.Count < cfg.MinimumReadyPlayers / 2
+                    && !playingTPlayers.Any(p => p.PlayerID == player.PlayerID))
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation($"HandlePlayerJoinTeam - Match: Player {player.Controller.PlayerName} joined T team.");

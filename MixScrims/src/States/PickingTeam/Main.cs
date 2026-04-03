@@ -354,7 +354,8 @@ public partial class MixScrims
             }
             if (matchState == MatchState.KnifeRound)
             {
-                playingCtPlayers.Add(captainCt);
+                if (!playingCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID))
+                    playingCtPlayers.Add(captainCt);
             }
 
             if (cfg.DetailedLogging)
@@ -407,7 +408,8 @@ public partial class MixScrims
             }
             if (matchState == MatchState.KnifeRound)
             {
-                playingTPlayers.Add(captainT);
+                if (!playingTPlayers.Any(p => p.PlayerID == captainT.PlayerID))
+                    playingTPlayers.Add(captainT);
             }
 
             if (cfg.DetailedLogging)

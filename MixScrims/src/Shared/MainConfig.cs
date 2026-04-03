@@ -38,6 +38,9 @@ public class MainConfig
         "invite"
     ];
 
+    // Vote kick settings
+    public VoteKickConfig VoteKick { get; set; } = new();
+
     // Player leave punishment settings
     public bool PunishPlayerLeaves { get; set; } = false;
     public LeavePunishment PlayerLeavePunishment { get; set; } = new();
@@ -65,6 +68,7 @@ public class MainConfig
         { "stay", new() { Permission = "", Aliases = ["st"] } },
         { "switch", new() { Permission = "", Aliases = ["swap"] } },
         { "volunteer_captain", new() { Permission = "", Aliases = ["volcap", "selfcapt"] }   },
+        { "votekick", new() { Permission = "", Aliases = ["vk"] } },
     };
 
     // Map settings
@@ -117,5 +121,11 @@ public class CommandInfo
 {
     public string Permission { get; set; } = string.Empty;
     public List<string> Aliases { get; set; } = [];
+}
+
+public class VoteKickConfig
+{
+    public bool Enabled { get; set; } = true;
+    public int VoteKickTime { get; set; } = 30;
 }
 

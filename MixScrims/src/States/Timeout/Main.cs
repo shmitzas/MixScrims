@@ -25,6 +25,7 @@ public partial class MixScrims
     internal int timeoutTotalEligibleVotes = 0;
     internal CancellationTokenSource? timeoutVoteTimer = null;
     internal bool isTimeoutVoteInProgress = false;
+    internal Team timeoutVoteTeam = Team.None;
 
     internal bool isFreezeTime = false;
 
@@ -166,6 +167,7 @@ public partial class MixScrims
         timeoutVoteNoCount = 0;
         timeoutTotalEligibleVotes = 0;
         isTimeoutVoteInProgress = true;
+        timeoutVoteTeam = team;
         timeoutVoteTimer?.Cancel();
         timeoutVoteTimer = null;
 
@@ -207,7 +209,7 @@ public partial class MixScrims
             return;
         }
 
-        players.Remove(caller);
+        players.RemoveAll(p => p.PlayerID == caller.PlayerID);
         timeoutTotalEligibleVotes = players.Count; // Store for consistent use across methods
 
         if (cfg.DetailedLogging)
@@ -312,15 +314,13 @@ public partial class MixScrims
             timeoutVoteNoCount++;
         }
 
-        var team = (Team)player.PlayerPawn.TeamNum;
-
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("HandleTimeoutVote: After vote - {Yes} yes, {No} no out of {Total}. Total voted: {TotalVoted}",
                 timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes, timeoutVoteYesCount + timeoutVoteNoCount);
         }
 
-        PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes]);
+        PrintMessageToTeam(timeoutVoteTeam, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes]);
 
         // Check if all eligible players have voted
         if (timeoutVoteYesCount + timeoutVoteNoCount >= timeoutTotalEligibleVotes)
@@ -331,7 +331,7 @@ public partial class MixScrims
                     timeoutVoteYesCount + timeoutVoteNoCount, timeoutTotalEligibleVotes);
             }
             timeoutVoteTimer?.Cancel();
-            TimeoutVoteResult(team);
+            TimeoutVoteResult(timeoutVoteTeam);
         }
 
         CloseMenuForPlayer(player);
