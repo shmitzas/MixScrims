@@ -115,5 +115,18 @@
   "menu.team_picking": "Pick {0} teammate",
   "menu.side_picking": "Choose starting side",
   "menu.timeout_vote": "Vote for a timeout",
-  "menu.surrender_vote": "Vote to surrender"
+  "menu.surrender_vote": "Vote to surrender",
+  "menu.votekick": "Vote to kick {0}",
+  "command.votekick.started": "[lime]{0} [default]started a vote to kick teammate [red]{1}[default]!",
+  "command.votekick.vote_in_progress": "A vote kick is [red]already in progress [default]for your team!",
+  "command.votekick.disabled": "Vote kick is [red]disabled [default]on this server!",
+  "command.votekick.self": "You [red]cannot [default]vote kick yourself!",
+  "command.votekick.not_teammate": "You can only vote kick your own [red]teammate[default]!",
+  "command.votekick.invalid_target": "Player [lime]{0} [red]not found[default]!",
+  "command.votekick.missing_args": "Usage: [gold]!votekick <player name>",
+  "command.votekick.passed.ct": "[lightblue]{0} [default]was [red]kicked [default]by their team!",
+  "command.votekick.passed.t": "[orange]{0} [default]was [red]kicked [default]by their team!",
+  "command.votekick.failed": "Vote to kick [lime]{0} [red]failed[default].",
+  "info.kick_reason.votekicked": "Voted out by your team",
+  "info.center.votekick.progress": "<span>Waiting for votes</span><br><span class=\"fontSize-sm\">[<span color=\"lime\">{0}</span>/<span color=\"lime\">{1}</span>] players voted</span>"
 }

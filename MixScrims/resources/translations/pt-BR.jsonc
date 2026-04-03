@@ -115,5 +115,18 @@
   "menu.team_picking": "Escolha o companheiro {0}",
   "menu.side_picking": "Escolha o lado inicial",
   "menu.timeout_vote": "Vote por um timeout",
-  "menu.surrender_vote": "Vote para render"
+  "menu.surrender_vote": "Vote para render",
+  "menu.votekick": "Votar para expulsar {0}",
+  "command.votekick.started": "[lime]{0} [default]iniciou um voto para expulsar o companheiro [red]{1}[default]!",
+  "command.votekick.vote_in_progress": "Uma votação de expulsão já está [red]em andamento [default]para o seu time!",
+  "command.votekick.disabled": "A votação de expulsão está [red]desativada [default]neste servidor!",
+  "command.votekick.self": "Você [red]não pode [default]votar para se expulsar!",
+  "command.votekick.not_teammate": "Você só pode votar para expulsar um [red]companheiro de time[default]!",
+  "command.votekick.invalid_target": "Jogador [lime]{0} [red]não encontrado[default]!",
+  "command.votekick.missing_args": "Uso: [gold]!votekick <nome do jogador>",
+  "command.votekick.passed.ct": "[lightblue]{0} [default]foi [red]expulso [default]pelo seu time!",
+  "command.votekick.passed.t": "[orange]{0} [default]foi [red]expulso [default]pelo seu time!",
+  "command.votekick.failed": "Votação para expulsar [lime]{0} [red]falhou[default].",
+  "info.kick_reason.votekicked": "Expulso por votação do time",
+  "info.center.votekick.progress": "<span>Aguardando votos</span><br><span class=\"fontSize-sm\">[<span color=\"lime\">{0}</span>/<span color=\"lime\">{1}</span>] jogadores votaram</span>"
 }
