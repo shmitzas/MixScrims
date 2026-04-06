@@ -5,7 +5,7 @@
 MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches with in-game management. It's a **state machine-driven plugin** that progresses through match phases: Warmup → MapVoting → MapChosen → PickingTeam → KnifeRound → PickingStartingSide → Match.
 
 - **Plugin Framework**: [SwiftlyS2](https://swiftlys2.net) - CS2 server modification framework for .NET 10.0
-- **Plugin Version**: 1.3.0
+- **Plugin Version**: 1.6.1
 - **Architecture**: State-based partial classes with shared service layer
 - **Key Components**: Main plugin (`MixScrims`), Contract API (`MixScrims.Contract`), state handlers, shared services, announcement system
 
@@ -58,17 +58,18 @@ The main `MixScrims` class is split across **multiple partial class files** orga
 
 **State Folder Structure:**
 
-| State | Main.cs | Events.cs | Purpose |
-|-------|---------|-----------|---------|  
-| KnifeRound | ✅ | ✅ | Knife round logic & round end handling |
-| MapChosen | ❌ | ✅ | Post-map-vote ready check |
-| MapVoting | ✅ | ❌ | Vote collection & map selection |
-| Match | ✅ | ✅ | Active match logic & round events |
-| PickingTeam | ✅ | ❌ | Captain team selection menus |
-| Reset | ✅ | ❌ | Plugin state reset & cleanup |
-| Surrender | ✅ | ❌ | Team surrender voting |
-| Timeout | ✅ | ✅ | Pause/resume logic & timer |
-| Warmup | ✅ | ✅ | Initial ready check & player join handling |
+| State | Main.cs | Events.cs | Extra Files | Purpose |
+|-------|---------|-----------|-------------|---------|  
+| KnifeRound | ✅ | ✅ | — | Knife round logic & round end handling |
+| MapChosen | ❌ | ✅ | — | Post-map-vote ready check |
+| MapVoting | ✅ | ❌ | — | Vote collection & map selection |
+| Match | ✅ | ✅ | `VoteKick.cs` | Active match logic, round events & votekick |
+| PickingTeam | ✅ | ❌ | — | Captain team selection menus |
+| Reset | ✅ | ❌ | — | Plugin state reset & cleanup |
+| Surrender | ✅ | ❌ | — | Team surrender voting |
+| Timeout | ✅ | ✅ | — | Pause/resume logic & timer |
+| VoteKick | ❌ | ❌ | — | Reserved folder (logic lives in Match/VoteKick.cs) |
+| Warmup | ✅ | ✅ | — | Initial ready check & player join handling |
 
 When modifying functionality, **always check if related code exists in other partial files** before adding new methods.
 
@@ -110,7 +111,10 @@ public HookResult HandleRoundEnd(EventRoundEnd @event) { ... }
 Game event handlers **must return `HookResult.Continue`** to allow event propagation. Register listeners in `RegisterXListeners()` methods per state.
 
 ### Configuration & Localization
-- **Config**: JSON-based with JSONC support (`config.jsonc`), bound via `IOptions<Config>`
+- **Config**: Three separate JSONC files, each bound via `IOptions<T>`:
+  - `config.jsonc` → `MainConfig` (section `MixScrims`) — match settings, timers, commands
+  - `maps.jsonc` → `MapsConfig` (section `MapsConfig`) — map pool definitions
+  - `discord_config.jsonc` → `DiscordConfig` (section `DiscordConfig`) — Discord webhook settings
 - **Translations**: Localized strings in `resources/translations/{lang}.jsonc`, accessed via `Core.Localizer["key"]`
 - Config reloads on change but **requires plugin reload** for structural changes (maps, commands)
 
@@ -127,9 +131,9 @@ CFG files **must exist on CS2 server** at `csgo/cfg/mixscrims/`. Environment-spe
 ### Common Development Tasks
 
 **Adding a New Command:**
-1. Add handler method to `src/Commands/Admin.cs` or `Player.cs`
+1. Add handler method to `src/Commands/Admin/` or `src/Commands/Player/` (one file per command)
 2. Register in `commandHandlers` dict in `Main.cs` `RegisterCommands()`
-3. Add config entry to `Config.Commands` with aliases & permissions
+3. Add config entry to `MainConfig.Commands` with aliases & permissions
 4. Add localization key to `resources/translations/en.jsonc`
 
 **Adding State-Specific Behavior:**
@@ -221,8 +225,10 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 
 **Display & UI:**
 - `GlobalServerPrefix` - Customizable message prefix (default: `[ [darkred]MixScrims [default]]`)
+- `ShowReadyStatusInChat` - Print ready status to chat (default true)
 - `ShowReadyStatusInScoreboard` - Scoreboard ready/not ready prefix
 - `ShowReadyStatusInCenterHtml` - Center HTML overlay (1s updates)
+- `HideReadyStatusInCenterWhenReady` - Hide center HTML once all required players are ready
 
 **Match Flow Control:**
 - `SkipMapVoting` - Use current map, skip voting phase
@@ -234,22 +240,33 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - `MinimumReadyPlayers` - Minimum to start (default 10)
 - `RequireAllConnectedPlayersToBeReady` - ALL players must ready (not just minimum)
 - `MoveOverflowPlayersToSpec` - Auto-move beyond 10 players to spectator
+- `MovePlayersToSpecDuringTeamPicking` - Move unpicked players to spectator during team picking
 - `PunishPlayerLeaves` - Punish disconnecting players (see below)
 - `PreventNotPickedPlayersFromJoiningOngoingMatch` - Block non-picked players from joining
+- `KickPlayersNotInMatch` - Kick players not in the active match roster
 
 **Gameplay:**
 - `FaceitLikeDamageControl` - Reflect friendly fire damage to shooter
 - `Timeouts` - Number of timeouts per team (default 3)
 - `TimeoutDurationSeconds` - Timeout length (default 60s)
 
-**Map Settings:**
+**Map Settings** (`config.jsonc`):
 - `DisallowVotePreviousMaps` - Exclude N recent maps from voting
 - `DefaultVoteTimeSeconds` - Map voting duration (default 30s)
+
+**Map Pool** (`maps.jsonc` → `MapsConfig.Maps`):
+- Configured separately in `maps.jsonc` as a list of `MapDetails` objects
+- Each entry: `MapName`, `DisplayName`, `WorkshopId`, `CanBeVoted`, `IsWorkshopMap`
+
+**Vote Kick** (`config.jsonc` → `VoteKick`):
+- `VoteKick.Enabled` - Enable/disable vote kick feature (default true)
+- `VoteKick.VoteKickTime` - Voting window in seconds (default 30)
 
 **Announcement Timers:**
 - `ChatAnnouncementTimers.PlayersReadyStatus` - Ready status chat interval (default 30s)
 - `ChatAnnouncementTimers.CaptainsAnnouncements` - Captain announcement interval (default 30s)
 - `ChatAnnouncementTimers.CommandReminders` - Command help interval (default 320s)
+- `CommandRemindersLocalization` - List of localization keys shown in command reminder messages (default: `["timeout", "ready", "invite"]`)
 
 **Environment:**
 - `TestMode` - Loads `staging_overrides.cfg` (bots, lower reqs), sets PluginState to Staging
@@ -269,22 +286,24 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 ## Key Files Reference
 
 **Core Components:**
-- [MixScrims/src/Main.cs](MixScrims/src/Main.cs) - Plugin entry point (v1.3.0), DI, lifecycle, command registration
+- [MixScrims/src/Main.cs](MixScrims/src/Main.cs) - Plugin entry point (v1.6.1), DI, lifecycle, command registration
 - [MixScrims/src/StateAgnostic/Main.cs](MixScrims/src/StateAgnostic/Main.cs) - Ready system, team logic, player punishment, timers
 - [MixScrims/src/StateAgnostic/Announcements.cs](MixScrims/src/StateAgnostic/Announcements.cs) - Ready announcements, scoreboard/center HTML display
 - [MixScrims/src/StateAgnostic/Events.cs](MixScrims/src/StateAgnostic/Events.cs) - Cross-state event handlers
-- [MixScrims/src/Shared/Config.cs](MixScrims/src/Shared/Config.cs) - Configuration model (GlobalServerPrefix, punishment settings, display options)
+- [MixScrims/src/Shared/MainConfig.cs](MixScrims/src/Shared/MainConfig.cs) - Main config model (match settings, commands, punishment, timers)
+- [MixScrims/src/Shared/MapsConfig.cs](MixScrims/src/Shared/MapsConfig.cs) - Maps config model (map pool, loaded from `maps.jsonc`)
+- [MixScrims/src/Shared/DiscordConfig.cs](MixScrims/src/Shared/DiscordConfig.cs) - Discord webhook config model (loaded from `discord_config.jsonc`)
 - [MixScrims/src/Shared/MixScrimsService.cs](MixScrims/src/Shared/MixScrimsService.cs) - API service implementation
 - [MixScrims/src/Shared/Helpers.cs](MixScrims/src/Shared/Helpers.cs) - Utility functions
 
 **Contract API:**
-- [MixScrims.Contract/IMixScrims.cs](MixScrims.Contract/IMixScrims.cs) - Public API interface (67 methods)
-- [MixScrims.Contract/MatchState.cs](MixScrims.Contract/MatchState.cs) - Match state enum
+- [MixScrims.Contract/IMixScrims.cs](MixScrims.Contract/IMixScrims.cs) - Public API interface (39 methods)
+- [MixScrims.Contract/MatchState.cs](MixScrims.Contract/MatchState.cs) - Match state enum (`Ended`, `KnifeRound`, `MapChosen`, `MapLoading`, `MapVoting`, `Match`, `PickingStartingSide`, `PickingTeam`, `Timeout`, `Reset`, `Warmup`)
 - [MixScrims.Contract/PluginState.cs](MixScrims.Contract/PluginState.cs) - Plugin state enum (Staging/Production)
 
 **Commands:**
-- [MixScrims/src/Commands/Admin.cs](MixScrims/src/Commands/Admin.cs) - Admin command handlers
-- [MixScrims/src/Commands/Player.cs](MixScrims/src/Commands/Player.cs) - Player command handlers
+- [MixScrims/src/Commands/Admin/](MixScrims/src/Commands/Admin/) - Admin command handlers (one file per command: Captain, ForceReady, ForceUnready, Map, MaplistAll, Maps, MixReset, MixStart)
+- [MixScrims/src/Commands/Player/](MixScrims/src/Commands/Player/) - Player command handlers (one file per command: Invite, Ready, Revote, Stay, Surrender, Switch, Timeout, Unready, VolunteerCaptain, VoteKick)
 
 **Localization:**
 - [MixScrims/resources/translations/en.jsonc](MixScrims/resources/translations/en.jsonc) - English localization keys
@@ -312,6 +331,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - `!stay` / `!st` - Stay on current side (knife winner)
 - `!switch` / `!swap` - Switch sides (knife winner)
 - `!volunteer_captain <t/ct>` - Volunteer as captain (if `AllowVolunteerCaptains` enabled)
+- `!votekick <name>` / `!vk` - Vote to kick a player (if `VoteKick.Enabled`, during match)
 
 ## Integration Points
 
@@ -329,21 +349,21 @@ mixScrims.AddPlayerToPickedCtPlayers(steamId);
 mixScrims.KickNotPlayingPlayers("Not participating");
 ```
 
-**Extended API Methods** (v1.3.0):
+**API Methods** (v1.6.1, 39 total):
 - **State Management**: `GetCurrentMatchState()`, `SetMatchState()`, `GetCurrentPluginState()`, `SetPluginState()`
 - **Team Names**: `SetCounterTerroristsTeamName()`, `SetTerroristsTeamName()`
 - **Phase Control**: `StartWarmup()`, `StartMapVoting()`, `StartTeamPicking()`, `StartKnifeRound()`, `StartMatch()`, `CancelMatch()`
 - **Timeout/Surrender**: `StartTimeoutCt()`, `StartTimeoutT()`, `StopTimeout()`, `SurrenderCt()`, `SurrenderT()`
-- **Map Control**: `ChangeMap(mapName, workshopId)`
+- **Map Control**: `ChangeMap(string mapName = "", string workshopId = "")`
 - **Ready System**: `ForceAllPlayersToReady()`, `ForceAllPlayersToUnready()`
-- **Picked Players**: `GetPickedCtPlayers()`, `GetPickedTPlayers()`, `AddPlayerToPickedCtPlayers()`, `AddPlayerToPickedTPlayers()`, `RemovePlayerFromPickedCtPlayers()`, `RemovePlayerFromPickedTPlayers()`
-- **Playing Players**: `GetPlayingCtPlayers()`, `GetPlayingTPlayers()`, `AddPlayerToPlayingCtPlayers()`, `AddPlayerToPlayingTPlayers()`, `RemovePlayerFromPlayingCtPlayers()`, `RemovePlayerFromPlayingTPlayers()`
-- **Punishment System**: `GetPlayersWaitingForPunishment()`, `AddPlayerToWaitingForPunishmentList()`, `RemovePlayerFromWaitingForPunishmentList()`
+- **Picked Players**: `GetPickedCtPlayers()`, `GetPickedTPlayers()`, `AddPlayerToPickedCtPlayers(steamId)`, `AddPlayerToPickedTPlayers(steamId)`, `RemovePlayerFromPickedCtPlayers(steamId)`, `RemovePlayerFromPickedTPlayers(steamId)`
+- **Playing Players**: `GetPlayingCtPlayers()`, `GetPlayingTPlayers()`, `AddPlayerToPlayingCtPlayers(steamId)`, `AddPlayerToPlayingTPlayers(steamId)`, `RemovePlayerFromPlayingCtPlayers(steamId)`, `RemovePlayerFromPlayingTPlayers(steamId)`
+- **Punishment System**: `GetPlayersWaitingForPunishment(ulong steamId)`, `AddPlayerToWaitingForPunishmentList(steamId)`, `RemovePlayerFromWaitingForPunishmentList(steamId)`
 - **Captain Management**: `SetCtCaptain(steamId)`, `SetTCaptain(steamId)`
 - **Player Control**: `KickNotPlayingPlayers(reason)`, `KickNotPickedPlayers(reason)`, `PreventNewPlayersJoining(bool)`
 
 ### Discord Webhooks
-Optional Discord notifications via `DiscordWebHook.cs` - sends formatted messages on player invite commands. Configured in `Config.DiscordInviteWebhooks`.
+Optional Discord notifications via `DiscordService.cs` — sends rich embed messages to configured webhooks when players use `!invite`. Configured in `discord_config.jsonc` (`DiscordConfig` section): `EnableDiscordInvites`, `DiscordInviteDelayMinutes`, and a list of `Invites` (each with `WebhookUrl`, `Username`, `AvatarUrl`, `Content`, and an `Embed` with title/description/color/fields).
 
 ## Testing & Debugging
 

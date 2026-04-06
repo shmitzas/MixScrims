@@ -87,7 +87,7 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation("Player {Player} voted for map {Map}", playerName, mapDisplayName);
 
-        var votedMap = cfg.Maps.FirstOrDefault(m => string.Equals(m.DisplayName, mapDisplayName, StringComparison.OrdinalIgnoreCase));
+        var votedMap = mapsConfig.Maps.FirstOrDefault(m => string.Equals(m.DisplayName, mapDisplayName, StringComparison.OrdinalIgnoreCase));
         if (votedMap == null)
         {
             logger.LogError("RegisterMapVote: Map not found in configuration: {Map}", mapDisplayName);

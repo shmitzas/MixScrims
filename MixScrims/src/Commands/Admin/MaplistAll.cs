@@ -11,7 +11,7 @@ public partial class MixScrims
     public void OnListAllMaps(ICommandContext context)
     {
         var admin = context.Sender;
-        var maps = cfg.Maps.ToList();
+        var maps = mapsConfig.Maps.ToList();
         if (admin == null)
         {
             logger.LogInformation("All maps list:");

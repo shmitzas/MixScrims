@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.6",
+    Version = "1.6.1",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -23,6 +23,7 @@ public partial class MixScrims : BasePlugin
     internal ILogger<MixScrims> logger = null!;
     internal MainConfig cfg = new();
     internal DiscordConfig discordConfig = new();
+    internal MapsConfig mapsConfig = new();
     internal MixScrimsService mixScrimsService = null!;
     internal MatchState MatchState { get; set; } = MatchState.Warmup;
     internal PluginState PluginState { get; set; } = PluginState.Production;
@@ -43,6 +44,7 @@ public partial class MixScrims : BasePlugin
 
         LoadMainConfig();
         LoadDiscordConfig();
+        LoadMapsConfig();
         RegisterListeners();
         ResetVariables();
         RegisterCommands();
@@ -186,6 +188,41 @@ public partial class MixScrims : BasePlugin
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to load MixScrims configuration/services.");
+        }
+    }
+
+    internal void LoadMapsConfig()
+    {
+        try
+        {
+            const string fileName = "maps.jsonc";
+            const string section = "MapsConfig";
+
+            Core.Configuration
+                .InitializeJsonWithModel<MapsConfig>(fileName, section)
+                .Configure(builder =>
+                {
+                    builder.AddJsonFile(
+                        Core.Configuration.GetConfigPath(fileName),
+                        optional: false,
+                        reloadOnChange: true
+                    );
+                });
+
+            ServiceCollection services = new();
+            services
+                .AddSwiftly(Core, addConfiguration: true)
+                .AddOptionsWithValidateOnStart<MapsConfig>()
+                .BindConfiguration(section);
+
+            var provider = services.BuildServiceProvider();
+
+            var cfgOptions = provider.GetRequiredService<IOptions<MapsConfig>>();
+            mapsConfig = cfgOptions.Value;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to load MixScrims maps configuration.");
         }
     }
 

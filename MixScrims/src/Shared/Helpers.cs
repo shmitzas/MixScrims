@@ -164,7 +164,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal List<MapDetails> GetMapsToVote()
     {
-        return cfg.Maps
+        return mapsConfig.Maps
             .Where(m => m.CanBeVoted && !playedMaps.Any(pm => pm.MapName == m.MapName)).ToList();
     }
 
@@ -227,7 +227,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal MapDetails? GetMapByName(string mapName)
     {
-        return cfg.Maps.FirstOrDefault(m =>
+        return mapsConfig.Maps.FirstOrDefault(m =>
             string.Equals(m.MapName, mapName, StringComparison.OrdinalIgnoreCase)
             || string.Equals(m.DisplayName, mapName, StringComparison.OrdinalIgnoreCase));
     }
@@ -237,7 +237,7 @@ public sealed partial class MixScrims
     /// </summary>
 	internal MapDetails? GetMapByWorkshopId(string workshopId)
 	{
-		return cfg.Maps.FirstOrDefault(m =>
+		return mapsConfig.Maps.FirstOrDefault(m =>
 			string.Equals(m.WorkshopId, workshopId, StringComparison.OrdinalIgnoreCase));
 	}
 

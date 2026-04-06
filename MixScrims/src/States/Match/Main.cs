@@ -37,7 +37,7 @@ public partial class MixScrims
             return;
         }
 
-        var mapDetails = cfg.Maps.FirstOrDefault(m => m.MapName.Equals(mapName, StringComparison.OrdinalIgnoreCase));
+        var mapDetails = mapsConfig.Maps.FirstOrDefault(m => m.MapName.Equals(mapName, StringComparison.OrdinalIgnoreCase));
         if (mapDetails == null)
         {
             logger.LogWarning($"StartMatch: Map {mapName} not found in configuration.");
@@ -106,8 +106,18 @@ public partial class MixScrims
         if (player.PlayerPawn.Team == Team.CT)
         {
             var ocupiedColors = new HashSet<int>(GetPlayersInTeam(Team.CT)
-                .Where(p => p.PlayerID != player.PlayerID && playerColors.ContainsKey(p.PlayerID))
-                .Select(p => playerColors[p.PlayerID]));
+                .Where(p => p.PlayerID != player.PlayerID)
+                .Select(p => {
+                    // First check the actual in-game color to catch all assigned colors
+                    if (p.Controller?.CompTeammateColor != null)
+                        return p.Controller.CompTeammateColor;
+                    // Fallback to tracking dictionary if controller color is not set
+                    if (playerColors.ContainsKey(p.PlayerID))
+                        return playerColors[p.PlayerID];
+                    return -1; // No color assigned
+                })
+                .Where(color => color >= 0 && color < 5)); // Filter out invalid colors
+            
             if (ocupiedColors.Count >= 5)
                 return null;
 
@@ -121,8 +131,18 @@ public partial class MixScrims
         if (player.PlayerPawn.Team == Team.T)
         {
             var ocupiedColors = new HashSet<int>(GetPlayersInTeam(Team.T)
-                .Where(p => p.PlayerID != player.PlayerID && playerColors.ContainsKey(p.PlayerID))
-                .Select(p => playerColors[p.PlayerID]));
+                .Where(p => p.PlayerID != player.PlayerID)
+                .Select(p => {
+                    // First check the actual in-game color to catch all assigned colors
+                    if (p.Controller?.CompTeammateColor != null)
+                        return p.Controller.CompTeammateColor;
+                    // Fallback to tracking dictionary if controller color is not set
+                    if (playerColors.ContainsKey(p.PlayerID))
+                        return playerColors[p.PlayerID];
+                    return -1; // No color assigned
+                })
+                .Where(color => color >= 0 && color < 5)); // Filter out invalid colors
+            
             if (ocupiedColors.Count >= 5)
                 return null;
 
@@ -142,17 +162,21 @@ public partial class MixScrims
     private void FixColorDuplicatesForTeam(Team team)
     {
         var teamPlayers = GetPlayersInTeam(team)
-            .Where(p => playerColors.ContainsKey(p.PlayerID))
+            .Select(p => new {
+                Player = p,
+                Color = GetPlayerActualColor(p)
+            })
+            .Where(x => x.Color >= 0 && x.Color < 5) // Only players with valid colors
             .ToList();
 
         var colorGroups = teamPlayers
-            .GroupBy(p => playerColors[p.PlayerID])
+            .GroupBy(x => x.Color)
             .Where(g => g.Count() > 1)
             .ToList();
 
         foreach (var duplicateGroup in colorGroups)
         {
-            var playersWithDuplicateColor = duplicateGroup.Skip(1).ToList();
+            var playersWithDuplicateColor = duplicateGroup.Skip(1).Select(x => x.Player).ToList();
 
             foreach (var player in playersWithDuplicateColor)
             {
@@ -172,5 +196,21 @@ public partial class MixScrims
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Gets the actual color assigned to a player, checking both the controller and tracking dictionary.
+    /// </summary>
+    private int GetPlayerActualColor(IPlayer player)
+    {
+        // First check the actual in-game color
+        if (player.Controller?.CompTeammateColor != null)
+            return player.Controller.CompTeammateColor;
+        
+        // Fallback to tracking dictionary
+        if (playerColors.ContainsKey(player.PlayerID))
+            return playerColors[player.PlayerID];
+        
+        return -1; // No color assigned
     }
 }

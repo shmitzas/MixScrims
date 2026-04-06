@@ -242,7 +242,7 @@ public sealed partial class MixScrims
         var maps = GetMapsToVote();
         if (maps.Count == 0)
         {
-            maps = cfg.Maps.Where(m => m.CanBeVoted).ToList();
+            maps = mapsConfig.Maps.Where(m => m.CanBeVoted).ToList();
         }
         if (maps.Count == 0)
         {
