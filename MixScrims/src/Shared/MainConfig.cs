@@ -41,6 +41,9 @@ public class MainConfig
     // Vote kick settings
     public VoteKickConfig VoteKick { get; set; } = new();
 
+    // Auto reset when players leave during match
+    public AutoResetOnLeaveConfig AutoResetOnLeave { get; set; } = new();
+
     // Player leave punishment settings
     public bool PunishPlayerLeaves { get; set; } = false;
     public LeavePunishment PlayerLeavePunishment { get; set; } = new();
@@ -114,5 +117,12 @@ public class VoteKickConfig
 {
     public bool Enabled { get; set; } = true;
     public int VoteKickTime { get; set; } = 30;
+}
+
+public class AutoResetOnLeaveConfig
+{
+    public bool Enabled { get; set; } = false;
+    public int MinimumPlayersRequired { get; set; } = 0;
+    public int GracePeriodSeconds { get; set; } = 10;
 }
 

@@ -128,5 +128,8 @@
   "command.votekick.passed.t": "[orange]{0} [default]was [red]kicked [default]by their team!",
   "command.votekick.failed": "Vote to kick [lime]{0} [red]failed[default].",
   "info.kick_reason.votekicked": "Voted out by your team",
-  "info.center.votekick.progress": "<span>Waiting for votes</span><br><span class=\"fontSize-sm\">[<span color=\"lime\">{0}</span>/<span color=\"lime\">{1}</span>] players voted</span>"
+  "info.center.votekick.progress": "<span>Waiting for votes</span><br><span class=\"fontSize-sm\">[<span color=\"lime\">{0}</span>/<span color=\"lime\">{1}</span>] players voted</span>",
+  "announcement.auto_reset.warning": "[red]Warning: [default]Only [gold]{0}[default]/[lime]{1} [default]players remain! Match will reset in [gold]{2}s [default]if players don't rejoin.",
+  "announcement.auto_reset.cancelled": "[lime]Auto-reset cancelled [default]- enough players are back!",
+  "announcement.auto_reset.triggered": "[red]Match reset! [default]Too few players remained for too long."
 }

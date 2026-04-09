@@ -63,6 +63,8 @@ public partial class MixScrims
         playerColors.Clear();
         recentlyDisconnectedPlayers.Clear();
         freshlyJoinedPlayers.Clear();
+        resetMixOnFirstJoin = false;
+        CancelAutoResetOnLeaveTimer(announce: false);
         StopAllAnnouncmentTimers();
     }
 }

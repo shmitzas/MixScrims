@@ -365,8 +365,8 @@ public partial class MixScrims
         {
             Core.Scheduler.NextWorldUpdate(() => 
             {
-                SetTeamName(Team.CT, captainCt?.Controller.PlayerName);
-                SetTeamName(Team.T, captainT?.Controller.PlayerName);
+                SetTeamName(Team.CT, IsPlayerValid(captainCt) ? captainCt!.Controller.PlayerName : null);
+                SetTeamName(Team.T, IsPlayerValid(captainT) ? captainT!.Controller.PlayerName : null);
 
                 isMovingPlayersToTeams = true;
 

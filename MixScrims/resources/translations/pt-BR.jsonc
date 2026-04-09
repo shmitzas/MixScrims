@@ -128,5 +128,8 @@
   "command.votekick.passed.t": "[orange]{0} [default]foi [red]expulso [default]pelo seu time!",
   "command.votekick.failed": "Votação para expulsar [lime]{0} [red]falhou[default].",
   "info.kick_reason.votekicked": "Expulso por votação do time",
-  "info.center.votekick.progress": "<span>Aguardando votos</span><br><span class=\"fontSize-sm\">[<span color=\"lime\">{0}</span>/<span color=\"lime\">{1}</span>] jogadores votaram</span>"
+  "info.center.votekick.progress": "<span>Aguardando votos</span><br><span class=\"fontSize-sm\">[<span color=\"lime\">{0}</span>/<span color=\"lime\">{1}</span>] jogadores votaram</span>",
+  "announcement.auto_reset.warning": "[red]Aviso: [default]Apenas [gold]{0}[default]/[lime]{1} [default]jogadores restam! A partida será reiniciada em [gold]{2}s [default]se os jogadores não voltarem.",
+  "announcement.auto_reset.cancelled": "[lime]Reinício automático cancelado [default]- jogadores suficientes voltaram!",
+  "announcement.auto_reset.triggered": "[red]Partida reiniciada! [default]Poucos jogadores permaneceram por muito tempo."
 }

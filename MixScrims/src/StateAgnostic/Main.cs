@@ -12,6 +12,7 @@ public sealed partial class MixScrims
     internal CancellationTokenSource? playerStatusTimerCenterHtml;
     internal CancellationTokenSource? commandRemindersTimer;
     internal CancellationTokenSource? captainsAnnouncementsTimer;
+    internal CancellationTokenSource? autoResetOnLeaveTimer;
 
     internal readonly List<IPlayer> readyPlayers = [];
     internal readonly List<int> freshlyJoinedPlayers = new();
@@ -22,6 +23,7 @@ public sealed partial class MixScrims
     internal bool preventNotPickedPlayersFromJoiningOngoingMatch = false;
     internal DateTime lastDiscordInviteSentAt = DateTime.MinValue;
     internal List<ulong> playersWaitingForPunishment = [];
+    internal bool resetMixOnFirstJoin = false;
 
     internal void StartAnnouncementTimers()
     {
@@ -503,6 +505,95 @@ public sealed partial class MixScrims
         }
 
         player.Kick(reason, ENetworkDisconnectionReason.NETWORK_DISCONNECT_DISCONNECT_BY_SERVER);
+    }
+
+    /// <summary>
+    /// Checks whether the active player count has dropped below the configured threshold during a match,
+    /// and starts or cancels the auto-reset grace period timer accordingly.
+    /// </summary>
+    internal void CheckAutoResetOnLeave()
+    {
+        if (!cfg.AutoResetOnLeave.Enabled)
+            return;
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
+        if (matchState == MatchState.Warmup || matchState == MatchState.MapLoading)
+            return;
+
+        var currentPlayerCount = GetPlayingPlayers().Count(p => !IsBot(p));
+        var requiredPlayers = cfg.AutoResetOnLeave.MinimumPlayersRequired;
+
+        if (currentPlayerCount < requiredPlayers)
+        {
+            // If no human players remain, defer reset to when the next player joins.
+            // The server hibernates with 0 players so timers won't fire.
+            if (currentPlayerCount == 0)
+            {
+                logger.LogInformation("CheckAutoResetOnLeave: No human players remaining, deferring reset to next player join.");
+                autoResetOnLeaveTimer?.Cancel();
+                autoResetOnLeaveTimer = null;
+                resetMixOnFirstJoin = true;
+                return;
+            }
+
+            if (autoResetOnLeaveTimer != null)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("CheckAutoResetOnLeave: Timer already running, player count {Current}/{Required}", currentPlayerCount, requiredPlayers);
+                return;
+            }
+
+            logger.LogInformation("CheckAutoResetOnLeave: Player count {Current} below threshold {Required}, starting grace period of {Seconds}s", currentPlayerCount, requiredPlayers, cfg.AutoResetOnLeave.GracePeriodSeconds);
+
+            PrintMessageToAllPlayers(Core.Localizer["announcement.auto_reset.warning", currentPlayerCount, requiredPlayers, cfg.AutoResetOnLeave.GracePeriodSeconds]);
+
+            autoResetOnLeaveTimer = Core.Scheduler.DelayBySeconds(cfg.AutoResetOnLeave.GracePeriodSeconds, () =>
+            {
+                var currentState = mixScrimsService.GetCurrentMatchState();
+                if (currentState == MatchState.Warmup || currentState == MatchState.MapLoading)
+                {
+                    autoResetOnLeaveTimer = null;
+                    return;
+                }
+
+                var playersNow = GetPlayingPlayers().Count(p => !IsBot(p));
+                if (playersNow < requiredPlayers)
+                {
+                    logger.LogInformation("CheckAutoResetOnLeave: Grace period expired, player count {Current} still below {Required}. Resetting match.", playersNow, requiredPlayers);
+                    PrintMessageToAllPlayers(Core.Localizer["announcement.auto_reset.triggered"]);
+                    autoResetOnLeaveTimer = null;
+                    ResetPluginState();
+                }
+                else
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("CheckAutoResetOnLeave: Grace period expired but player count {Current} is now sufficient.", playersNow);
+                    autoResetOnLeaveTimer = null;
+                }
+            });
+            Core.Scheduler.StopOnMapChange(autoResetOnLeaveTimer);
+        }
+        else
+        {
+            CancelAutoResetOnLeaveTimer();
+        }
+    }
+
+    /// <summary>
+    /// Cancels the auto-reset grace period timer if it is currently running, and notifies players.
+    /// </summary>
+    internal void CancelAutoResetOnLeaveTimer(bool announce = true)
+    {
+        if (autoResetOnLeaveTimer != null)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CancelAutoResetOnLeaveTimer: Cancelling auto-reset timer, player count restored.");
+            autoResetOnLeaveTimer.Cancel();
+            autoResetOnLeaveTimer = null;
+
+            if (announce)
+                PrintMessageToAllPlayers(Core.Localizer["announcement.auto_reset.cancelled"]);
+        }
     }
 
     /// <summary>
