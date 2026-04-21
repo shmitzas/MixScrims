@@ -13,7 +13,7 @@ public partial class MixScrims
 
         if (connectedPlayers < cfg.MinimumReadyPlayers)
         {
-            logger.LogWarning($"OnForceUnready: Not enough players connected ({connectedPlayers}/{cfg.MinimumReadyPlayers})");
+            logger.LogWarning("OnForceUnready: Not enough players connected ({Connected}/{Minimum})", connectedPlayers, cfg.MinimumReadyPlayers);
             if (admin != null)
             {
                 PrintMessageToPlayer(admin, Core.Localizer["error.not_enough_players", connectedPlayers, cfg.MinimumReadyPlayers]);
@@ -32,7 +32,7 @@ public partial class MixScrims
         }
         else
         {
-            logger.LogInformation($"Players were forced into unready state by force by {admin.Controller.PlayerName}");
+            logger.LogInformation("Players were forced into unready state by {AdminName}", admin.Controller.PlayerName);
             PrintMessageToAllPlayers(Core.Localizer["command.force.unready", admin.Controller.PlayerName]);
         }
 

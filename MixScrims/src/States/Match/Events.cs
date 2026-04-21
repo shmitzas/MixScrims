@@ -22,6 +22,12 @@ public partial class MixScrims
                 if (cfg.DetailedLogging)
                     logger.LogInformation("Match ended, transitioning to Fresh match state.");
                 ResetPluginState();
+                MapDetails map = new();
+                {
+                    map.MapName = Core.Engine.GlobalVars.MapName;
+                    map.DisplayName = Core.Engine.GlobalVars.MapName;
+                };
+                LoadMap(map);
             });
         }
         return HookResult.Continue;
@@ -65,7 +71,7 @@ public partial class MixScrims
                 playingTPlayers = oldPlayingCtPlayers;
 
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"Halftime team lists updated - CT: {playingCtPlayers.Count}, T: {playingTPlayers.Count}");
+                    logger.LogInformation("Halftime team lists updated - CT: {CT}, T: {T}", playingCtPlayers.Count, playingTPlayers.Count);
 
                 Core.Scheduler.DelayBySeconds(1f, () =>
                 {

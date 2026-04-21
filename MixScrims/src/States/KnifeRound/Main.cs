@@ -51,7 +51,7 @@ public partial class MixScrims
             if (!playingCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID))
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"StartKnifeRound: Adding manually-set CT Captain {captainCt.Controller.PlayerName} to playingCtPlayers.");
+                    logger.LogInformation("StartKnifeRound: Adding manually-set CT Captain {PlayerName} to playingCtPlayers.", captainCt.Controller.PlayerName);
                 playingCtPlayers.Add(captainCt);
             }
         }
@@ -61,7 +61,7 @@ public partial class MixScrims
             if (!playingTPlayers.Any(p => p.PlayerID == captainT.PlayerID))
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"StartKnifeRound: Adding manually-set T Captain {captainT.Controller.PlayerName} to playingTPlayers.");
+                    logger.LogInformation("StartKnifeRound: Adding manually-set T Captain {PlayerName} to playingTPlayers.", captainT.Controller.PlayerName);
                 playingTPlayers.Add(captainT);
             }
         }
@@ -70,14 +70,14 @@ public partial class MixScrims
         {
             captainCt = playingCtPlayers[0];
             if (cfg.DetailedLogging)
-                logger.LogInformation($"StartKnifeRound: CT Captain not set, assigning {captainCt.Controller.PlayerName} as CT Captain.");
+                logger.LogInformation("StartKnifeRound: CT Captain not set, assigning {PlayerName} as CT Captain.", captainCt.Controller.PlayerName);
         }
 
         if (captainT == null && playingTPlayers.Count > 0)
         {
             captainT = playingTPlayers[0];
             if (cfg.DetailedLogging)
-                logger.LogInformation($"StartKnifeRound: T Captain not set, assigning {captainT.Controller.PlayerName} as T Captain.");
+                logger.LogInformation("StartKnifeRound: T Captain not set, assigning {PlayerName} as T Captain.", captainT.Controller.PlayerName);
         }
 
         readyPlayers.Clear();
@@ -95,7 +95,7 @@ public partial class MixScrims
             {
                 Core.MenusAPI.CloseMenuForPlayer(captainCt, ctMenu);
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"StartKnifeRound: Closed open menu for CT captain {captainCt.Controller.PlayerName}");
+                    logger.LogInformation("StartKnifeRound: Closed open menu for CT captain {PlayerName}", captainCt.Controller.PlayerName);
             }
         }
 
@@ -106,7 +106,7 @@ public partial class MixScrims
             {
                 Core.MenusAPI.CloseMenuForPlayer(captainT, tMenu);
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"StartKnifeRound: Closed open menu for T captain {captainT.Controller.PlayerName}");
+                    logger.LogInformation("StartKnifeRound: Closed open menu for T captain {PlayerName}", captainT.Controller.PlayerName);
             }
         }
 
@@ -309,7 +309,7 @@ public partial class MixScrims
         var stayVotes = sideVotes.Values.Count(v => string.Equals(v, "Stay", StringComparison.OrdinalIgnoreCase));
 
         if (cfg.DetailedLogging)
-            logger.LogInformation($"ProcessTeamSideVotes: Switch={switchVotes}, Stay={stayVotes}");
+            logger.LogInformation("ProcessTeamSideVotes: Switch={SwitchVotes}, Stay={StayVotes}", switchVotes, stayVotes);
 
         PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.vote_results", switchVotes, stayVotes]);
 
@@ -375,20 +375,17 @@ public partial class MixScrims
                     if (player != null && player.IsValid)
                     {
                         if (cfg.DetailedLogging)
-                            logger.LogInformation($"SwitchStartingSides: Moving {player.Controller.PlayerName} to T");
+                                logger.LogInformation("SwitchStartingSides: Moving {PlayerName} to T", player.Controller.PlayerName);
                         if (IsBot(player))
-                        {
                             player.SwitchTeamAsync(Team.T);
-                        }
-
-                        try
+                        else
                         {
-                            player.ChangeTeamAsync(Team.T);
-                        }
-                        catch (Exception ex)
-                        {
-                            if (cfg.DetailedLogging)
-                                logger.LogWarning(ex, $"SwitchStartingSides: Error changing team for player.");
+                            try { player.ChangeTeamAsync(Team.T); }
+                            catch (Exception ex)
+                            {
+                                if (cfg.DetailedLogging)
+                                    logger.LogWarning(ex, "SwitchStartingSides: Error changing T player team.");
+                            }
                         }
                     }
                     else
@@ -403,20 +400,17 @@ public partial class MixScrims
                     if (player != null && player.IsValid)
                     {
                         if (cfg.DetailedLogging)
-                            logger.LogInformation($"SwitchStartingSides: Moving {player.Controller.PlayerName} to CT");
+                                logger.LogInformation("SwitchStartingSides: Moving {PlayerName} to CT", player.Controller.PlayerName);
                         if (IsBot(player))
-                        {
                             player.SwitchTeamAsync(Team.CT);
-                        }
-
-                        try
+                        else
                         {
-                            player.ChangeTeamAsync(Team.CT);
-                        }
-                        catch (Exception ex)
-                        {
-                            if (cfg.DetailedLogging)
-                                logger.LogWarning(ex, $"SwitchStartingSides: Error changing team for player.");
+                            try { player.ChangeTeamAsync(Team.CT); }
+                            catch (Exception ex)
+                            {
+                                if (cfg.DetailedLogging)
+                                    logger.LogWarning(ex, "SwitchStartingSides: Error changing CT player team.");
+                            }
                         }
                     }
                     else
@@ -469,12 +463,12 @@ public partial class MixScrims
             if (IsBot(player))
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"Player is a bot, skipping move to SPEC" );
+                    logger.LogInformation("Player is a bot, skipping move to SPEC");
                 continue;
             }
 
             if (cfg.DetailedLogging)
-                logger.LogInformation($"Moving {player.Controller.PlayerName} to SPEC");
+                logger.LogInformation("Moving {PlayerName} to SPEC", player.Controller.PlayerName);
             player.ChangeTeamAsync(Team.Spectator);
         }
 
@@ -485,7 +479,7 @@ public partial class MixScrims
                 continue;
 
             if (cfg.DetailedLogging)
-                logger.LogInformation($"Moving {player.Controller.PlayerName} to CT");
+                logger.LogInformation("Moving {PlayerName} to CT", player.Controller.PlayerName);
             if (IsBot(player))
             {
                 player.SwitchTeamAsync(Team.CT);
@@ -504,7 +498,7 @@ public partial class MixScrims
                 continue;
 
             if (cfg.DetailedLogging)
-                logger.LogInformation($"Moving {player.Controller.PlayerName} to T");
+                logger.LogInformation("Moving {PlayerName} to T", player.Controller.PlayerName);
             if (IsBot(player))
             {
                 player.SwitchTeamAsync(Team.T);

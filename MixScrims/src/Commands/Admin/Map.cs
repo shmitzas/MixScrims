@@ -35,7 +35,7 @@ public partial class MixScrims
         var map = GetMapByName(mapName);
         if (map == null)
         {
-            logger.LogError($"OnGoToMap: Map not found in configuration: {mapName}");
+            logger.LogError("OnGoToMap: Map not found in configuration: {MapName}", mapName);
             if (admin != null)
             {
                 PrintMessageToPlayer(admin, Core.Localizer["error.map_not_found", mapName]);
@@ -50,7 +50,7 @@ public partial class MixScrims
         }
         else
         {
-            logger.LogInformation($"Map changed by {admin.Controller.PlayerName}");
+            logger.LogInformation("Map changed by {AdminName}", admin.Controller.PlayerName);
             PrintMessageToAllPlayers(Core.Localizer["command.go_to_map", admin.Controller.PlayerName, map.DisplayName]);
         }
 

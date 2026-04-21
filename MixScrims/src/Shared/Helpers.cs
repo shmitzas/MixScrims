@@ -93,10 +93,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal bool IsPlayerValid(IPlayer? player)
     {
-        if (player != null && player.IsValid)
-            return true;
-
-        return false;
+        return player != null && player.IsValid;
     }
 
     /// <summary>
@@ -104,9 +101,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal bool IsBot(IPlayer? player)
     {
-        if (!IsPlayerValid(player))
-            return false;
-        return player!.PlayerPawn?.Bot?.IsValid ?? false;
+        return player != null && player.IsFakeClient;
     }
 
     /// <summary>
@@ -114,7 +109,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal List<IPlayer> GetPlayers()
     {
-        return Core.PlayerManager.GetAllPlayers().Where(IsPlayerValid).ToList()!;
+        return Core.PlayerManager.GetAllValidPlayers().ToList();
     }
 
     /// <summary>
@@ -122,8 +117,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal List<IPlayer> GetPlayingPlayers()
     {
-        return Core.PlayerManager
-            .GetAllPlayers()
+        return GetPlayers()
             .Where(p => IsPlayerValid(p)
                 && p.PlayerPawn != null
                 && (p.PlayerPawn.TeamNum == 2

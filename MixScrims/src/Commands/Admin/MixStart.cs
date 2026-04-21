@@ -15,7 +15,7 @@ public partial class MixScrims
 
         if (connectedPlayers < cfg.MinimumReadyPlayers)
         {
-            logger.LogWarning($"OnForceMatchStart: Not enough players connected ({connectedPlayers}/{cfg.MinimumReadyPlayers})");
+            logger.LogWarning("OnForceMatchStart: Not enough players connected ({Connected}/{Minimum})", connectedPlayers, cfg.MinimumReadyPlayers);
             if (admin != null)
             {
                 PrintMessageToPlayer(admin, Core.Localizer["error.not_enough_players", connectedPlayers, cfg.MinimumReadyPlayers]);
@@ -36,7 +36,7 @@ public partial class MixScrims
             }
             else
             {
-                logger.LogInformation($"Match started by force by {admin.Controller.PlayerName}");
+                logger.LogInformation("Match started by force by {AdminName}", admin.Controller.PlayerName);
                 PrintMessageToAllPlayers(Core.Localizer["command.force.match_start", admin.Controller.PlayerName]);
             }
         }

@@ -18,7 +18,7 @@ public partial class MixScrims
         }
         else
         {
-            logger.LogInformation($"Mix state has been reset by {admin.Controller.PlayerName}");
+            logger.LogInformation("Mix state has been reset by {AdminName}", admin.Controller.PlayerName);
             PrintMessageToAllPlayers(Core.Localizer["command.mix_reset", admin.Controller.PlayerName]);
         }
 

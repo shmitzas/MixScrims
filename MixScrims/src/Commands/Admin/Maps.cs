@@ -17,7 +17,7 @@ public partial class MixScrims
             logger.LogInformation("Voteable maps list:");
             foreach (var map in maps)
             {
-                logger.LogInformation($"Map: {map.DisplayName} ({map.MapName})");
+                logger.LogInformation("Map: {DisplayName} ({MapName})", map.DisplayName, map.MapName);
             }
         }
         else

@@ -26,16 +26,16 @@ public partial class MixScrims
         if (!cfg.DisableCaptains)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation($"StartTeamPickingPhase: Current captains - CT: {captainCt?.Name ?? "null"}, T: {captainT?.Name ?? "null"}");
+                logger.LogInformation("StartTeamPickingPhase: Current captains - CT: {CT}, T: {T}", captainCt?.Name ?? "null", captainT?.Name ?? "null");
 
             PickCaptains();
 
             if (captainCt == null || captainT == null)
             {
                 logger.LogError("StartTeamPickingPhase: One or both captains are null.");
-                logger.LogError($"captainCt: {(captainCt != null ? captainCt.Name ?? "(no name)" : "null")}");
-                logger.LogError($"captainT: {(captainT != null ? captainT.Name ?? "(no name)" : "null")}");
-                logger.LogError($"StartTeamPickingPhase: Valid players in the server: {GetPlayers().Count}");
+                logger.LogError("captainCt: {Name}", captainCt != null ? captainCt.Name ?? "(no name)" : "null");
+                logger.LogError("captainT: {Name}", captainT != null ? captainT.Name ?? "(no name)" : "null");
+                logger.LogError("StartTeamPickingPhase: Valid players in the server: {Count}", GetPlayers().Count);
                 logger.LogError("StartTeamPickingPhase: Aborting team picking phase.");
                 PrintMessageToAllPlayers(Core.Localizer["error.captain.selection_failed"]);
                 ResetPluginState();
@@ -44,9 +44,9 @@ public partial class MixScrims
 
             if (cfg.DetailedLogging)
             {
-                logger.LogInformation($"StartTeamPickingPhase: Before validation - pickedCtPlayers count: {pickedCtPlayers.Count}, pickedTPlayers count: {pickedTPlayers.Count}");
-                logger.LogInformation($"StartTeamPickingPhase: CT captain in picked list: {pickedCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID)}");
-                logger.LogInformation($"StartTeamPickingPhase: T captain in picked list: {pickedTPlayers.Any(p => p.PlayerID == captainT.PlayerID)}");
+                logger.LogInformation("StartTeamPickingPhase: Before validation - pickedCt: {CtCount}, pickedT: {TCount}", pickedCtPlayers.Count, pickedTPlayers.Count);
+                logger.LogInformation("StartTeamPickingPhase: CT captain in picked list: {InList}", pickedCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID));
+                logger.LogInformation("StartTeamPickingPhase: T captain in picked list: {InList}", pickedTPlayers.Any(p => p.PlayerID == captainT.PlayerID));
             }
 
             // Ensure captains are in picked lists (handles captains set during Warmup state)
@@ -55,7 +55,7 @@ public partial class MixScrims
                 if (!pickedCtPlayers.Any(p => p.PlayerID == captainCt.PlayerID))
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation($"StartTeamPickingPhase: Adding CT Captain {captainCt.Controller.PlayerName} to pickedCtPlayers.");
+                        logger.LogInformation("StartTeamPickingPhase: Adding CT Captain {PlayerName} to pickedCtPlayers.", captainCt.Controller.PlayerName);
                     pickedCtPlayers.Add(captainCt);
                 }
             }
@@ -65,14 +65,14 @@ public partial class MixScrims
                 if (!pickedTPlayers.Any(p => p.PlayerID == captainT.PlayerID))
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation($"StartTeamPickingPhase: Adding T Captain {captainT.Controller.PlayerName} to pickedTPlayers.");
+                        logger.LogInformation("StartTeamPickingPhase: Adding T Captain {PlayerName} to pickedTPlayers.", captainT.Controller.PlayerName);
                     pickedTPlayers.Add(captainT);
                 }
             }
 
             if (cfg.DetailedLogging)
             {
-                logger.LogInformation($"StartTeamPickingPhase: After validation - pickedCtPlayers count: {pickedCtPlayers.Count}, pickedTPlayers count: {pickedTPlayers.Count}");
+                logger.LogInformation("StartTeamPickingPhase: After validation - pickedCt: {CtCount}, pickedT: {TCount}", pickedCtPlayers.Count, pickedTPlayers.Count);
             }
         }
 
@@ -102,8 +102,7 @@ public partial class MixScrims
         SetTeamName(Team.CT, captainCt == null ? null : captainCt.Controller.PlayerName);
         SetTeamName(Team.T, captainT == null ? null :  captainT.Controller.PlayerName);
 
-        Random random = new Random();
-        int teamStarting = random.Next(2, 4);
+        int teamStarting = Random.Shared.Next(2, 4);
         if (teamStarting == 3)
         {
             PromptCaptainToPickPlayer(captainCt, Team.CT);
@@ -157,13 +156,13 @@ public partial class MixScrims
                         if (playingTPlayers.Count >= cfg.MinimumReadyPlayers / 2)
                         {
                             if (cfg.DetailedLogging)
-                                logger.LogInformation($"SkipTeamPickingPhase: Disregarding overflow player {player.Name}");
+                                logger.LogInformation("SkipTeamPickingPhase: Disregarding overflow T player {PlayerName}", player.Name);
                             continue;
                         }
                     }
 
                     if (cfg.DetailedLogging)
-                        logger.LogInformation($"SkipTeamPickingPhase: Adding {player.Name} to T picked players");
+                        logger.LogInformation("SkipTeamPickingPhase: Adding {PlayerName} to T picked players", player.Name);
                     playingTPlayers.Add(player);
                 }
 
@@ -174,13 +173,13 @@ public partial class MixScrims
                         if (playingCtPlayers.Count >= cfg.MinimumReadyPlayers / 2)
                         {
                             if (cfg.DetailedLogging)
-                                logger.LogInformation($"SkipTeamPickingPhase: Disregarding overflow player {player.Name}");
+                                logger.LogInformation("SkipTeamPickingPhase: Disregarding overflow CT player {PlayerName}", player.Name);
                             continue;
                         }
                     }
 
                     if (cfg.DetailedLogging)
-                        logger.LogInformation($"SkipTeamPickingPhase: Adding {player.Name} to CT picked players");
+                        logger.LogInformation("SkipTeamPickingPhase: Adding {PlayerName} to CT picked players", player.Name);
                     playingCtPlayers.Add(player);
                 }
             }
@@ -229,7 +228,7 @@ public partial class MixScrims
         // Bot: auto-pick random player
         if (IsBot(captain))
         {
-            var randomIndex = new Random().Next(players.Count);
+            var randomIndex = Random.Shared.Next(players.Count);
             var selectedPlayer = players[randomIndex];
             var selectedPlayerName = selectedPlayer.Name;
             if (team == Team.CT)
@@ -253,8 +252,6 @@ public partial class MixScrims
             .DisableExit()
             .SetAutoCloseDelay(0);
 
-        builder.DisableExit();
-
         foreach (var player in players)
         {
             var displayName = player.Name ?? $"#{player.PlayerID}";
@@ -274,7 +271,7 @@ public partial class MixScrims
                 };
             }
             if (cfg.DetailedLogging)
-                logger.LogInformation($"PromptCaptainToPickPlayer: Added menu option for player {displayName} to be picked by {captain.Name} for team {(team == Team.CT ? "CT" : "T")}");
+                logger.LogInformation("PromptCaptainToPickPlayer: Added option {PlayerName} for {CaptainName} ({Team})", displayName, captain.Name, team == Team.CT ? "CT" : "T");
             builder.AddOption(button);
         }
 
@@ -282,7 +279,7 @@ public partial class MixScrims
         if (IsPlayerValid(captain))
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation($"PromptCaptainToPickPlayer: Displaying team picking menu to {captain.Name} for team {(team == Team.CT ? "CT" : "T")}");
+                logger.LogInformation("PromptCaptainToPickPlayer: Displaying picking menu to {CaptainName} for team {Team}", captain.Name, team == Team.CT ? "CT" : "T");
             Core.MenusAPI.OpenMenuForPlayer(captain, menu);
         }
     }
@@ -359,7 +356,7 @@ public partial class MixScrims
             }
 
             if (cfg.DetailedLogging)
-                logger.LogInformation($"PickCtCaptain: picked {captainCt.Name}");
+                logger.LogInformation("PickCtCaptain: picked {PlayerName}", captainCt.Name);
             PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.captain.ct", captainCt.Name]);
         }
         else
@@ -413,7 +410,7 @@ public partial class MixScrims
             }
 
             if (cfg.DetailedLogging)
-                logger.LogInformation($"PickTCaptain: picked {captainT.Name}");
+                logger.LogInformation("PickTCaptain: picked {PlayerName}", captainT.Name);
             PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.captain.t", captainT.Name]);
         }
         else
@@ -445,8 +442,7 @@ public partial class MixScrims
             logger.LogWarning("PickRandomCaptain: No players available to pick a captain.");
             return null;
         }
-        var random = new Random();
-        var captainIndex = random.Next(players.Count);
+        var captainIndex = Random.Shared.Next(players.Count);
         return players[captainIndex];
     }
 
@@ -469,13 +465,12 @@ public partial class MixScrims
         pickedCtPlayers.Add(player);
 
         if (IsBot(player))
-        {
             player.SwitchTeamAsync(Team.CT);
-        }
-        player.ChangeTeamAsync(Team.CT);
+        else
+            player.ChangeTeamAsync(Team.CT);
 
         if (cfg.DetailedLogging)
-            logger.LogInformation($"AssignPickedPlayerToTeamCt: {captain.Name} picked {player.Name} for CT team.");
+            logger.LogInformation("AssignPickedPlayerToTeamCt: {CaptainName} picked {PlayerName} for CT team.", captain.Name, player.Name);
         PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.member.ct", captain.Name, player.Name]);
 
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
@@ -506,10 +501,9 @@ public partial class MixScrims
         pickedTPlayers.Add(player);
 
         if (IsBot(player))
-        {
             player.SwitchTeamAsync(Team.T);
-        }
-        player.ChangeTeamAsync(Team.T);
+        else
+            player.ChangeTeamAsync(Team.T);
 
         var currentMenu = Core.MenusAPI.GetCurrentMenu(captain);
         if (currentMenu != null)
@@ -518,7 +512,7 @@ public partial class MixScrims
         }
 
         if (cfg.DetailedLogging)
-            logger.LogInformation($"AssignPickedPlayerToTeamT: {captain.Name} picked {player.Name} for T team.");
+            logger.LogInformation("AssignPickedPlayerToTeamT: {CaptainName} picked {PlayerName} for T team.", captain.Name, player.Name);
         PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.member.t", captain.Name, player.Name]);
 
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
@@ -556,12 +550,12 @@ public partial class MixScrims
             if (IsBot(player))
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation($"Player is a bot, skipping move to SPEC");
+                    logger.LogInformation("Player is a bot, skipping move to SPEC");
                 continue;
             }
 
             if (cfg.DetailedLogging)
-                logger.LogInformation($"Moving {player.Name} to SPEC");
+                logger.LogInformation("Moving {PlayerName} to SPEC", player.Name);
             player.ChangeTeamAsync(Team.Spectator);
         }
 
@@ -572,12 +566,11 @@ public partial class MixScrims
                 continue;
 
             if (cfg.DetailedLogging)
-                logger.LogInformation($"Moving {player.Name} to CT");
+                logger.LogInformation("Moving {PlayerName} to CT", player.Name);
             if (IsBot(player))
-            {
                 player.SwitchTeamAsync(Team.CT);
-            }
-            player.ChangeTeamAsync(Team.CT);
+            else
+                player.ChangeTeamAsync(Team.CT);
         }
 
         var pickedTPlayerIds = new HashSet<int>(pickedTPlayers.Select(p => p.PlayerID));
@@ -587,12 +580,11 @@ public partial class MixScrims
                 continue;
 
             if (cfg.DetailedLogging)
-                logger.LogInformation($"Moving {player.Name} to T");
+                logger.LogInformation("Moving {PlayerName} to T", player.Name);
             if (IsBot(player))
-            {
                 player.SwitchTeamAsync(Team.T);
-            }
-            player.ChangeTeamAsync(Team.T);
+            else
+                player.ChangeTeamAsync(Team.T);
         }
 
         isMovingPlayersToTeams = false;

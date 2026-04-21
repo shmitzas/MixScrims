@@ -40,7 +40,7 @@ public partial class MixScrims
         var mapDetails = mapsConfig.Maps.FirstOrDefault(m => m.MapName.Equals(mapName, StringComparison.OrdinalIgnoreCase));
         if (mapDetails == null)
         {
-            logger.LogWarning($"StartMatch: Map {mapName} not found in configuration.");
+            logger.LogWarning("StartMatch: Map {MapName} not found in configuration.", mapName);
             return;
         }
 
@@ -57,7 +57,7 @@ public partial class MixScrims
                 while (playedMaps.Count > maxHistory)
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation($"StartMatch: Removing oldest map '{playedMaps[0].MapName}' from history.");
+                        logger.LogInformation("StartMatch: Removing oldest map {MapName} from history.", playedMaps[0].MapName);
                     playedMaps.RemoveAt(0);
                 }
             }
@@ -73,144 +73,68 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Assigns available teammate colors to all currently playing players who do not already have one.
+    /// Assigns unique teammate colors to all currently playing players, per team.
+    /// Uses the tracking dictionary as the source of truth to avoid stale controller reads.
     /// </summary>
     internal void FixTeammateColors()
     {
-        var players = GetPlayingPlayers();
-        foreach(var player in players)
+        AssignUniqueTeamColors(Team.CT);
+        AssignUniqueTeamColors(Team.T);
+    }
+
+    /// <summary>
+    /// Builds a guaranteed-unique color assignment for a team in two passes:
+    /// 1. Honor existing dict entries that are still unique.
+    /// 2. Assign the first free color to players without a valid unique entry.
+    /// All assignments are applied atomically at the end to avoid stale reads.
+    /// </summary>
+    private void AssignUniqueTeamColors(Team team)
+    {
+        var players = GetPlayersInTeam(team);
+        if (players.Count == 0) return;
+
+        var finalAssignments = new Dictionary<int, int>(); // playerID → color
+        var usedColors = new HashSet<int>();
+
+        // First pass: preserve existing unique assignments from the tracking dict
+        foreach (var player in players)
         {
-            var freeColor = GetFreePlayerColor(player);
-            if (freeColor != null)
+            if (playerColors.TryGetValue(player.PlayerID, out int existingColor)
+                && existingColor >= 0 && existingColor < 5
+                && usedColors.Add(existingColor))
             {
-                player.Controller.CompTeammateColor = freeColor.Value;
+                finalAssignments[player.PlayerID] = existingColor;
+            }
+        }
+
+        // Second pass: assign a free color to players without a valid unique entry
+        foreach (var player in players)
+        {
+            if (finalAssignments.ContainsKey(player.PlayerID))
+                continue;
+
+            for (int color = 0; color < 5; color++)
+            {
+                if (usedColors.Add(color))
+                {
+                    finalAssignments[player.PlayerID] = color;
+                    break;
+                }
+            }
+        }
+
+        // Apply all assignments to controllers and update the tracking dict
+        foreach (var player in players)
+        {
+            if (finalAssignments.TryGetValue(player.PlayerID, out int color))
+            {
+                player.Controller.CompTeammateColor = color;
                 player.Controller.CompTeammateColorUpdated();
-                playerColors[player.PlayerID] = freeColor.Value;
+                playerColors[player.PlayerID] = color;
+
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("AssignUniqueTeamColors: Assigned color {Color} to {PlayerName} (ID: {PlayerId}) on {Team}", color, player.Name, player.PlayerID, team);
             }
         }
-
-        FixColorDuplicatesForTeam(Team.CT);
-        FixColorDuplicatesForTeam(Team.T);
-    }
-
-    /// <summary>
-    /// Finds the first available player color index for the specified player based on their team affiliation.
-    /// </summary>
-    internal int? GetFreePlayerColor(IPlayer player)
-    {
-        if (player == null)
-            return null;
-        if (player.PlayerPawn == null)
-            return null;
-
-        if (player.PlayerPawn.Team == Team.CT)
-        {
-            var ocupiedColors = new HashSet<int>(GetPlayersInTeam(Team.CT)
-                .Where(p => p.PlayerID != player.PlayerID)
-                .Select(p => {
-                    // First check the actual in-game color to catch all assigned colors
-                    if (p.Controller?.CompTeammateColor != null)
-                        return p.Controller.CompTeammateColor;
-                    // Fallback to tracking dictionary if controller color is not set
-                    if (playerColors.ContainsKey(p.PlayerID))
-                        return playerColors[p.PlayerID];
-                    return -1; // No color assigned
-                })
-                .Where(color => color >= 0 && color < 5)); // Filter out invalid colors
-            
-            if (ocupiedColors.Count >= 5)
-                return null;
-
-            for (int color = 0; color < 5; color++)
-            {
-                if (!ocupiedColors.Contains(color))
-                    return color;
-            }
-        }
-
-        if (player.PlayerPawn.Team == Team.T)
-        {
-            var ocupiedColors = new HashSet<int>(GetPlayersInTeam(Team.T)
-                .Where(p => p.PlayerID != player.PlayerID)
-                .Select(p => {
-                    // First check the actual in-game color to catch all assigned colors
-                    if (p.Controller?.CompTeammateColor != null)
-                        return p.Controller.CompTeammateColor;
-                    // Fallback to tracking dictionary if controller color is not set
-                    if (playerColors.ContainsKey(p.PlayerID))
-                        return playerColors[p.PlayerID];
-                    return -1; // No color assigned
-                })
-                .Where(color => color >= 0 && color < 5)); // Filter out invalid colors
-            
-            if (ocupiedColors.Count >= 5)
-                return null;
-
-            for (int color = 0; color < 5; color++)
-            {
-                if (!ocupiedColors.Contains(color))
-                    return color;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Fixes color duplicates for a specific team by identifying players with the same color and reassigning free colors.
-    /// </summary>
-    private void FixColorDuplicatesForTeam(Team team)
-    {
-        var teamPlayers = GetPlayersInTeam(team)
-            .Select(p => new {
-                Player = p,
-                Color = GetPlayerActualColor(p)
-            })
-            .Where(x => x.Color >= 0 && x.Color < 5) // Only players with valid colors
-            .ToList();
-
-        var colorGroups = teamPlayers
-            .GroupBy(x => x.Color)
-            .Where(g => g.Count() > 1)
-            .ToList();
-
-        foreach (var duplicateGroup in colorGroups)
-        {
-            var playersWithDuplicateColor = duplicateGroup.Skip(1).Select(x => x.Player).ToList();
-
-            foreach (var player in playersWithDuplicateColor)
-            {
-                var freeColor = GetFreePlayerColor(player);
-                if (freeColor != null)
-                {
-                    player.Controller.CompTeammateColor = freeColor.Value;
-                    player.Controller.CompTeammateColorUpdated();
-                    playerColors[player.PlayerID] = freeColor.Value;
-
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation($"FixColorDuplicates: Reassigned player {player.Name} (ID: {player.PlayerID}) from color {duplicateGroup.Key} to {freeColor.Value} on {team}");
-                }
-                else
-                {
-                    logger.LogWarning($"FixColorDuplicates: Could not find free color for player {player.Name} (ID: {player.PlayerID}) on {team}");
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets the actual color assigned to a player, checking both the controller and tracking dictionary.
-    /// </summary>
-    private int GetPlayerActualColor(IPlayer player)
-    {
-        // First check the actual in-game color
-        if (player.Controller?.CompTeammateColor != null)
-            return player.Controller.CompTeammateColor;
-        
-        // Fallback to tracking dictionary
-        if (playerColors.ContainsKey(player.PlayerID))
-            return playerColors[player.PlayerID];
-        
-        return -1; // No color assigned
     }
 }

@@ -123,7 +123,7 @@
   "command.votekick.self": "Você [red]não pode [default]votar para se expulsar!",
   "command.votekick.not_teammate": "Você só pode votar para expulsar um [red]companheiro de time[default]!",
   "command.votekick.invalid_target": "Jogador [lime]{0} [red]não encontrado[default]!",
-  "command.votekick.missing_args": "Uso: [gold]!votekick <nome do jogador>",
+  "command.votekick.missing_args": "Uso: [gold]!votekick [grey]<nome do jogador>",
   "command.votekick.passed.ct": "[lightblue]{0} [default]foi [red]expulso [default]pelo seu time!",
   "command.votekick.passed.t": "[orange]{0} [default]foi [red]expulso [default]pelo seu time!",
   "command.votekick.failed": "Votação para expulsar [lime]{0} [red]falhou[default].",

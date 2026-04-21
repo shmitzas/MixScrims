@@ -7,6 +7,9 @@ namespace MixScrims;
 
 partial class MixScrims
 {
+    // Shared HttpClient instance - reusing avoids socket exhaustion from per-request creation
+    private static readonly HttpClient _discordHttpClient = new();
+
     /// <summary>
     /// Sends a Discord invite with full embed support to the configured webhook.
     /// </summary>
@@ -17,28 +20,22 @@ partial class MixScrims
             StringContent content = FormatPayload(invite);
             if (content is null)
             {
-                logger.LogError("Error in MixScrims sending request to Discord. Invite was not converted to \"StringContent\"");
+                logger.LogError("Error in MixScrims sending request to Discord. Invite was not converted to StringContent");
                 return;
             }
-            using var httpClient = new HttpClient();
-            var response = await httpClient.PostAsync(invite.WebhookUrl, content);
+            var response = await _discordHttpClient.PostAsync(invite.WebhookUrl, content);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogError($"Error in MixScrims sending request to Discord. Status Code: {response.StatusCode}, Reason: {response.ReasonPhrase}");
-                logger.LogError($"Webhook URL: {invite.WebhookUrl}");
+                logger.LogError("Discord webhook request failed. Status: {StatusCode}, Reason: {Reason}", response.StatusCode, response.ReasonPhrase);
             }
-            else
+            else if (cfg.DetailedLogging)
             {
-                if (cfg.DetailedLogging)
-                {
-                    logger.LogInformation("Successfully sent message to Discord webhook.");
-                    logger.LogInformation($"Webhook URL: {invite.WebhookUrl}");
-                }
+                logger.LogInformation("Successfully sent message to Discord webhook");
             }
         }
         catch (Exception ex)
         {
-            logger.LogError($"Error in MixScrims sending request to Discord: {ex}");
+            logger.LogError(ex, "Error sending request to Discord webhook");
         }
     }
 
@@ -72,8 +69,9 @@ partial class MixScrims
             if (!string.IsNullOrEmpty(invite.Embed.Description))
                 embed["description"] = invite.Embed.Description;
 
-            if (!string.IsNullOrEmpty(invite.Embed.Color))
-                embed["color"] = Convert.ToInt32(invite.Embed.Color, 16);
+            if (!string.IsNullOrEmpty(invite.Embed.Color) &&
+                int.TryParse(invite.Embed.Color, System.Globalization.NumberStyles.HexNumber, null, out var colorInt))
+                embed["color"] = colorInt;
 
             if (!string.IsNullOrEmpty(invite.Embed.Footer))
             {

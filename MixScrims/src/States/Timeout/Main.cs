@@ -69,7 +69,7 @@ public partial class MixScrims
             PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.timeout.t"]);
             PrintMessageToTeam(Team.T, Core.Localizer["command.timeout.remaining_timeouts", timeoutCountT, cfg.Timeouts]);
         }
-        BroadcastRemainingTimeoutTime();
+        BroadcastRemainingTimeoutTime(team);
         Core.Scheduler.DelayBySeconds(cfg.TimeoutDurationSeconds, EndTimeout);
     }
 
@@ -440,32 +440,20 @@ public partial class MixScrims
     /// <summary>
     /// Broadcasts announcements to all players about the remaining timeout time at specific intervals.
     /// </summary>
-    internal void BroadcastRemainingTimeoutTime()
+    internal void BroadcastRemainingTimeoutTime(Team team)
     {
         int remainingSeconds = cfg.TimeoutDurationSeconds;
         if (cfg.DetailedLogging)
         {
-            logger.LogInformation("BroadcastRemainingTimeoutTime: Broadcasting CenterHTML for remaining timeout time: {Time}", remainingSeconds);
+            logger.LogInformation("BroadcastRemainingTimeoutTime: Broadcasting CenterHTML for remaining timeout time: {Time}, team: {Team}", remainingSeconds, team);
         }
 
-        if (timeoutPending == TimeoutPending.CT)
+        var locKey = team == Team.CT ? "info.center.timeout_remaining.ct" : "info.center.timeout_remaining.t";
+        var timer = Core.Scheduler.RepeatBySeconds(1, () =>
         {
-            var timer = Core.Scheduler.RepeatBySeconds(1, () =>
-            {
-                Core.PlayerManager.SendCenterHTML(Core.Localizer["info.center.timeout_remaining.ct", remainingSeconds], 1000);
-                remainingSeconds--;
-            });
-            timer.CancelAfter(cfg.TimeoutDurationSeconds * 1000);
-        }
-
-        if (timeoutPending == TimeoutPending.T)
-        {
-            var timer = Core.Scheduler.RepeatBySeconds(1, () =>
-            {
-                Core.PlayerManager.SendCenterHTML(Core.Localizer["info.center.timeout_remaining.t", remainingSeconds], 1000);
-                remainingSeconds--;
-            });
-            timer.CancelAfter(cfg.TimeoutDurationSeconds * 1000);
-        }       
+            Core.PlayerManager.SendCenterHTML(Core.Localizer[locKey, remainingSeconds], 1000);
+            remainingSeconds--;
+        });
+        timer.CancelAfter(cfg.TimeoutDurationSeconds * 1000);
     }
 }

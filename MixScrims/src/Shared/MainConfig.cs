@@ -4,7 +4,7 @@ public class MainConfig
 {
     // Debug settings
     public bool TestMode { get; set; } = false;
-    public bool DetailedLogging { get; set; } = true;
+    public bool DetailedLogging { get; set; } = false;
     // Match settings
     public string GlobalServerPrefix { get; set; } = "[ [darkred]MixScrims [default]]";
     public int MinimumReadyPlayers { get; set; } = 10;
@@ -24,7 +24,7 @@ public class MainConfig
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
     public bool ShowReadyStatusInChat { get; set; } = true;
-    public bool ShowReadyStatusInScoreboard { get; set; } = true;
+    public bool ShowReadyStatusInScoreboard { get; set; } = false;
     public bool ShowReadyStatusInCenterHtml { get; set; } = true;
     public bool HideReadyStatusInCenterWhenReady { get; set; } = false;
     public bool MovePlayersToSpecDuringTeamPicking { get; set; } = true;
@@ -123,6 +123,6 @@ public class AutoResetOnLeaveConfig
 {
     public bool Enabled { get; set; } = false;
     public int MinimumPlayersRequired { get; set; } = 0;
-    public int GracePeriodSeconds { get; set; } = 10;
+    public int GracePeriodSeconds { get; set; } = 30;
 }
 

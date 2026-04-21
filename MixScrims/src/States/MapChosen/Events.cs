@@ -25,7 +25,7 @@ public partial class MixScrims
     public void AddPickedMapToPlayedMaps(IOnMapLoadEvent mapName)
     {
         if (cfg.DetailedLogging)
-            logger.LogInformation($"AddPickedMapToPlayedMaps: OnMapLoad event fired for map {mapName.MapName}");
+            logger.LogInformation("AddPickedMapToPlayedMaps: OnMapLoad event fired for map {MapName}", mapName.MapName);
         HandleMapChosenNewMapLoad();
     }
 
@@ -36,12 +36,12 @@ public partial class MixScrims
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (cfg.DetailedLogging)
-            logger.LogInformation($"HandleMapChosenNewMapLoad: Current match state is {matchState}");
+            logger.LogInformation("HandleMapChosenNewMapLoad: Current match state is {MatchState}", matchState);
 
         if (matchState != MatchState.MapLoading)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation($"HandleMapChosenNewMapLoad: Ignored map start event because match state is {matchState}");
+                logger.LogInformation("HandleMapChosenNewMapLoad: Ignored map start event because match state is {MatchState}", matchState);
             return;
         }
 

@@ -35,15 +35,20 @@ public partial class MixScrims
 
         var notReadyPlayers = GetNotReadyPlayers();
         if (cfg.DetailedLogging)
-            logger.LogInformation($"Not ready players count: {notReadyPlayers.Count}");
+            logger.LogInformation("Not ready players count: {Count}", notReadyPlayers.Count);
 
         if (notReadyPlayers.Count > 0)
         {
-            string notReadyPlayersNames = string.Join(", ", notReadyPlayers.Select(p => p.Controller.PlayerName));
-            if (cfg.DetailedLogging)
-                logger.LogInformation($"Not ready players: {notReadyPlayersNames}");
-            PrintMessageToAllPlayers(Core.Localizer["announcement.ready_status", readyPlayers.Count, GetNumberOfPlayersRequiredToStart()]);
-            PrintMessageToAllPlayers(Core.Localizer["announcement.not_ready_players", notReadyPlayersNames]);
+            // Filter out invalid players before accessing Controller
+            var validNotReadyPlayers = notReadyPlayers.Where(p => IsPlayerValid(p)).ToList();
+            if (validNotReadyPlayers.Count > 0)
+            {
+                string notReadyPlayersNames = string.Join(", ", validNotReadyPlayers.Select(p => p.Controller.PlayerName));
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("Not ready players: {Names}", notReadyPlayersNames);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.ready_status", readyPlayers.Count, GetNumberOfPlayersRequiredToStart()]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.not_ready_players", notReadyPlayersNames]);
+            }
         }
     }
 
@@ -56,12 +61,18 @@ public partial class MixScrims
 
         foreach(var player in readyPlayers)
         {
-            SetPlayerReadyStatusInScoreboard(player, true);
+            if (IsPlayerValid(player))
+            {
+                SetPlayerReadyStatusInScoreboard(player, true);
+            }
         }
 
         foreach(var player in notReadyPlayers)
         {
-            SetPlayerReadyStatusInScoreboard(player, false);
+            if (IsPlayerValid(player))
+            {
+                SetPlayerReadyStatusInScoreboard(player, false);
+            }
         }
     }
 
@@ -107,7 +118,8 @@ public partial class MixScrims
 
             player.Controller.Clan = playerClanTag;
             player.Controller.ClanUpdated();
-            Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(player.PlayerID);
+            if (Core.GameEvent.IsListeningToEvent<EventNextlevelChanged>(player.PlayerID))
+                Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(player.PlayerID);
         }
         catch (Exception ex)
         {
@@ -149,7 +161,8 @@ public partial class MixScrims
                 {
                     player.Controller.Clan = playerClanTag;
                     player.Controller.ClanUpdated();
-                    Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(player.PlayerID);
+                    if (Core.GameEvent.IsListeningToEvent<EventNextlevelChanged>(player.PlayerID))
+                        Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(player.PlayerID);
                 }
             }
             catch (Exception ex)
@@ -208,7 +221,7 @@ public partial class MixScrims
         if (captainCt != null)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation($"Captain CT: {captainCt.Controller.PlayerName}");
+                logger.LogInformation("Captain CT: {PlayerName}", captainCt.Controller.PlayerName);
             PrintMessageToAllPlayers(Core.Localizer["announcement.captain.chosen.ct", captainCt.Controller.PlayerName]);
         }
         else
@@ -221,7 +234,7 @@ public partial class MixScrims
         if (captainT != null)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation($"Captain T: {captainT.Controller.PlayerName}");
+                logger.LogInformation("Captain T: {PlayerName}", captainT.Controller.PlayerName);
             PrintMessageToAllPlayers(Core.Localizer["announcement.captain.chosen.t", captainT.Controller.PlayerName]);
         }
         else
@@ -246,7 +259,10 @@ public partial class MixScrims
             {
                 foreach (var player in playersToShow)
                 {
-                    player.SendCenterHTML(message, displayLenght);
+                    if (IsPlayerValid(player))
+                    {
+                        player.SendCenterHTML(message, displayLenght);
+                    }
                 }
             }
             return;

@@ -15,14 +15,15 @@ public sealed partial class MixScrims
     internal CancellationTokenSource? autoResetOnLeaveTimer;
 
     internal readonly List<IPlayer> readyPlayers = [];
-    internal readonly List<int> freshlyJoinedPlayers = new();
-    internal readonly List<int> recentlyDisconnectedPlayers = new();
+    internal readonly HashSet<int> freshlyJoinedPlayers = [];
+    internal readonly HashSet<int> recentlyDisconnectedPlayers = [];
     internal Team previousAutoJoinedTeam = Team.None;
     internal bool canPlayerBeRespawned = true;
     internal bool isMovingPlayersToTeams = false;
     internal bool preventNotPickedPlayersFromJoiningOngoingMatch = false;
     internal DateTime lastDiscordInviteSentAt = DateTime.MinValue;
-    internal List<ulong> playersWaitingForPunishment = [];
+    internal HashSet<ulong> playersWaitingForPunishment = [];
+    internal readonly Dictionary<ulong, CancellationTokenSource> _punishmentTimers = [];
     internal bool resetMixOnFirstJoin = false;
 
     internal void StartAnnouncementTimers()
@@ -251,8 +252,7 @@ public sealed partial class MixScrims
             logger.LogError("GetRandomMap: No maps available for voting. Check configuration.");
             return new MapDetails { MapName = "de_mirage", DisplayName = "Mirage", CanBeVoted = true };
         }
-        var random = new Random();
-        int index = random.Next(maps.Count);
+        var index = Random.Shared.Next(maps.Count);
         return maps[index];
     }
 
@@ -429,10 +429,11 @@ public sealed partial class MixScrims
             return;
         }
 
-        Core.Scheduler.DelayBySeconds(cfg.PlayerLeavePunishment.WaitBeforePunishmentSeconds, () =>
+        var token = Core.Scheduler.DelayBySeconds(cfg.PlayerLeavePunishment.WaitBeforePunishmentSeconds, () =>
         {
             Core.Scheduler.NextTick(() =>
             { 
+                _punishmentTimers.Remove(steamId);
                 var players = GetPlayers();
                 if (players == null)
                 {
@@ -448,20 +449,21 @@ public sealed partial class MixScrims
                     return;
                 }
 
-                if (players.Any(p => p.SteamID.ToString() == steamId.ToString()))
+                if (players.Any(p => p.SteamID == steamId))
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("PunishPlayer: Player {PlayerName} has rejoined, skipping punishment", steamId);
+                        logger.LogInformation("PunishPlayer: Player {SteamId} has rejoined, skipping punishment", steamId);
                     return;
                 }
                 else
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("PunishOnLeave: punishing player {PlayerName} for leaving", steamId);
+                        logger.LogInformation("PunishOnLeave: punishing player {SteamId} for leaving", steamId);
                     ExecutePunishmentCommand(steamId);
                 }
             });
         });
+        _punishmentTimers[steamId] = token;
     }
 
     /// <summary>
@@ -470,7 +472,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal void ExecutePunishmentCommand(ulong steamId)
     {
-        if (playersWaitingForPunishment.Any(s => s == steamId) == false)
+        if (!playersWaitingForPunishment.Contains(steamId))
         {
             if (cfg.DetailedLogging)
                 logger.LogWarning("ExecutePunishmentCommand: player with SteamID {SteamId} is no longer queued for punishment", steamId);
@@ -488,6 +490,7 @@ public sealed partial class MixScrims
             Core.Engine.ExecuteCommand(banCommand);
         });
         playersWaitingForPunishment.Remove(steamId);
+        _punishmentTimers.Remove(steamId);
     }
 
     internal void KickPlayer(ulong steamId, string? reason)
@@ -504,7 +507,8 @@ public sealed partial class MixScrims
             reason = Core.Localizer["info.kick_reason.generic"];
         }
 
-        player.Kick(reason, ENetworkDisconnectionReason.NETWORK_DISCONNECT_DISCONNECT_BY_SERVER);
+        // KickAsync is thread-safe; Kick() is not safe outside the main game thread
+        _ = player.KickAsync(reason, ENetworkDisconnectionReason.NETWORK_DISCONNECT_DISCONNECT_BY_SERVER);
     }
 
     /// <summary>
@@ -571,7 +575,6 @@ public sealed partial class MixScrims
                     autoResetOnLeaveTimer = null;
                 }
             });
-            Core.Scheduler.StopOnMapChange(autoResetOnLeaveTimer);
         }
         else
         {
