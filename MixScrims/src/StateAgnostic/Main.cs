@@ -575,6 +575,7 @@ public sealed partial class MixScrims
                     autoResetOnLeaveTimer = null;
                 }
             });
+            Core.Scheduler.StopOnMapChange(autoResetOnLeaveTimer);
         }
         else
         {

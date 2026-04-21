@@ -19,6 +19,23 @@ partial class MixScrims
     {
         Core.Event.OnClientPutInServer += HandleClientPutInServer;
         Core.Event.OnClientDisconnected += OnPlayerDisconnect;
+        Core.Event.OnMapLoad += HandleStateAgnosticMapLoad;
+    }
+
+    /// <summary>
+    /// Clears auto-reset state on every map load so that a stale
+    /// <c>resetMixOnFirstJoin</c> flag (set when all players left during an active
+    /// match) cannot trigger an unintended reset on the new map, and so that any
+    /// running grace-period timer is cancelled before it can fire in a new context.
+    /// </summary>
+    internal void HandleStateAgnosticMapLoad(IOnMapLoadEvent @event)
+    {
+        if (resetMixOnFirstJoin)
+        {
+            logger.LogInformation("HandleStateAgnosticMapLoad: Clearing resetMixOnFirstJoin flag — map changed while flag was set.");
+            resetMixOnFirstJoin = false;
+        }
+        CancelAutoResetOnLeaveTimer(announce: false);
     }
 
     /// <summary>
