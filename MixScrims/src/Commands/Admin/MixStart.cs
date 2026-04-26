@@ -8,6 +8,7 @@ public partial class MixScrims
     ///<summary>
     ///Forcefully starts the match regardless of how many players are ready
     ///</summary>
+    [Command("mix_start", true, "managemix", HelpText = "Forcefully starts the match regardless of how many players are ready. Usage: !mix_start")]
     public void OnForceMatchStart(ICommandContext context)
     {
         var admin = context.Sender;

@@ -10,6 +10,7 @@ public partial class MixScrims
     ///<summary>
     ///Prompts a list of players to choose a captain for chosen team
     ///</summary>
+    [Command("captain", true, "managemix", HelpText = "Manually selects a captain for the chosen team. Usage: !captain <t/ct>")]
     public void OnCaptain(ICommandContext context)
     {
         var admin = context.Sender;

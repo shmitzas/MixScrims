@@ -11,7 +11,7 @@ public partial class MixScrims
     /// <summary>
     /// Players can call timeout if they have timeouts left and the match is in progress
     /// </summary>
-    [Command("timeout")]
+    [Command("timeout", true, "", HelpText = "Calls a tactical timeout for your team if any are remaining. Usage: !timeout")]
     public void OnTimeout(ICommandContext context)
     {
         if (!context.IsSentByPlayer)

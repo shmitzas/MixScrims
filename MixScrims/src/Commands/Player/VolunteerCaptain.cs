@@ -10,6 +10,7 @@ public partial class MixScrims
     /// <summary>
     /// Handles a player's request to volunteer as a team captain for the current match.
     /// </summary>
+    [Command("volunteer_captain", true, "", HelpText = "Volunteer to be a captain for the chosen team. Usage: !volunteer_captain <t/ct>")]
     public void OnCaptainVolunteer(ICommandContext context)
     {
         if (!context.IsSentByPlayer)

@@ -11,7 +11,7 @@ public partial class MixScrims
     /// <summary>
     /// Initiates a vote to kick a teammate from the match. All other teammates must vote YES for the kick to pass.
     /// </summary>
-    [Command("votekick")]
+    [Command("votekick", true, "", HelpText = "Starts a unanimous vote to kick a teammate from the match. Usage: !votekick")]
     public void OnVoteKick(ICommandContext context)
     {
         if (!context.IsSentByPlayer)

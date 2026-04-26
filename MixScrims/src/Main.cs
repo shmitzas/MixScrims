@@ -69,86 +69,31 @@ public partial class MixScrims : BasePlugin
     }
 
     /// <summary>
-    /// Registers available command handlers and their aliases with the command system.
+    /// Registers command aliases from configuration. Primary commands are registered automatically
+    /// via the [Command] attribute on their handler methods.
     /// </summary>
     internal void RegisterCommands()
     {
-        // Define command mappings
-        var commandHandlers = new Dictionary<string, ICommandService.CommandListener>
-        {
-            { "mix_reset", OnResetPlugin },
-            { "mix_start", OnForceMatchStart },
-            { "forceready", OnForceReady },
-            { "forceunready", OnForceUnready },
-            { "captain", OnCaptain },
-            { "map", OnGoToMap },
-            { "maps", OnListVoteableMaps },
-            { "maplist_all", OnListAllMaps },
-            { "ready", OnReady },
-            { "unready", OnUnReady },
-            { "revote", OnRevote },
-            { "timeout", OnTimeout },
-            { "surrender", OnSurrender },
-            { "invite", OnInvite },
-            { "stay", OnStay },
-            { "switch", OnSwitch }
-        };
-
-        if (cfg.AllowVolunteerCaptains)
-        {
-            commandHandlers["volunteer_captain"] = OnCaptainVolunteer;
-        }
-
-        if (cfg.VoteKick.Enabled)
-        {
-            commandHandlers["votekick"] = OnVoteKick;
-        }
-
         if (cfg.DetailedLogging)
-            logger.LogInformation("Registering commands and aliases...");
+            logger.LogInformation("Registering command aliases...");
 
-
-        foreach (var (commandName, handler) in commandHandlers)
+        foreach (var (commandName, commandInfo) in cfg.Commands)
         {
-            if (!cfg.Commands.TryGetValue(commandName, out var commandInfo))
-            {
-                if (cfg.DetailedLogging)
-                    logger.LogWarning("Command '{CommandName}' not found in config, skipping registration", commandName);
+            // Skip aliases for commands gated by feature flags when those features are disabled.
+            if (commandName == "volunteer_captain" && !cfg.AllowVolunteerCaptains)
                 continue;
-            }
+            if (commandName == "votekick" && !cfg.VoteKick.Enabled)
+                continue;
 
-            // Register command with permission from config
-            Core.Command.RegisterCommand(commandName, handler, true, commandInfo.Permission);
-
-            // Register aliases
             foreach (var alias in commandInfo.Aliases)
             {
-                Core.Command.RegisterCommandAlias(commandName, alias);
+                Core.Command.RegisterCommandAlias(commandName, alias, true);
             }
         }
     }
 
-    /// <summary>
-    /// Unregisters all commands currently configured in the application, including the volunteer captain command if
-    /// enabled.
-    /// </summary>
     internal void UnregisterCommands()
-    {
-        var commandNames = cfg.Commands.Keys.ToList();
-        if (cfg.AllowVolunteerCaptains)
-        {
-            commandNames.Add("volunteer_captain");
-        }
-
-        if (cfg.VoteKick.Enabled)
-        {
-            commandNames.Add("votekick");
-        }
-        foreach (var commandName in commandNames)
-        {
-            Core.Command.UnregisterCommand(commandName);
-        }
-    }
+    {}
 
     /// <summary>
     /// Loads the configuration and initializes dependency injection services

@@ -8,6 +8,7 @@ public partial class MixScrims
     ///<summary>
     ///Lists all configured maps regardless of voteable status
     ///</summary>
+    [Command("maplist_all", true, "managemix", HelpText = "Lists all configured maps regardless of voteable status. Usage: !maplist_all")]
     public void OnListAllMaps(ICommandContext context)
     {
         var admin = context.Sender;

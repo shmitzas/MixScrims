@@ -10,7 +10,7 @@ public partial class MixScrims
     /// <summary>
     /// Additional way of choosing whether to stay or switch teams after knife round
     /// </summary>
-    [Command("stay")]
+    [Command("stay", true, "", HelpText = "Vote to stay on your current side after winning the knife round. Usage: !stay")]
     public void OnStay(ICommandContext context)
     {
         if (!context.IsSentByPlayer)
