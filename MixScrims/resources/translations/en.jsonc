@@ -85,6 +85,7 @@
   "error.team.join_denied.t": "You [red]can't join [orange]T team [default]because you are not in the [orange]T players [default]list!",
   "error.team.full.ct": "[lightblue]CT team [red]is full!",
   "error.team.full.t": "[orange]T team [red]is full!",
+  "error.team.slot_unavailable": "[red]No team slots are available [default]for you - moved to [gold]Spectators[default].",
   "error.not_captain": "You are [red]not [default]the victorious team captain!",
   "error.not_winner_team": "You are [red]not [default]on the winning team!",
   "error.captain.cannot_change_team": "You [red]can't [default]change teams during [red]Knife round!",

@@ -85,6 +85,7 @@
   "error.team.join_denied.t": "Você [red]não pode entrar [orange]no time T [default]porque você não está na lista de jogadores [orange]T[default]!",
   "error.team.full.ct": "Time [lightblue]CT [red]está cheio!",
   "error.team.full.t": "Time [orange]T [red]está cheio!",
+  "error.team.slot_unavailable": "[red]Não há vagas disponíveis [default]- você foi movido para [gold]Espectadores[default].",
   "error.not_captain": "Você [red]não é [default]o capitão do time vencedor!",
   "error.not_winner_team": "Você [red]não está [default]no time vencedor!",
   "error.captain.cannot_change_team": "Você [red]não pode [default]mudar de time durante o [red]Round Faca!",

@@ -85,6 +85,7 @@
   "error.team.join_denied.t": "Jūs [red]negalite prisijungti prie [orange]T komandos[default], nes nesate [orange]T žaidėjų [default]sąraše!",
   "error.team.full.ct": "[lightblue]CT komanda [red]pilna!",
   "error.team.full.t": "[orange]T komanda [red]pilna!",
+  "error.team.slot_unavailable": "[red]Nėra laisvų vietų komandose [default]- perkeltas į [gold]stebėtojus[default].",
   "error.not_captain": "Jūs [red]nesate [default]laimėjusios komandos kapitonas!",
   "error.not_winner_team": "Jūs [red]nesate [default]laimėjusioje komandoje!",
   "error.captain.cannot_change_team": "Jūs [red]negalite [default]keisti komandų [red]Peilių raundo [default]metu!",
