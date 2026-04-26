@@ -68,19 +68,42 @@ partial class MixScrims
             {
                 if (MatchState != MatchState.Warmup && MatchState != MatchState.MapVoting && MatchState != MatchState.MapChosen && MatchState != MatchState.PickingTeam)
                 {
+                    // Active match state. Resolve roster membership by SteamID (reconnects get new PlayerID/slot).
+                    bool isListed = playingCtPlayers.Any(p => p.SteamID == player.SteamID)
+                                 || playingTPlayers.Any(p => p.SteamID == player.SteamID)
+                                 || pickedCtPlayers.Any(p => p.SteamID == player.SteamID)
+                                 || pickedTPlayers.Any(p => p.SteamID == player.SteamID)
+                                 || reservedCtSlots.Contains(player.SteamID)
+                                 || reservedTSlots.Contains(player.SteamID);
+
                     if (preventNotPickedPlayersFromJoiningOngoingMatch)
                     {
-                        if (playingCtPlayers.Any(p => p.PlayerID == player.PlayerID) || playingTPlayers.Any(p => p.PlayerID == player.PlayerID) || pickedCtPlayers.Any(p => p.PlayerID == player.PlayerID) || pickedTPlayers.Any(p => p.PlayerID == player.PlayerID))
+                        if (isListed)
                         {
                             if (cfg.DetailedLogging)
-                                logger.LogInformation("HandlePlayerJoinTeam: Player {PlayerName} is already in a team, allowing.", player.Controller.PlayerName);
+                                logger.LogInformation("HandleClientPutInServer: {PlayerName} is tracked/reserved, allowing.", player.Controller.PlayerName);
                         }
                         else
                         {
                             if (cfg.DetailedLogging)
-                                logger.LogInformation("HandlePlayerJoinTeam: Player {PlayerName} attempted to join a team but is not in playing/picked lists, kicking.", player.Controller.PlayerName);
+                                logger.LogInformation("HandleClientPutInServer: {PlayerName} joined mid-match and is not tracked, kicking.", player.Controller.PlayerName);
                             KickPlayer(player.SteamID, Core.Localizer["info.kick_reason.not_picked"]);
+                            return;
                         }
+                    }
+                    else if (!isListed)
+                    {
+                        // Prevention disabled but slots may still be full. The engine typically places a
+                        // reconnecting player back onto their previous team automatically even though our
+                        // validation would have rejected it, and the exact timing of that placement is
+                        // not reliable to intercept via the Pre hook alone. Mark this SteamID as forced
+                        // to spectator - any join attempt will be rejected AND a retrying scheduler will
+                        // actively switch them to Spectator until they're confirmed there.
+                        if (cfg.DetailedLogging)
+                            logger.LogInformation("HandleClientPutInServer: {PlayerName} is not tracked during active match - forcing to Spectator.", player.Controller.PlayerName);
+
+                        ScheduleForceToSpectator(player);
+                        return;
                     }
                 }
 
@@ -169,11 +192,7 @@ partial class MixScrims
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandlePlayerChangeTeamOnJoin: joining Terrorists");
                 previousAutoJoinedTeam = Team.T;
-                Core.Scheduler.DelayBySeconds(2, async () =>
-                {
-                    await player.SwitchTeamAsync(Team.T);
-                    Core.Scheduler.NextTick(() => RespawnPlayer(player));
-                });
+                ScheduleAutoJoinTeamSwitch(player, Team.T);
                 return;
             }
 
@@ -182,11 +201,7 @@ partial class MixScrims
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandlePlayerChangeTeamOnJoin: joining CounterTerrorists");
                 previousAutoJoinedTeam = Team.CT;
-                Core.Scheduler.DelayBySeconds(2, async () =>
-                {
-                    await player.SwitchTeamAsync(Team.CT);
-                    Core.Scheduler.NextTick(() => RespawnPlayer(player));
-                });
+                ScheduleAutoJoinTeamSwitch(player, Team.CT);
                 return;
             }
 
@@ -197,26 +212,59 @@ partial class MixScrims
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandlePlayerChangeTeamOnJoin: both teams equal, joining CounterTerrorists");
                     previousAutoJoinedTeam = Team.CT;
-                    Core.Scheduler.DelayBySeconds(2, async () =>
-                    {
-                        await player.SwitchTeamAsync(Team.CT);
-                        Core.Scheduler.NextTick(() => RespawnPlayer(player));
-                    });
+                    ScheduleAutoJoinTeamSwitch(player, Team.CT);
                 }
                 else
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandlePlayerChangeTeamOnJoin: both teams equal, joining Terrorists");
                     previousAutoJoinedTeam = Team.T;
-                    Core.Scheduler.DelayBySeconds(2, async () =>
-                    {
-                        await player.SwitchTeamAsync(Team.T);
-                        Core.Scheduler.NextTick(() => RespawnPlayer(player));
-                    });
+                    ScheduleAutoJoinTeamSwitch(player, Team.T);
                 }
             }
         }
         CancelAutoResetOnLeaveTimer();
+    }
+
+    /// <summary>
+    /// Schedules a delayed team switch + respawn for a freshly joined player, with safety re-checks
+    /// to avoid throwing if the player disconnects during the delay.
+    /// </summary>
+    private void ScheduleAutoJoinTeamSwitch(IPlayer player, Team targetTeam)
+    {
+        int playerSlot = player.Slot;
+        Core.Scheduler.DelayBySeconds(2, async () =>
+        {
+            try
+            {
+                if (player is null || !player.IsValid)
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("ScheduleAutoJoinTeamSwitch: player (slot {Slot}) no longer valid, skipping switch to {Team}.", playerSlot, targetTeam);
+                    return;
+                }
+
+                await player.SwitchTeamAsync(targetTeam);
+
+                Core.Scheduler.NextTick(() =>
+                {
+                    try
+                    {
+                        if (player is null || !player.IsValid)
+                            return;
+                        RespawnPlayer(player);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "ScheduleAutoJoinTeamSwitch: error respawning player (slot {Slot}).", playerSlot);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "ScheduleAutoJoinTeamSwitch: error switching team for player (slot {Slot}) to {Team}.", playerSlot, targetTeam);
+            }
+        });
     }
 
     /// <summary>
@@ -265,6 +313,7 @@ partial class MixScrims
         var playerName = IsPlayerValid(player) ? player.Controller.PlayerName : $"Player {player.PlayerID}";
 
         freshlyJoinedPlayers.Remove(player.Slot);
+        forcedToSpectator.Remove(player.SteamID);
 
         if (pickedCtPlayers.Any(p => p.PlayerID == player.PlayerID))
         {
@@ -301,8 +350,9 @@ partial class MixScrims
             }
             else
             {
+                reservedCtSlots.Add(player.SteamID);
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleDisconnectedPlayer: {PlayerName} disconnected from CT - keeping slot reserved.", playerName);
+                    logger.LogInformation("HandleDisconnectedPlayer: {PlayerName} disconnected from CT - keeping slot reserved (SteamID {SteamId}).", playerName, player.SteamID);
             }
         }
 
@@ -316,8 +366,9 @@ partial class MixScrims
             }
             else
             {
+                reservedTSlots.Add(player.SteamID);
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleDisconnectedPlayer: {PlayerName} disconnected from T - keeping slot reserved.", playerName);
+                    logger.LogInformation("HandleDisconnectedPlayer: {PlayerName} disconnected from T - keeping slot reserved (SteamID {SteamId}).", playerName, player.SteamID);
             }
         }
 
@@ -442,15 +493,59 @@ partial class MixScrims
             return HookResult.Stop;
         }
 
-        if (player.PlayerPawn == null)
-        {
-            logger.LogError("HandleEventPlayerTeam: player's PlayerPawn is null");
-            return HookResult.Stop;
-        }
-
+        // NOTE: PlayerPawn can legitimately be null here (e.g. when moving TO Spectator the pawn
+        // is being destroyed). Do NOT early-return on null pawn - HandlePlayerChangeTeam will
+        // handle that case per state (Spec branch doesn't need a pawn).
         int teamTojoin = @event.Team;
 
         return HandlePlayerChangeTeam(player, teamTojoin);
+    }
+
+    /// <summary>
+    /// Post-mode reconciler: after a team change has actually been committed by the engine,
+    /// ensure the playing lists match physical team membership. Prunes entries for players that
+    /// the engine placed on a team other than the one they're tracked on (e.g. a voluntary
+    /// move to Spectator). Only runs during active match states and only when prevention is off -
+    /// with prevention on, reservations are intentionally held for the original occupant.
+    /// </summary>
+    [GameEventHandler(HookMode.Post)]
+    public HookResult HandleEventPlayerTeamPost(EventPlayerTeam @event)
+    {
+        var player = @event.UserIdPlayer;
+        if (player == null || !IsPlayerValid(player) || IsBot(player) || player.IsFakeClient)
+            return HookResult.Continue;
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
+        bool isActive = matchState == MatchState.KnifeRound
+                      || matchState == MatchState.Match
+                      || matchState == MatchState.PickingStartingSide
+                      || matchState == MatchState.Timeout;
+        if (!isActive)
+            return HookResult.Continue;
+
+        if (preventNotPickedPlayersFromJoiningOngoingMatch)
+            return HookResult.Continue;
+
+        // Committed team for this player. Use event value (Team=new) which is authoritative here.
+        int committedTeam = @event.Team;
+
+        // If the player is no longer on CT but is still in playingCtPlayers, prune.
+        if (committedTeam != (int)Team.CT && playingCtPlayers.Any(p => p.SteamID == player.SteamID))
+        {
+            playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleEventPlayerTeamPost: Pruned {PlayerName} from playingCtPlayers (committed team {Team}).", player.Controller.PlayerName, committedTeam);
+        }
+
+        // If the player is no longer on T but is still in playingTPlayers, prune.
+        if (committedTeam != (int)Team.T && playingTPlayers.Any(p => p.SteamID == player.SteamID))
+        {
+            playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleEventPlayerTeamPost: Pruned {PlayerName} from playingTPlayers (committed team {Team}).", player.Controller.PlayerName, committedTeam);
+        }
+
+        return HookResult.Continue;
     }
 
     /// <summary>
@@ -484,12 +579,9 @@ partial class MixScrims
             return HookResult.Stop;
         }
 
-        if (player.PlayerPawn == null)
-        {
-            if (cfg.DetailedLogging)
-                logger.LogWarning("HandlePlayerChangeTeam: player PlayerPawn is null");
-            return HookResult.Stop;
-        }
+        // Do not reject on null PlayerPawn — this is valid when moving to/from Spectator.
+        // State-specific branches that need the pawn (e.g. capacity via GetPlayersInTeam)
+        // handle null pawns themselves.
 
         if (IsBot(player))
         {
@@ -498,12 +590,28 @@ partial class MixScrims
             return HookResult.Continue;
         }
 
-        // Skip validation during programmatic team moves (switch/stay sides, etc.)
+        // Skip validation during programmatic team moves (switch/stay sides, halftime swap, team picking).
+        // Narrowed so only players the plugin is actively moving (those already tracked in the picked
+        // or playing rosters by SteamID) get the bypass. Untracked players must still be validated,
+        // otherwise they could exploit the window (e.g. halftime) to bypass team size limits.
         if (isMovingPlayersToTeams)
         {
+            bool isTracked = playingCtPlayers.Any(p => p.SteamID == player.SteamID)
+                          || playingTPlayers.Any(p => p.SteamID == player.SteamID)
+                          || pickedCtPlayers.Any(p => p.SteamID == player.SteamID)
+                          || pickedTPlayers.Any(p => p.SteamID == player.SteamID)
+                          || reservedCtSlots.Contains(player.SteamID)
+                          || reservedTSlots.Contains(player.SteamID);
+
+            if (isTracked)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("HandlePlayerChangeTeam: Skipping validation during team move for tracked {PlayerName}", player.Controller.PlayerName);
+                return HookResult.Continue;
+            }
+
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandlePlayerChangeTeam: Skipping validation during team move for {PlayerName}", player.Controller.PlayerName);
-            return HookResult.Continue;
+                logger.LogInformation("HandlePlayerChangeTeam: Programmatic move active but {PlayerName} is untracked - validating normally", player.Controller.PlayerName);
         }
 
         var matchState = mixScrimsService.GetCurrentMatchState();
@@ -589,9 +697,10 @@ partial class MixScrims
             // This prevents players from bypassing team limit checks
             if (teamTojoin == 0)
             {
-                // Determine which team the player should be on based on playing lists
-                bool isInCtTeam = playingCtPlayers.Any(p => p.PlayerID == player.PlayerID);
-                bool isInTTeam = playingTPlayers.Any(p => p.PlayerID == player.PlayerID);
+                // Determine which team the player belongs to based on playing lists / reservations
+                // (match by SteamID so reconnected players with new PlayerID/slot still resolve correctly)
+                bool isInCtTeam = playingCtPlayers.Any(p => p.SteamID == player.SteamID) || reservedCtSlots.Contains(player.SteamID);
+                bool isInTTeam = playingTPlayers.Any(p => p.SteamID == player.SteamID) || reservedTSlots.Contains(player.SteamID);
 
                 if (isInCtTeam)
                 {
@@ -619,127 +728,132 @@ partial class MixScrims
 
             if (teamTojoin == 3)
             {
-                // Check if player is already in the playing list
-                bool isInPlayingList = playingCtPlayers.Any(p => p.PlayerID == player.PlayerID);
-                int maxTeamSize = cfg.MinimumReadyPlayers / 2;
-                
-                // Get actual connected player count (excludes disconnected players with reserved slots)
-                var actualCtPlayers = GetPlayersInTeam(Team.CT);
-                int actualCtCount = actualCtPlayers.Count;
-                
-                // Get list count (includes disconnected players with reserved slots)
-                int listCount = playingCtPlayers.Count;
-
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandlePlayerJoinTeam - Match: CT list {ListCount}/{Max}, actual {Actual}, in list: {InList}", listCount, maxTeamSize, actualCtCount, isInPlayingList);
-
-                if (isInPlayingList)
-                {
-                    // Player is already in the playing list (has a reserved slot), allow rejoin
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} re-joined CT team.", player.Controller.PlayerName);
-                    Core.Scheduler.NextTick(() => FixTeammateColors());
-                    CheckAutoResetOnLeave();
-                    return HookResult.Continue;
-                }
-
-                // Player is NOT in playing list - check if they can join
-                if (preventNotPickedPlayersFromJoiningOngoingMatch)
-                {
-                    // Config blocks new players from joining ongoing match
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} blocked from joining CT (prevention enabled).", player.Controller.PlayerName);
-                    PrintMessageToPlayer(player, Core.Localizer["error.team.full.ct"]);
-                    return HookResult.Stop;
-                }
-
-                // Config allows new players - check list count (includes reserved slots for disconnected players)
-                // This prevents exceeding team limit when disconnected players have reserved slots
-                if (listCount < maxTeamSize)
-                {
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} joined CT team (list: {List}/{Max}, actual: {Actual}).", player.Controller.PlayerName, listCount, maxTeamSize, actualCtCount);
-                    playingCtPlayers.Add(player);
-                    Core.Scheduler.NextTick(() => FixTeammateColors());
-                    CheckAutoResetOnLeave();
-                    return HookResult.Continue;
-                }
-                else
-                {
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} blocked from CT - team full (list: {List}/{Max}, actual: {Actual}).", player.Controller.PlayerName, listCount, maxTeamSize, actualCtCount);
-                    PrintMessageToPlayer(player, Core.Localizer["error.team.full.ct"]);
-                    return HookResult.Stop;
-                }
+                return HandleActiveMatchJoin(
+                    player,
+                    Team.CT,
+                    playingCtPlayers,
+                    reservedCtSlots,
+                    "error.team.full.ct");
             }
 
             if (teamTojoin == 2)
             {
-                // Check if player is already in the playing list
-                bool isInPlayingList = playingTPlayers.Any(p => p.PlayerID == player.PlayerID);
-                int maxTeamSize = cfg.MinimumReadyPlayers / 2;
-                
-                // Get actual connected player count (excludes disconnected players with reserved slots)
-                var actualTPlayers = GetPlayersInTeam(Team.T);
-                int actualTCount = actualTPlayers.Count;
-                
-                // Get list count (includes disconnected players with reserved slots)
-                int listCount = playingTPlayers.Count;
-
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandlePlayerJoinTeam - Match: T list {ListCount}/{Max}, actual {Actual}, in list: {InList}", listCount, maxTeamSize, actualTCount, isInPlayingList);
-
-                if (isInPlayingList)
-                {
-                    // Player is already in the playing list (has a reserved slot), allow rejoin
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} re-joined T team.", player.Controller.PlayerName);
-                    Core.Scheduler.NextTick(() => FixTeammateColors());
-                    CheckAutoResetOnLeave();
-                    return HookResult.Continue;
-                }
-
-                // Player is NOT in playing list - check if they can join
-                if (preventNotPickedPlayersFromJoiningOngoingMatch)
-                {
-                    // Config blocks new players from joining ongoing match
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} blocked from joining T (prevention enabled).", player.Controller.PlayerName);
-                    PrintMessageToPlayer(player, Core.Localizer["error.team.full.t"]);
-                    return HookResult.Stop;
-                }
-
-                // Config allows new players - check list count (includes reserved slots for disconnected players)
-                // This prevents exceeding team limit when disconnected players have reserved slots
-                if (listCount < maxTeamSize)
-                {
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} joined T team (list: {List}/{Max}, actual: {Actual}).", player.Controller.PlayerName, listCount, maxTeamSize, actualTCount);
-                    playingTPlayers.Add(player);
-                    Core.Scheduler.NextTick(() => FixTeammateColors());
-                    CheckAutoResetOnLeave();
-                    return HookResult.Continue;
-                }
-                else
-                {
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} blocked from T - team full (list: {List}/{Max}, actual: {Actual}).", player.Controller.PlayerName, listCount, maxTeamSize, actualTCount);
-                    PrintMessageToPlayer(player, Core.Localizer["error.team.full.t"]);
-                    return HookResult.Stop;
-                }
+                return HandleActiveMatchJoin(
+                    player,
+                    Team.T,
+                    playingTPlayers,
+                    reservedTSlots,
+                    "error.team.full.t");
             }
 
             if (teamTojoin == 1)
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} joined Spectators.", player.Controller.PlayerName);
-                // Don't remove players from playing lists when they go to spectator during active match
-                // They should keep their slot reserved so they can rejoin their team
-                // Lists will be cleaned up when the match resets
+
+                // Slot release on Spec move depends on config:
+                // - PreventNotPickedPlayersFromJoiningOngoingMatch = true: keep the slot reserved
+                //   for the player so no one else can take it (list identity preserved).
+                // - false: release the slot so other spectators can claim it. The player can still
+                //   rejoin via the normal capacity check as long as the team isn't full.
+                if (!preventNotPickedPlayersFromJoiningOngoingMatch)
+                {
+                    bool wasInCt = playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
+                    bool wasInT = playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
+                    if (cfg.DetailedLogging && (wasInCt || wasInT))
+                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} moved to Spectator - released slot (CT:{Ct} T:{T}).", player.Controller.PlayerName, wasInCt, wasInT);
+                }
+
                 return HookResult.Continue;
             }
         }
 
+        return HookResult.Stop;
+    }
+
+    /// <summary>
+    /// Shared implementation for validating a team-join request during an active match state
+    /// (KnifeRound, Match, PickingStartingSide, Timeout) for either CT or T.
+    /// Handles re-joins (existing listed players OR reserved SteamIDs) and caps capacity at
+    /// <c>max(listCount, actualCount)</c> so the engine's live team never exceeds the configured limit.
+    /// </summary>
+    private HookResult HandleActiveMatchJoin(IPlayer player, Team team, List<IPlayer> playingList, HashSet<ulong> reservedSlots, string fullErrorKey)
+    {
+        int maxTeamSize = cfg.MinimumReadyPlayers / 2;
+
+        bool isInPlayingList = playingList.Any(p => p.SteamID == player.SteamID);
+        bool hasReservation = reservedSlots.Contains(player.SteamID);
+
+        int listCount = playingList.Count;
+        int actualCount = GetPlayersInTeam(team).Count;
+
+        if (cfg.DetailedLogging)
+            logger.LogInformation("HandleActiveMatchJoin - {Team}: list {ListCount}/{Max}, actual {Actual}, inList={InList}, reserved={Reserved}",
+                team, listCount, maxTeamSize, actualCount, isInPlayingList, hasReservation);
+
+        // Rejoin path: already in the playing list OR has a SteamID-based reservation.
+        if (isInPlayingList || hasReservation)
+        {
+            // If the player is not currently on this team and the engine team is already at capacity,
+            // reject. This covers the window where an untracked reconnect is still physically occupying
+            // a seat (ScheduleForceToSpectator hasn't yet moved them off) - allowing the list-owner to
+            // rejoin here would push the physical team above the configured limit.
+            var currentTeam = (Team)player.Controller.TeamNum;
+            if (currentTeam != team && actualCount >= maxTeamSize)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} has slot but team is physically full (actual:{Actual}/{Max}) - rejecting.",
+                        team, player.Controller.PlayerName, actualCount, maxTeamSize);
+                PrintMessageToPlayer(player, Core.Localizer[fullErrorKey]);
+                return HookResult.Stop;
+            }
+
+            // Refresh the IPlayer reference in the list (stale ref from before disconnect would have
+            // different PlayerID/slot). This keeps list identity aligned with the current connected player.
+            playingList.RemoveAll(p => p.SteamID == player.SteamID);
+            playingList.Add(player);
+            reservedSlots.Remove(player.SteamID);
+            forcedToSpectator.Remove(player.SteamID);
+
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} re-joined.", team, player.Controller.PlayerName);
+
+            Core.Scheduler.NextTick(() => FixTeammateColors());
+            CheckAutoResetOnLeave();
+            return HookResult.Continue;
+        }
+
+        // Untracked player. If prevention is enabled, always block.
+        if (preventNotPickedPlayersFromJoiningOngoingMatch)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} blocked (prevention enabled).", team, player.Controller.PlayerName);
+            PrintMessageToPlayer(player, Core.Localizer[fullErrorKey]);
+            ScheduleForceToSpectator(player, fullErrorKey);
+            return HookResult.Stop;
+        }
+
+        // Use the larger of list-count and actual engine-team count. This closes races where
+        // engine-side placements during the isMovingPlayersToTeams window inflated the actual
+        // team count above the tracked list count.
+        int effectiveCount = Math.Max(listCount, actualCount);
+        if (effectiveCount < maxTeamSize)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} joined (list:{List}, actual:{Actual}, max:{Max}).",
+                    team, player.Controller.PlayerName, listCount, actualCount, maxTeamSize);
+            playingList.Add(player);
+            forcedToSpectator.Remove(player.SteamID);
+            Core.Scheduler.NextTick(() => FixTeammateColors());
+            CheckAutoResetOnLeave();
+            return HookResult.Continue;
+        }
+
+        if (cfg.DetailedLogging)
+            logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} blocked - team full (list:{List}, actual:{Actual}, max:{Max}).",
+                team, player.Controller.PlayerName, listCount, actualCount, maxTeamSize);
+        PrintMessageToPlayer(player, Core.Localizer[fullErrorKey]);
+        ScheduleForceToSpectator(player, fullErrorKey);
         return HookResult.Stop;
     }
 
@@ -786,7 +900,7 @@ partial class MixScrims
 
         if (attacker.Team == victim.Team)
         {
-            if (weapon == DamageTypes_t.DMG_BULLET || weapon == DamageTypes_t.DMG_SLASH)
+            if (weapon == DamageTypes_t.DMG_BULLET || weapon == DamageTypes_t.DMG_SLASH || weapon == DamageTypes_t.DMG_SHOCK)
             {
                 if(cfg.DetailedLogging)
                     logger.LogInformation("HandleTakeDamage: Friendly fire or knife slash detected, skipping.");

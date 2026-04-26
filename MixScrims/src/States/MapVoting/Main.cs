@@ -115,11 +115,11 @@ public partial class MixScrims
         }
         else
         {
-            votedMaps.Add(new VotedMap { Map = votedMap, Votes = 1, VotedBy = [player.PlayerID] });
+            votedMaps.Add(new VotedMap { Map = votedMap, Votes = 1, VotedBy = new List<int> { player.PlayerID } });
             votes = 1;
         }
 
-        PrintMessageToPlayer(player, Core.Localizer["announcement.map.voted", playerName, votedMap.DisplayName, votes]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.map.voted", playerName, votedMap.DisplayName, votes]);
 
         CloseMenuForPlayer(player);
     }

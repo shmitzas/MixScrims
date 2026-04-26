@@ -66,6 +66,9 @@ public partial class MixScrims
         foreach (var token in _punishmentTimers.Values) token.Cancel();
         _punishmentTimers.Clear();
         playersWaitingForPunishment.Clear();
+        reservedCtSlots.Clear();
+        reservedTSlots.Clear();
+        forcedToSpectator.Clear();
         resetMixOnFirstJoin = false;
         CancelAutoResetOnLeaveTimer(announce: false);
         StopAllAnnouncmentTimers();
