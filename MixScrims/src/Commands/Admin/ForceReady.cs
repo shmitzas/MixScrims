@@ -15,7 +15,7 @@ public partial class MixScrims
         var admin = context.Sender;
         var connectedPlayers = GetPlayers().Count;
 
-        if (connectedPlayers < cfg.MinimumReadyPlayers)
+        if (!cfg.AdminCommandsBypassPlayerLimit && connectedPlayers < cfg.MinimumReadyPlayers)
         {
             logger.LogWarning("OnForceReady: Not enough players connected ({Connected}/{Minimum})", connectedPlayers, cfg.MinimumReadyPlayers);
             if (admin != null)
