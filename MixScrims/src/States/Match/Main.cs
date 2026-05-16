@@ -28,6 +28,9 @@ public partial class MixScrims
         Core.Scheduler.NextTick(() =>
         {
             Core.Engine.ExecuteCommand("exec mixscrims/match_start.cfg");
+            // Override engine team limits immediately after match cvars settle, so the
+            // very first side switch (and every subsequent one) cannot dump players to spec.
+            RelaxEngineTeamLimits("StartMatch");
         });
 
         var mapName = Core.Engine.GlobalVars.MapName;
@@ -70,6 +73,93 @@ public partial class MixScrims
         {
             mixScrimsService.KickNotPlayingPlayers(Core.Localizer["info.kick_reason.not_picked"]);
         }
+    }
+
+    /// <summary>
+    /// Resynchronizes <see cref="playingCtPlayers"/> and <see cref="playingTPlayers"/>
+    /// with the engine's actual team assignments. Walks both lists, looks up each tracked
+    /// SteamID's current team, and moves them between lists when sides have been swapped
+    /// by the engine (regular halftime, OT halftime, OT-period transitions, surrender,
+    /// or any other engine-driven swap). Players currently in Spectator or disconnected
+    /// keep their existing assignment so reserved slots are preserved.
+    /// </summary>
+    internal void ResyncPlayingListsFromEngine()
+    {
+        // Snapshot to avoid mutating the lists we're iterating.
+        var ctSnapshot = playingCtPlayers.ToList();
+        var tSnapshot = playingTPlayers.ToList();
+
+        var newCt = new List<IPlayer>();
+        var newT = new List<IPlayer>();
+        int movedCtToT = 0;
+        int movedTToCt = 0;
+
+        void Place(IPlayer tracked, List<IPlayer> originList)
+        {
+            // Try to refresh the IPlayer reference (handles reconnects with new PlayerID/slot).
+            IPlayer? live = null;
+            try { live = GetPlayerBySteamId(tracked.SteamID); }
+            catch { live = null; }
+
+            var current = live ?? tracked;
+            int teamNum = -1;
+            if (current.IsValid && current.Controller != null)
+                teamNum = current.Controller.TeamNum;
+
+            if (teamNum == (int)Team.CT)
+                newCt.Add(current);
+            else if (teamNum == (int)Team.T)
+                newT.Add(current);
+            else
+            {
+                // Disconnected, in Spectator, or unassigned - keep on the original side
+                // so reserved-slot semantics are preserved.
+                if (originList == playingCtPlayers)
+                    newCt.Add(current);
+                else
+                    newT.Add(current);
+            }
+        }
+
+        foreach (var p in ctSnapshot)
+        {
+            int before = newCt.Count + newT.Count;
+            Place(p, playingCtPlayers);
+            // Track moves for logging
+            if (newT.Count + newCt.Count == before + 1
+                && newT.Count > 0
+                && newT[^1].SteamID == p.SteamID)
+                movedCtToT++;
+        }
+        foreach (var p in tSnapshot)
+        {
+            int before = newCt.Count + newT.Count;
+            Place(p, playingTPlayers);
+            if (newT.Count + newCt.Count == before + 1
+                && newCt.Count > 0
+                && newCt[^1].SteamID == p.SteamID)
+                movedTToCt++;
+        }
+
+        playingCtPlayers = newCt;
+        playingTPlayers = newT;
+
+        // Reservations are SteamID-based and must follow side switches too. When we detect any
+        // movement of tracked players between sides, swap the reservation sets so a reserved
+        // player who is currently in Spectator returns to the correct (post-swap) side.
+        if (movedCtToT > 0 || movedTToCt > 0)
+        {
+            var oldReservedCt = reservedCtSlots.ToList();
+            var oldReservedT = reservedTSlots.ToList();
+            reservedCtSlots.Clear();
+            reservedTSlots.Clear();
+            foreach (var s in oldReservedCt) reservedTSlots.Add(s);
+            foreach (var s in oldReservedT) reservedCtSlots.Add(s);
+        }
+
+        if (cfg.DetailedLogging && (movedCtToT > 0 || movedTToCt > 0))
+            logger.LogInformation("ResyncPlayingListsFromEngine: side swap detected - moved {CtToT} CT->T, {TToCt} T->CT (now CT:{CT} T:{T})",
+                movedCtToT, movedTToCt, playingCtPlayers.Count, playingTPlayers.Count);
     }
 
     /// <summary>

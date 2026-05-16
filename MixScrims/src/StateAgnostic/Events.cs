@@ -526,6 +526,22 @@ partial class MixScrims
         if (preventNotPickedPlayersFromJoiningOngoingMatch)
             return HookResult.Continue;
 
+        // While the plugin is performing a programmatic team move (side-swap at halftime
+        // or OT period boundaries, knife->match transition, stay/switch sides) we MUST NOT
+        // prune entries from the playing lists. The pre-handler bypasses with Continue
+        // without re-adding to the new list, so pruning here would leave the player
+        // untracked until ResyncPlayingListsFromEngine runs (1s after EventRoundStart).
+        // Any team event firing in that window would then treat them as untracked and
+        // force them to spec - the exact symptom of "OT side switch dumps half the
+        // players to spec". Resync will reconcile the lists with engine reality.
+        if (isMovingPlayersToTeams)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleEventPlayerTeamPost: skipping prune for {PlayerName} during programmatic move (committed team {Team}).",
+                    player.Controller.PlayerName, @event.Team);
+            return HookResult.Continue;
+        }
+
         // Committed team for this player. Use event value (Team=new) which is authoritative here.
         int committedTeam = @event.Team;
 
@@ -751,18 +767,27 @@ partial class MixScrims
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} joined Spectators.", player.Controller.PlayerName);
 
-                // Slot release on Spec move depends on config:
-                // - PreventNotPickedPlayersFromJoiningOngoingMatch = true: keep the slot reserved
-                //   for the player so no one else can take it (list identity preserved).
-                // - false: release the slot so other spectators can claim it. The player can still
-                //   rejoin via the normal capacity check as long as the team isn't full.
-                if (!preventNotPickedPlayersFromJoiningOngoingMatch)
+                // Voluntary move to Spectator releases the playing-list slot so any other
+                // currently-connected player can take it. Without this, the seat would stay
+                // occupied in the list and HandleActiveMatchJoin's capacity check would block
+                // every new joiner until the original player physically disconnects.
+                //
+                // Under PreventNotPickedPlayersFromJoiningOngoingMatch = true the player is
+                // additionally added to the side's reserved-slot set so they retain the right
+                // to come back to that side via the rejoin path in HandleActiveMatchJoin
+                // (hasReservation == true), as long as a free seat is available at the time.
+                bool wasInCt = playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
+                bool wasInT = playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
+
+                if (preventNotPickedPlayersFromJoiningOngoingMatch)
                 {
-                    bool wasInCt = playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
-                    bool wasInT = playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
-                    if (cfg.DetailedLogging && (wasInCt || wasInT))
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} moved to Spectator - released slot (CT:{Ct} T:{T}).", player.Controller.PlayerName, wasInCt, wasInT);
+                    if (wasInCt) reservedCtSlots.Add(player.SteamID);
+                    if (wasInT) reservedTSlots.Add(player.SteamID);
                 }
+
+                if (cfg.DetailedLogging && (wasInCt || wasInT))
+                    logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} moved to Spectator - released slot (CT:{Ct} T:{T}, reserved:{Reserved}).",
+                        player.Controller.PlayerName, wasInCt, wasInT, preventNotPickedPlayersFromJoiningOngoingMatch);
 
                 return HookResult.Continue;
             }

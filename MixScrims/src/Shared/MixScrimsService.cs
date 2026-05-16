@@ -25,12 +25,27 @@ public class MixScrimsService : IMixScrims
 
     public void SetMatchState(MatchState state)
     {
+        var previous = _mixScrims.MatchState;
         _mixScrims.MatchState = state;
+        // State transitions are infrequent and high-signal. Log unconditionally (not gated
+        // by DetailedLogging) so issues like \"OT side switch dumps players to spec\" can be
+        // correlated with the surrounding state machine activity even on production servers.
+        if (previous != state)
+        {
+            _mixScrims.logger.LogInformation("SetMatchState: {Previous} -> {New} (playing CT:{Ct}/T:{T}, picked CT:{PCt}/T:{PT}, ready:{Ready})",
+                previous, state,
+                _mixScrims.playingCtPlayers.Count, _mixScrims.playingTPlayers.Count,
+                _mixScrims.pickedCtPlayers.Count, _mixScrims.pickedTPlayers.Count,
+                _mixScrims.readyPlayers.Count);
+        }
     }
 
     public void SetPluginState(PluginState state)
     {
+        var previous = _mixScrims.PluginState;
         _mixScrims.PluginState = state;
+        if (previous != state)
+            _mixScrims.logger.LogInformation("SetPluginState: {Previous} -> {New}", previous, state);
     }
 
     public void SetCounterTerroristsTeamName(string name)

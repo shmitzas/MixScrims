@@ -113,7 +113,8 @@ public partial class MixScrims
         UnpauseMatch();
 
         Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");
-        
+        Core.Scheduler.NextTick(() => RelaxEngineTeamLimits("StartKnifeRound"));
+
         if (cfg.KickPlayersNotInMatch)
         {
             mixScrimsService.KickNotPlayingPlayers(Core.Localizer["info.kick_reason.not_picked"]);
@@ -467,8 +468,18 @@ public partial class MixScrims
                 continue;
             }
 
+            // ChangeTeam kills the player and recreates the pawn entity, which is expensive.
+            // Skip the call if the player is already on Spectator to avoid unnecessary entity churn.
+            int currentTeam = player.Controller?.TeamNum ?? -1;
+            if (currentTeam == (int)Team.Spectator)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("MovePlayersToDesignatedTeamsPreMatch: {PlayerName} already on SPEC, skipping.", player.Controller?.PlayerName ?? "<unknown>");
+                continue;
+            }
+
             if (cfg.DetailedLogging)
-                logger.LogInformation("Moving {PlayerName} to SPEC", player.Controller.PlayerName);
+                logger.LogInformation("Moving {PlayerName} to SPEC", player.Controller!.PlayerName);
             player.ChangeTeamAsync(Team.Spectator);
         }
 
@@ -478,8 +489,19 @@ public partial class MixScrims
             if (!playingCtPlayerIds.Contains(player.PlayerID))
                 continue;
 
+            // Skip if the player is already on CT — ChangeTeam kills/respawns the pawn,
+            // and doing this unnecessarily for every player on phase transitions causes
+            // ~1s server-frame stalls (combined with mp_restartgame in match_start.cfg).
+            int currentTeam = player.Controller?.TeamNum ?? -1;
+            if (currentTeam == (int)Team.CT)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("MovePlayersToDesignatedTeamsPreMatch: {PlayerName} already on CT, skipping.", player.Controller?.PlayerName ?? "<unknown>");
+                continue;
+            }
+
             if (cfg.DetailedLogging)
-                logger.LogInformation("Moving {PlayerName} to CT", player.Controller.PlayerName);
+                logger.LogInformation("Moving {PlayerName} to CT", player.Controller!.PlayerName);
             if (IsBot(player))
             {
                 player.SwitchTeamAsync(Team.CT);
@@ -497,8 +519,17 @@ public partial class MixScrims
             if (!playingTPlayerIds.Contains(player.PlayerID))
                 continue;
 
+            // Same reasoning as the CT loop above — avoid redundant pawn destroy/create.
+            int currentTeam = player.Controller?.TeamNum ?? -1;
+            if (currentTeam == (int)Team.T)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("MovePlayersToDesignatedTeamsPreMatch: {PlayerName} already on T, skipping.", player.Controller?.PlayerName ?? "<unknown>");
+                continue;
+            }
+
             if (cfg.DetailedLogging)
-                logger.LogInformation("Moving {PlayerName} to T", player.Controller.PlayerName);
+                logger.LogInformation("Moving {PlayerName} to T", player.Controller!.PlayerName);
             if (IsBot(player))
             {
                 player.SwitchTeamAsync(Team.T);
