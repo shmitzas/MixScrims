@@ -29,6 +29,8 @@ public partial class MixScrims
         {
             if (Core.Engine is { } engine)
                 engine.ExecuteCommand("exec mixscrims/match_start.cfg");
+            else
+                logger.LogWarning("StartMatch: Core.Engine unavailable; skipping match_start.cfg.");
             // Override engine team limits immediately after match cvars settle, so the
             // very first side switch (and every subsequent one) cannot dump players to spec.
             RelaxEngineTeamLimits("StartMatch");
@@ -97,10 +99,14 @@ public partial class MixScrims
         // the round-prestart). Accessing .SteamID on a disposed Player throws
         // ObjectDisposedException, which previously killed the entire resync and left the
         // playing lists desynced from the engine.
-        static ulong SafeSteamId(IPlayer p)
+        ulong SafeSteamId(IPlayer p)
         {
             try { return p.SteamID; }
-            catch { return 0UL; }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "ResyncPlayingListsFromEngine: failed reading SteamID from tracked player reference (likely disposed).");
+                return 0UL;
+            }
         }
 
         var ctSnapshot = playingCtPlayers
@@ -121,12 +127,19 @@ public partial class MixScrims
             // belong to disconnected players that HandleDisconnectedPlayer will/has
             // already pruned; carrying them forward only re-introduces disposed refs.
             if (steamId == 0UL)
+            {
+                logger.LogWarning("ResyncPlayingListsFromEngine: dropping tracked player due to unreadable SteamID (disposed reference).");
                 return;
+            }
 
             // Try to refresh the IPlayer reference (handles reconnects with new PlayerID/slot).
             IPlayer? live = null;
             try { live = GetPlayerBySteamId(steamId); }
-            catch { live = null; }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "ResyncPlayingListsFromEngine: exception while refreshing player by SteamID {SteamId}.", steamId);
+                live = null;
+            }
 
             var current = live ?? tracked;
             int teamNum = -1;
@@ -135,8 +148,9 @@ public partial class MixScrims
                 if (current.IsValid && current.Controller != null)
                     teamNum = current.Controller.TeamNum;
             }
-            catch
+            catch (Exception ex)
             {
+                logger.LogWarning(ex, "ResyncPlayingListsFromEngine: failed reading controller/team for SteamID {SteamId}.", steamId);
                 teamNum = -1;
             }
 

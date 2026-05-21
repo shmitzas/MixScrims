@@ -429,7 +429,10 @@ public sealed partial class MixScrims
             Core.Scheduler.NextTick(() =>
             {
                 if (Core.Engine is not { } engine)
+                {
+                    logger.LogWarning("SetTeamName: Core.Engine unavailable; skipping CT team name update.");
                     return;
+                }
                 if (teamName is null)
                 {
                     engine.ExecuteCommand("mp_teamname_1 COUNTER-TERRORISTS");
@@ -445,7 +448,10 @@ public sealed partial class MixScrims
             Core.Scheduler.NextTick(() =>
             {
                 if (Core.Engine is not { } engine)
+                {
+                    logger.LogWarning("SetTeamName: Core.Engine unavailable; skipping T team name update.");
                     return;
+                }
                 if (teamName is null)
                 {
                     engine.ExecuteCommand("mp_teamname_2 TERRORISTS");
@@ -651,7 +657,10 @@ public sealed partial class MixScrims
         }
         Core.Scheduler.NextTick(() =>
         {
-            Core.Engine.ExecuteCommand(banCommand);
+            if (Core.Engine is { } engine)
+                engine.ExecuteCommand(banCommand);
+            else
+                logger.LogWarning("ExecutePunishmentCommand: Core.Engine unavailable; skipping ban command for {SteamId}.", steamId);
         });
         playersWaitingForPunishment.Remove(steamId);
         _punishmentTimers.Remove(steamId);

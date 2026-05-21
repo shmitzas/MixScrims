@@ -40,8 +40,7 @@ public partial class MixScrims
                 // a value type so only the engine reference is null-checked here.
                 if (Core.Engine is not { } engine)
                 {
-                    if (cfg.DetailedLogging)
-                        logger.LogWarning("HandleMatchEnd: Core.Engine unavailable, skipping post-match LoadMap.");
+                    logger.LogWarning("HandleMatchEnd: Core.Engine unavailable, skipping post-match LoadMap.");
                     return;
                 }
 
@@ -172,15 +171,13 @@ public partial class MixScrims
             CCSGameRules? gameRules = Core.EntitySystem.GetGameRules();
             if (gameRules == null)
             {
-                if (cfg.DetailedLogging)
-                    logger.LogWarning("RelaxEngineTeamLimits[{Site}]: GetGameRules() returned null - skipping override", callSite);
+                logger.LogWarning("RelaxEngineTeamLimits[{Site}]: GetGameRules() returned null - skipping override", callSite);
                 return;
             }
 
             if (!gameRules.IsValid)
             {
-                if (cfg.DetailedLogging)
-                    logger.LogWarning("RelaxEngineTeamLimits[{Site}]: game rules entity is not valid - skipping override", callSite);
+                logger.LogWarning("RelaxEngineTeamLimits[{Site}]: game rules entity is not valid - skipping override", callSite);
                 return;
             }
 
@@ -190,8 +187,7 @@ public partial class MixScrims
                 // Defensive: MaxClients should always be positive on a running server, but
                 // if it ever isn't, writing a zero/negative cap would make CS2 worse, not
                 // better. Bail rather than corrupt the schema.
-                if (cfg.DetailedLogging)
-                    logger.LogWarning("RelaxEngineTeamLimits[{Site}]: MaxClients={Max} is not positive - skipping override", callSite, maxPlayers);
+                logger.LogWarning("RelaxEngineTeamLimits[{Site}]: MaxClients={Max} is not positive - skipping override", callSite, maxPlayers);
                 return;
             }
 

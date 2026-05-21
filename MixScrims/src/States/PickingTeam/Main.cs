@@ -95,7 +95,10 @@ public partial class MixScrims
         mixScrimsService.SetMatchState(MatchState.PickingTeam);        
 
         PauseMatch();
-        Core.Engine.ExecuteCommand("exec mixscrims/teampick.cfg");
+        if (Core.Engine is { } pickEngine)
+            pickEngine.ExecuteCommand("exec mixscrims/teampick.cfg");
+        else
+            logger.LogWarning("StartTeamPickingPhase: Core.Engine unavailable; skipping teampick.cfg.");
 
         MovePlayersToDesignatedTeamsPrePick();
 
@@ -123,7 +126,10 @@ public partial class MixScrims
     {
         mixScrimsService.SetMatchState(MatchState.PickingTeam);
 
-        Core.Engine.ExecuteCommand("exec mixscrims/teampick.cfg");
+        if (Core.Engine is { } skipPickEngine)
+            skipPickEngine.ExecuteCommand("exec mixscrims/teampick.cfg");
+        else
+            logger.LogWarning("SkipTeamPickingPhase: Core.Engine unavailable; skipping teampick.cfg.");
         PauseMatch();
 
         var players = GetPlayingPlayers();

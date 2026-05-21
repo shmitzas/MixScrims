@@ -123,8 +123,7 @@ public partial class MixScrims
         }
         catch (Exception ex)
         {
-            if (cfg.DetailedLogging)
-                logger.LogError(ex, "SetPlayerReadyStatusInScoreboard: Failed to update clan tag for player {PlayerName}. Most likely player left the server while setting clan tag.", player?.Name ?? $"Slot: {player?.Slot}");
+            logger.LogWarning(ex, "SetPlayerReadyStatusInScoreboard: Failed to update clan tag for player {PlayerName}. Most likely player left the server while setting clan tag.", player?.Name ?? $"Slot: {player?.Slot}");
         }
     }
 
@@ -167,8 +166,7 @@ public partial class MixScrims
             }
             catch (Exception ex)
             {
-                if (cfg.DetailedLogging)
-                    logger.LogError(ex, "RemoveReadyClanTagsFromAllPlayers: Failed to remove clan tag for player {PlayerName}.", player?.Name ?? $"Slot: {player?.Slot}");
+                logger.LogWarning(ex, "RemoveReadyClanTagsFromAllPlayers: Failed to remove clan tag for player {PlayerName}.", player?.Name ?? $"Slot: {player?.Slot}");
             }
         }
     }

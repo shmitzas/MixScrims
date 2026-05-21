@@ -287,7 +287,10 @@ public partial class MixScrims
     internal void HandleTimeoutVote(IPlayer player, string choice)
     {
         if (!IsPlayerValid(player))
+        {
+            logger.LogWarning("HandleTimeoutVote: ignoring vote from invalid/disconnected player {Slot}.", player?.Slot);
             return;
+        }
 
         if (cfg.DetailedLogging)
         {

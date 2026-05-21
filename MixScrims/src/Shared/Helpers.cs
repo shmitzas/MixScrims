@@ -200,7 +200,10 @@ public sealed partial class MixScrims
         logger.LogInformation("Pausing match");
         Core.Scheduler.NextTick(() =>
         {
-            Core.Engine.ExecuteCommand("mp_pause_match");
+            if (Core.Engine is { } engine)
+                engine.ExecuteCommand("mp_pause_match");
+            else
+                logger.LogWarning("PauseMatch: Core.Engine unavailable; skipping mp_pause_match.");
         });
     }
 
@@ -212,7 +215,10 @@ public sealed partial class MixScrims
         logger.LogInformation("Unpausing match");
         Core.Scheduler.NextTick(() =>
         {
-            Core.Engine.ExecuteCommand("mp_unpause_match");
+            if (Core.Engine is { } engine)
+                engine.ExecuteCommand("mp_unpause_match");
+            else
+                logger.LogWarning("UnpauseMatch: Core.Engine unavailable; skipping mp_unpause_match.");
         });
     }
 

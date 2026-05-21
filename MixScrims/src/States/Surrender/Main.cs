@@ -149,7 +149,10 @@ public partial class MixScrims
     internal void HandleSurrenderVote(IPlayer player, string choice)
     {
         if (!IsPlayerValid(player))
+        {
+            logger.LogWarning("HandleSurrenderVote: ignoring vote from invalid/disconnected player {Slot}.", player?.Slot);
             return;
+        }
 
         if (cfg.DetailedLogging)
         {

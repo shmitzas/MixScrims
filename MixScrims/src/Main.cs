@@ -82,9 +82,13 @@ public partial class MixScrims : BasePlugin
             timeoutVoteTimer?.Cancel();
             surrenderVoteTimer?.Cancel();
 
-            foreach (var cts in _punishmentTimers.Values)
+            foreach (var (steamId, cts) in _punishmentTimers)
             {
-                try { cts?.Cancel(); } catch { /* ignored */ }
+                try { cts?.Cancel(); }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning(ex, "MixScrims.Unload: failed to cancel punishment timer for {SteamId}.", steamId);
+                }
             }
             _punishmentTimers.Clear();
         }
@@ -138,12 +142,18 @@ public partial class MixScrims : BasePlugin
         // but aliases registered manually via RegisterCommandAlias persist on hot reload
         // and will route into a dead plugin instance unless removed here.
         if (cfg?.Commands == null)
+        {
+            logger?.LogWarning("UnregisterCommands: cfg.Commands is null, skipping alias cleanup.");
             return;
+        }
 
         foreach (var (commandName, commandInfo) in cfg.Commands)
         {
             if (commandInfo?.Aliases == null)
+            {
+                logger?.LogWarning("UnregisterCommands: command {Command} has null aliases, skipping.", commandName);
                 continue;
+            }
 
             foreach (var alias in commandInfo.Aliases)
             {

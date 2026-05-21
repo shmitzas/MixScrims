@@ -112,7 +112,10 @@ public partial class MixScrims
 
         UnpauseMatch();
 
-        Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");
+        if (Core.Engine is { } knifeEngine)
+            knifeEngine.ExecuteCommand("exec mixscrims/knife_round.cfg");
+        else
+            logger.LogWarning("StartKnifeRound: Core.Engine unavailable; skipping knife_round.cfg.");
         Core.Scheduler.NextTick(() => RelaxEngineTeamLimits("StartKnifeRound"));
 
         if (cfg.KickPlayersNotInMatch)
@@ -384,8 +387,7 @@ public partial class MixScrims
                             try { player.ChangeTeamAsync(Team.T); }
                             catch (Exception ex)
                             {
-                                if (cfg.DetailedLogging)
-                                    logger.LogWarning(ex, "SwitchStartingSides: Error changing T player team.");
+                                logger.LogWarning(ex, "SwitchStartingSides: Error changing team to T for {PlayerName}.", player.Controller.PlayerName);
                             }
                         }
                     }
@@ -409,8 +411,7 @@ public partial class MixScrims
                             try { player.ChangeTeamAsync(Team.CT); }
                             catch (Exception ex)
                             {
-                                if (cfg.DetailedLogging)
-                                    logger.LogWarning(ex, "SwitchStartingSides: Error changing CT player team.");
+                                logger.LogWarning(ex, "SwitchStartingSides: Error changing team to CT for {PlayerName}.", player.Controller.PlayerName);
                             }
                         }
                     }

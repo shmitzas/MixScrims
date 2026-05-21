@@ -577,8 +577,7 @@ partial class MixScrims
 
         if (player == null)
         {
-            if (cfg.DetailedLogging)
-                logger.LogWarning("HandlePlayerChangeTeam: player is null");
+            logger.LogWarning("HandlePlayerChangeTeam: player is null, stopping jointeam handling.");
             return HookResult.Stop;
         }
 
@@ -591,8 +590,7 @@ partial class MixScrims
 
         if (!player.IsValid)
         {
-            if (cfg.DetailedLogging)
-                logger.LogWarning("HandlePlayerChangeTeam: player is not valid");
+            logger.LogWarning("HandlePlayerChangeTeam: player {Slot} is not valid, stopping jointeam handling.", player.Slot);
             return HookResult.Stop;
         }
 

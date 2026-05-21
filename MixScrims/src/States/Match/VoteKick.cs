@@ -167,7 +167,10 @@ public partial class MixScrims
     internal void HandleVoteKickVote(IPlayer voter, Team team, bool voteYes)
     {
         if (!IsPlayerValid(voter))
+        {
+            logger.LogWarning("HandleVoteKickVote: ignoring vote from invalid/disconnected player {Slot}.", voter?.Slot);
             return;
+        }
 
         bool inProgress = team == Team.CT ? isVoteKickInProgressCt : isVoteKickInProgressT;
         if (!inProgress)

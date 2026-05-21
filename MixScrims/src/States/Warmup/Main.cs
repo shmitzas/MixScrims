@@ -30,6 +30,8 @@ public partial class MixScrims
         {
             if (Core.Engine is { } engine)
                 engine.ExecuteCommand("exec mixscrims/warmup.cfg");
+            else
+                logger.LogWarning("LoadWarmupConfig: Core.Engine unavailable; skipping warmup.cfg.");
         });
 
         var pluginState = mixScrimsService.GetCurrentPluginState();
@@ -42,6 +44,8 @@ public partial class MixScrims
                 {
                     if (Core.Engine is { } engine)
                         engine.ExecuteCommand("exec mixscrims/staging_overrides.cfg");
+                    else
+                        logger.LogWarning("LoadWarmupConfig: Core.Engine unavailable; skipping staging_overrides.cfg.");
                 });
             });
             Core.Scheduler.StopOnMapChange(token);
@@ -54,6 +58,8 @@ public partial class MixScrims
                 {
                     if (Core.Engine is { } engine)
                         engine.ExecuteCommand("exec mixscrims/production_overrides.cfg");
+                    else
+                        logger.LogWarning("LoadWarmupConfig: Core.Engine unavailable; skipping production_overrides.cfg.");
                 });
             });
             Core.Scheduler.StopOnMapChange(token);
