@@ -17,21 +17,51 @@ public partial class MixScrims
     public HookResult HandleMatchEnd(EventCsWinPanelMatch @event)
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
-        if (matchState == MatchState.Match)
+        if (matchState != MatchState.Match)
+            return HookResult.Continue;
+
+        var token = Core.Scheduler.DelayBySeconds(10, () =>
         {
-            Core.Scheduler.DelayBySeconds(10, () =>
+            try
             {
+                // Bail if another component has already initiated a map change in the
+                // meantime - stacking host_workshop_map / map commands across plugins is
+                // the classic CS2 map-transition crash window.
+                var stateNow = mixScrimsService.GetCurrentMatchState();
+                if (stateNow == MatchState.MapLoading || stateNow == MatchState.MapChosen)
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("HandleMatchEnd: map change already in progress ({State}), skipping post-match LoadMap.", stateNow);
+                    return;
+                }
+
+                // Engine null-guard: a concurrent transition (MapChooser, end-of-map cycle)
+                // may have begun tearing the world down within the 10s window. GlobalVars is
+                // a value type so only the engine reference is null-checked here.
+                if (Core.Engine is not { } engine)
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogWarning("HandleMatchEnd: Core.Engine unavailable, skipping post-match LoadMap.");
+                    return;
+                }
+
                 if (cfg.DetailedLogging)
                     logger.LogInformation("Match ended, transitioning to Fresh match state.");
                 ResetPluginState();
-                MapDetails map = new();
+                var mapNameStr = engine.GlobalVars.MapName.ToString() ?? string.Empty;
+                var map = new MapDetails
                 {
-                    map.MapName = Core.Engine.GlobalVars.MapName;
-                    map.DisplayName = Core.Engine.GlobalVars.MapName;
+                    MapName = mapNameStr,
+                    DisplayName = mapNameStr,
                 };
                 LoadMap(map);
-            });
-        }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "HandleMatchEnd: delayed post-match callback failed.");
+            }
+        });
+        Core.Scheduler.StopOnMapChange(token);
         return HookResult.Continue;
     }
 
@@ -88,15 +118,23 @@ public partial class MixScrims
         if (matchState != MatchState.Match)
             return HookResult.Continue;
 
-        Core.Scheduler.DelayBySeconds(1f, () =>
+        var resyncToken = Core.Scheduler.DelayBySeconds(1f, () =>
         {
-            ResyncPlayingListsFromEngine();
-            isMovingPlayersToTeams = false;
-            if (cfg.DetailedLogging)
-                logger.LogInformation("Round start resync complete - team validation re-enabled (CT:{CT} T:{T}, actual CT:{ActualCt} T:{ActualT})",
-                    playingCtPlayers.Count, playingTPlayers.Count,
-                    GetPlayersInTeam(Team.CT).Count, GetPlayersInTeam(Team.T).Count);
+            try
+            {
+                ResyncPlayingListsFromEngine();
+                isMovingPlayersToTeams = false;
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("Round start resync complete - team validation re-enabled (CT:{CT} T:{T}, actual CT:{ActualCt} T:{ActualT})",
+                        playingCtPlayers.Count, playingTPlayers.Count,
+                        GetPlayersInTeam(Team.CT).Count, GetPlayersInTeam(Team.T).Count);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "HandleRoundStart: deferred resync failed.");
+            }
         });
+        Core.Scheduler.StopOnMapChange(resyncToken);
 
         return HookResult.Continue;
     }

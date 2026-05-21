@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.7.4",
+    Version = "1.7.5",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -54,6 +54,45 @@ public partial class MixScrims : BasePlugin
 
     public override void Unload()
     {
+        try
+        {
+            // Unsubscribe explicit OnMapLoad handlers registered in RegisterListeners().
+            // [GameEventHandler]-attributed handlers are torn down by the framework on
+            // plugin unload, but these delegate-based subscriptions are not.
+            Core.Event.OnMapLoad -= WarmupHandleOnMapStart;
+            Core.Event.OnMapLoad -= AddPickedMapToPlayedMaps;
+            Core.Event.OnMapLoad -= HandleStateAgnosticMapLoad;
+            Core.Event.OnClientPutInServer -= HandleClientPutInServer;
+            Core.Event.OnClientDisconnected -= OnPlayerDisconnect;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "MixScrims.Unload: failed to unsubscribe lifecycle events.");
+        }
+
+        // Cancel every long-lived timer stored as an instance field so they cannot fire
+        // against a disposed plugin instance after a hot reload.
+        try
+        {
+            playerStatusTimer?.Cancel();
+            playerStatusTimerCenterHtml?.Cancel();
+            commandRemindersTimer?.Cancel();
+            captainsAnnouncementsTimer?.Cancel();
+            autoResetOnLeaveTimer?.Cancel();
+            timeoutVoteTimer?.Cancel();
+            surrenderVoteTimer?.Cancel();
+
+            foreach (var cts in _punishmentTimers.Values)
+            {
+                try { cts?.Cancel(); } catch { /* ignored */ }
+            }
+            _punishmentTimers.Clear();
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "MixScrims.Unload: failed to cancel one or more timers.");
+        }
+
         UnregisterCommands();
         logger?.LogInformation("MixScrims unloading.");
     }
@@ -93,7 +132,32 @@ public partial class MixScrims : BasePlugin
     }
 
     internal void UnregisterCommands()
-    {}
+    {
+        // Unregister every alias we registered in RegisterCommands(). Primary commands
+        // are auto-unregistered by the framework via the [Command] attribute lifecycle,
+        // but aliases registered manually via RegisterCommandAlias persist on hot reload
+        // and will route into a dead plugin instance unless removed here.
+        if (cfg?.Commands == null)
+            return;
+
+        foreach (var (commandName, commandInfo) in cfg.Commands)
+        {
+            if (commandInfo?.Aliases == null)
+                continue;
+
+            foreach (var alias in commandInfo.Aliases)
+            {
+                try
+                {
+                    Core.Command.UnregisterCommand(alias);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning(ex, "UnregisterCommands: failed to unregister alias {Alias} for {Command}.", alias, commandName);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Loads the configuration and initializes dependency injection services

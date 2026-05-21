@@ -135,6 +135,7 @@ public partial class MixScrims
         PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes]);
 
         surrenderVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => SurrenderVoteResult(team));
+        Core.Scheduler.StopOnMapChange(surrenderVoteTimer);
 
         if (cfg.DetailedLogging)
         {
@@ -289,11 +290,12 @@ public partial class MixScrims
         PauseMatch();
 
         // Schedule reset
-        Core.Scheduler.DelayBySeconds(matchResetDelay - 5, () =>
+        var resetToken = Core.Scheduler.DelayBySeconds(matchResetDelay - 5, () =>
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("Match surrendered by team {Team}, resetting plugin state.", team);
             ResetPluginState();
         });
+        Core.Scheduler.StopOnMapChange(resetToken);
     }
 }

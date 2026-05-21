@@ -27,13 +27,19 @@ public partial class MixScrims
         UnpauseMatch();
         Core.Scheduler.NextTick(() =>
         {
-            Core.Engine.ExecuteCommand("exec mixscrims/match_start.cfg");
+            if (Core.Engine is { } engine)
+                engine.ExecuteCommand("exec mixscrims/match_start.cfg");
             // Override engine team limits immediately after match cvars settle, so the
             // very first side switch (and every subsequent one) cannot dump players to spec.
             RelaxEngineTeamLimits("StartMatch");
         });
 
-        var mapName = Core.Engine.GlobalVars.MapName;
+        if (Core.Engine is not { } matchEngine)
+        {
+            logger.LogError("StartMatch: Core.Engine unavailable");
+            return;
+        }
+        var mapName = matchEngine.GlobalVars.MapName.ToString();
         if (string.IsNullOrEmpty(mapName))
         {
             logger.LogError("StartMatch: mapName is null or empty");
@@ -85,26 +91,54 @@ public partial class MixScrims
     /// </summary>
     internal void ResyncPlayingListsFromEngine()
     {
-        // Snapshot to avoid mutating the lists we're iterating.
-        var ctSnapshot = playingCtPlayers.ToList();
-        var tSnapshot = playingTPlayers.ToList();
+        // Snapshot SteamIDs (value-type) up front rather than IPlayer references. The
+        // tracked IPlayer objects may have been disposed by SwiftlyS2 between the time
+        // they were added to the list and this resync (e.g. a player disconnected after
+        // the round-prestart). Accessing .SteamID on a disposed Player throws
+        // ObjectDisposedException, which previously killed the entire resync and left the
+        // playing lists desynced from the engine.
+        static ulong SafeSteamId(IPlayer p)
+        {
+            try { return p.SteamID; }
+            catch { return 0UL; }
+        }
+
+        var ctSnapshot = playingCtPlayers
+            .Select(p => (player: p, steamId: SafeSteamId(p)))
+            .ToList();
+        var tSnapshot = playingTPlayers
+            .Select(p => (player: p, steamId: SafeSteamId(p)))
+            .ToList();
 
         var newCt = new List<IPlayer>();
         var newT = new List<IPlayer>();
         int movedCtToT = 0;
         int movedTToCt = 0;
 
-        void Place(IPlayer tracked, List<IPlayer> originList)
+        void Place(IPlayer tracked, ulong steamId, List<IPlayer> originList)
         {
+            // Drop entries whose SteamID could not be read (disposed object). These
+            // belong to disconnected players that HandleDisconnectedPlayer will/has
+            // already pruned; carrying them forward only re-introduces disposed refs.
+            if (steamId == 0UL)
+                return;
+
             // Try to refresh the IPlayer reference (handles reconnects with new PlayerID/slot).
             IPlayer? live = null;
-            try { live = GetPlayerBySteamId(tracked.SteamID); }
+            try { live = GetPlayerBySteamId(steamId); }
             catch { live = null; }
 
             var current = live ?? tracked;
             int teamNum = -1;
-            if (current.IsValid && current.Controller != null)
-                teamNum = current.Controller.TeamNum;
+            try
+            {
+                if (current.IsValid && current.Controller != null)
+                    teamNum = current.Controller.TeamNum;
+            }
+            catch
+            {
+                teamNum = -1;
+            }
 
             if (teamNum == (int)Team.CT)
                 newCt.Add(current);
@@ -112,8 +146,9 @@ public partial class MixScrims
                 newT.Add(current);
             else
             {
-                // Disconnected, in Spectator, or unassigned - keep on the original side
-                // so reserved-slot semantics are preserved.
+                // Currently in Spectator or unassigned - keep on the original side so
+                // a player who briefly went to spec is still tracked on their team.
+                // Disposed/disconnected players were filtered out above.
                 if (originList == playingCtPlayers)
                     newCt.Add(current);
                 else
@@ -121,23 +156,23 @@ public partial class MixScrims
             }
         }
 
-        foreach (var p in ctSnapshot)
+        foreach (var (player, steamId) in ctSnapshot)
         {
             int before = newCt.Count + newT.Count;
-            Place(p, playingCtPlayers);
+            Place(player, steamId, playingCtPlayers);
             // Track moves for logging
             if (newT.Count + newCt.Count == before + 1
                 && newT.Count > 0
-                && newT[^1].SteamID == p.SteamID)
+                && SafeSteamId(newT[^1]) == steamId)
                 movedCtToT++;
         }
-        foreach (var p in tSnapshot)
+        foreach (var (player, steamId) in tSnapshot)
         {
             int before = newCt.Count + newT.Count;
-            Place(p, playingTPlayers);
+            Place(player, steamId, playingTPlayers);
             if (newT.Count + newCt.Count == before + 1
                 && newCt.Count > 0
-                && newCt[^1].SteamID == p.SteamID)
+                && SafeSteamId(newCt[^1]) == steamId)
                 movedTToCt++;
         }
 

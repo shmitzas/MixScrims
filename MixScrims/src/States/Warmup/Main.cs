@@ -28,7 +28,8 @@ public partial class MixScrims
 
         Core.Scheduler.NextTick(() =>
         {
-            Core.Engine.ExecuteCommand("exec mixscrims/warmup.cfg");
+            if (Core.Engine is { } engine)
+                engine.ExecuteCommand("exec mixscrims/warmup.cfg");
         });
 
         var pluginState = mixScrimsService.GetCurrentPluginState();
@@ -37,7 +38,11 @@ public partial class MixScrims
         {
             var token = Core.Scheduler.DelayBySeconds(3, () => 
             {
-                Core.Scheduler.NextTick(() => Core.Engine.ExecuteCommand("exec mixscrims/staging_overrides.cfg"));
+                Core.Scheduler.NextTick(() =>
+                {
+                    if (Core.Engine is { } engine)
+                        engine.ExecuteCommand("exec mixscrims/staging_overrides.cfg");
+                });
             });
             Core.Scheduler.StopOnMapChange(token);
         }
@@ -45,7 +50,11 @@ public partial class MixScrims
         {
             var token = Core.Scheduler.DelayBySeconds(3, () => 
             {
-                Core.Scheduler.NextTick(() => Core.Engine.ExecuteCommand("exec mixscrims/production_overrides.cfg"));
+                Core.Scheduler.NextTick(() =>
+                {
+                    if (Core.Engine is { } engine)
+                        engine.ExecuteCommand("exec mixscrims/production_overrides.cfg");
+                });
             });
             Core.Scheduler.StopOnMapChange(token);
         }

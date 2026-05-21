@@ -70,7 +70,8 @@ public partial class MixScrims
             PrintMessageToTeam(Team.T, Core.Localizer["command.timeout.remaining_timeouts", timeoutCountT, cfg.Timeouts]);
         }
         BroadcastRemainingTimeoutTime(team);
-        Core.Scheduler.DelayBySeconds(cfg.TimeoutDurationSeconds, EndTimeout);
+        var endTimeoutToken = Core.Scheduler.DelayBySeconds(cfg.TimeoutDurationSeconds, EndTimeout);
+        Core.Scheduler.StopOnMapChange(endTimeoutToken);
     }
 
     /// <summary>
@@ -272,6 +273,7 @@ public partial class MixScrims
         PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes]);
 
         timeoutVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => TimeoutVoteResult(team));
+        Core.Scheduler.StopOnMapChange(timeoutVoteTimer);
 
         if (cfg.DetailedLogging)
         {

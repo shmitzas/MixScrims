@@ -148,7 +148,8 @@ public sealed partial class MixScrims
                     }
                     finally
                     {
-                        Core.Scheduler.DelayBySeconds(1, () => isMovingPlayersToTeams = false);
+                        var resetFlagToken = Core.Scheduler.DelayBySeconds(1, () => isMovingPlayersToTeams = false);
+                        Core.Scheduler.StopOnMapChange(resetFlagToken);
                     }
 
                     if (!informed)
@@ -354,15 +355,24 @@ public sealed partial class MixScrims
     /// </summary>
     internal void LoadMap(MapDetails map)
     {
+        // Guard against null engine: this is the actual map-switch command issuer and runs
+        // during the most dangerous window of a transition. A second concurrent caller can
+        // have already torn the engine down between scheduling and firing.
+        if (Core.Engine is not { } engine)
+        {
+            logger.LogWarning("LoadMap: Core.Engine unavailable; skipping map switch to {Map}.", map.MapName);
+            return;
+        }
+
 		if (cfg.DetailedLogging)
 			logger.LogInformation("LoadMap: Executing map change to {Map}", map.MapName);
         if (map.IsWorkshopMap && !string.IsNullOrWhiteSpace(map.WorkshopId))
         {
-            Core.Engine.ExecuteCommand($"host_workshop_map {map.WorkshopId}");
+            engine.ExecuteCommand($"host_workshop_map {map.WorkshopId}");
         }
         else
         {
-            Core.Engine.ExecuteCommand($"map {map.MapName}");
+            engine.ExecuteCommand($"map {map.MapName}");
         }
     }
 
@@ -418,13 +428,15 @@ public sealed partial class MixScrims
         {
             Core.Scheduler.NextTick(() =>
             {
+                if (Core.Engine is not { } engine)
+                    return;
                 if (teamName is null)
                 {
-                    Core.Engine.ExecuteCommand("mp_teamname_1 COUNTER-TERRORISTS");
+                    engine.ExecuteCommand("mp_teamname_1 COUNTER-TERRORISTS");
                 }
                 else
                 {
-                    Core.Engine.ExecuteCommand($"mp_teamname_1 team_{teamName}");
+                    engine.ExecuteCommand($"mp_teamname_1 team_{teamName}");
                 }
             });
         }
@@ -432,13 +444,15 @@ public sealed partial class MixScrims
         {
             Core.Scheduler.NextTick(() =>
             {
+                if (Core.Engine is not { } engine)
+                    return;
                 if (teamName is null)
                 {
-                    Core.Engine.ExecuteCommand("mp_teamname_2 TERRORISTS");
+                    engine.ExecuteCommand("mp_teamname_2 TERRORISTS");
                 }
                 else
                 {
-                    Core.Engine.ExecuteCommand($"mp_teamname_2 team_{teamName}");
+                    engine.ExecuteCommand($"mp_teamname_2 team_{teamName}");
                 }
             });
         }

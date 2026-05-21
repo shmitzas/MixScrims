@@ -110,16 +110,24 @@ partial class MixScrims
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandleClientPutInServer: Moving player slot {Slot} to Spectator team.", playerSlot);
                 
-                Core.Scheduler.DelayBySeconds(2, () =>
+                var specToken = Core.Scheduler.DelayBySeconds(2, () =>
                 {
-                    var delayedPlayer = Core.PlayerManager.GetPlayer(playerSlot);
-                    if (delayedPlayer != null && delayedPlayer.IsValid)
+                    try
                     {
-                        var currentState = mixScrimsService.GetCurrentMatchState();
-                        if (currentState == MatchState.Warmup || currentState == MatchState.MapVoting || currentState == MatchState.MapChosen)
-                            HandlePlayerChangeTeam(delayedPlayer, 0);
+                        var delayedPlayer = Core.PlayerManager.GetPlayer(playerSlot);
+                        if (delayedPlayer != null && delayedPlayer.IsValid)
+                        {
+                            var currentState = mixScrimsService.GetCurrentMatchState();
+                            if (currentState == MatchState.Warmup || currentState == MatchState.MapVoting || currentState == MatchState.MapChosen)
+                                HandlePlayerChangeTeam(delayedPlayer, 0);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "HandleClientPutInServer: deferred spectator move failed for slot {Slot}.", playerSlot);
                     }
                 });
+                Core.Scheduler.StopOnMapChange(specToken);
             }
         }
         catch (Exception ex)
@@ -233,26 +241,32 @@ partial class MixScrims
     private void ScheduleAutoJoinTeamSwitch(IPlayer player, Team targetTeam)
     {
         int playerSlot = player.Slot;
-        Core.Scheduler.DelayBySeconds(2, async () =>
+        ulong steamId = player.SteamID;
+        var token = Core.Scheduler.DelayBySeconds(2, async () =>
         {
             try
             {
-                if (player is null || !player.IsValid)
+                // Revalidate by slot + SteamID to ensure the captured reference still refers
+                // to the same physical player. After a map change the slot may belong to a
+                // different player whose IsValid would still return true.
+                var live = Core.PlayerManager.GetPlayer(playerSlot);
+                if (live is null || !live.IsValid || live.SteamID != steamId)
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("ScheduleAutoJoinTeamSwitch: player (slot {Slot}) no longer valid, skipping switch to {Team}.", playerSlot, targetTeam);
+                        logger.LogInformation("ScheduleAutoJoinTeamSwitch: player (slot {Slot}, steamId {SteamId}) no longer valid, skipping switch to {Team}.", playerSlot, steamId, targetTeam);
                     return;
                 }
 
-                await player.SwitchTeamAsync(targetTeam);
+                await live.SwitchTeamAsync(targetTeam);
 
                 Core.Scheduler.NextTick(() =>
                 {
                     try
                     {
-                        if (player is null || !player.IsValid)
+                        var live2 = Core.PlayerManager.GetPlayer(playerSlot);
+                        if (live2 is null || !live2.IsValid || live2.SteamID != steamId)
                             return;
-                        RespawnPlayer(player);
+                        RespawnPlayer(live2);
                     }
                     catch (Exception ex)
                     {
@@ -265,6 +279,7 @@ partial class MixScrims
                 logger.LogError(ex, "ScheduleAutoJoinTeamSwitch: error switching team for player (slot {Slot}) to {Team}.", playerSlot, targetTeam);
             }
         });
+        Core.Scheduler.StopOnMapChange(token);
     }
 
     /// <summary>
@@ -307,7 +322,8 @@ partial class MixScrims
             return;
         recentlyDisconnectedPlayers.Add(player.Slot);
         var disconnectingPlayerSlot = player.Slot;
-        Core.Scheduler.DelayBySeconds(1, () => recentlyDisconnectedPlayers.Remove(disconnectingPlayerSlot));
+        var recentlyDisconnectedToken = Core.Scheduler.DelayBySeconds(1, () => recentlyDisconnectedPlayers.Remove(disconnectingPlayerSlot));
+        Core.Scheduler.StopOnMapChange(recentlyDisconnectedToken);
 
         // Cache player name for logging since Controller might become invalid during disconnect
         var playerName = IsPlayerValid(player) ? player.Controller.PlayerName : $"Player {player.PlayerID}";
@@ -335,41 +351,26 @@ partial class MixScrims
                                  matchState == MatchState.PickingStartingSide ||
                                  matchState == MatchState.Timeout;
 
-        // During active match states, slot reservation behavior depends on config
-        // If PreventNotPickedPlayersFromJoiningOngoingMatch is true: reserve slot (keep in list)
-        // If false: remove immediately to allow new players without exceeding limit
-        bool shouldReserveSlot = isActivMatchState && preventNotPickedPlayersFromJoiningOngoingMatch;
-        
-        if (playingCtPlayers.Any(p => p.PlayerID == player.PlayerID))
+        // Always free the slot on disconnect so any connected spectator can take it.
+        // The team-size cap is enforced strictly in HandleActiveMatchJoin using both the
+        // playing list and the live engine team count, so removing here cannot overflow.
+        // Also drop any stale reservation/forced-spectator marker for this SteamID.
+        _ = isActivMatchState; // retained for readability; behavior no longer branches on it here
+        reservedCtSlots.Remove(player.SteamID);
+        reservedTSlots.Remove(player.SteamID);
+
+        if (playingCtPlayers.Any(p => p.SteamID == player.SteamID))
         {
-            if (!shouldReserveSlot)
-            {
-                playingCtPlayers.RemoveAll(p => p.PlayerID == player.PlayerID);
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingCtPlayers.", playerName);
-            }
-            else
-            {
-                reservedCtSlots.Add(player.SteamID);
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleDisconnectedPlayer: {PlayerName} disconnected from CT - keeping slot reserved (SteamID {SteamId}).", playerName, player.SteamID);
-            }
+            playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingCtPlayers.", playerName);
         }
 
-        if (playingTPlayers.Any(p => p.PlayerID == player.PlayerID))
+        if (playingTPlayers.Any(p => p.SteamID == player.SteamID))
         {
-            if (!shouldReserveSlot)
-            {
-                playingTPlayers.RemoveAll(p => p.PlayerID == player.PlayerID);
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingTPlayers.", playerName);
-            }
-            else
-            {
-                reservedTSlots.Add(player.SteamID);
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleDisconnectedPlayer: {PlayerName} disconnected from T - keeping slot reserved (SteamID {SteamId}).", playerName, player.SteamID);
-            }
+            playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingTPlayers.", playerName);
         }
 
         playerColors.Remove(player.PlayerID);
@@ -767,27 +768,19 @@ partial class MixScrims
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} joined Spectators.", player.Controller.PlayerName);
 
-                // Voluntary move to Spectator releases the playing-list slot so any other
-                // currently-connected player can take it. Without this, the seat would stay
-                // occupied in the list and HandleActiveMatchJoin's capacity check would block
-                // every new joiner until the original player physically disconnects.
-                //
-                // Under PreventNotPickedPlayersFromJoiningOngoingMatch = true the player is
-                // additionally added to the side's reserved-slot set so they retain the right
-                // to come back to that side via the rejoin path in HandleActiveMatchJoin
-                // (hasReservation == true), as long as a free seat is available at the time.
+                // Voluntary move to Spectator fully releases the slot so any other connected
+                // player can take it. No reservation is held: returning to a team uses the
+                // normal capacity-checked join path. Any stale reservation/force-spec marker
+                // for this SteamID is also cleared so it cannot block their own rejoin later.
                 bool wasInCt = playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
                 bool wasInT = playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
-
-                if (preventNotPickedPlayersFromJoiningOngoingMatch)
-                {
-                    if (wasInCt) reservedCtSlots.Add(player.SteamID);
-                    if (wasInT) reservedTSlots.Add(player.SteamID);
-                }
+                reservedCtSlots.Remove(player.SteamID);
+                reservedTSlots.Remove(player.SteamID);
+                forcedToSpectator.Remove(player.SteamID);
 
                 if (cfg.DetailedLogging && (wasInCt || wasInT))
-                    logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} moved to Spectator - released slot (CT:{Ct} T:{T}, reserved:{Reserved}).",
-                        player.Controller.PlayerName, wasInCt, wasInT, preventNotPickedPlayersFromJoiningOngoingMatch);
+                    logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} moved to Spectator - released slot (CT:{Ct} T:{T}).",
+                        player.Controller.PlayerName, wasInCt, wasInT);
 
                 return HookResult.Continue;
             }
@@ -858,11 +851,13 @@ partial class MixScrims
             return HookResult.Stop;
         }
 
-        // Use the larger of list-count and actual engine-team count. This closes races where
-        // engine-side placements during the isMovingPlayersToTeams window inflated the actual
-        // team count above the tracked list count.
-        int effectiveCount = Math.Max(listCount, actualCount);
-        if (effectiveCount < maxTeamSize)
+        // Strict capacity: both the tracked list AND the live engine team must have a free
+        // seat. listCount can lag behind reality (e.g. a CT->Spec event whose Post-prune has
+        // not committed yet) and actualCount can lag too (engine commit happens after the
+        // Pre hook). Requiring BOTH to be under the cap prevents two concurrent joiners from
+        // overflowing the team through the gap and matches the user-visible expectation
+        // that the team count never exceeds MinimumReadyPlayers/2.
+        if (listCount < maxTeamSize && actualCount < maxTeamSize)
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} joined (list:{List}, actual:{Actual}, max:{Max}).",

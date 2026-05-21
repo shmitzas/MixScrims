@@ -121,6 +121,16 @@ public class MixScrimsService : IMixScrims
             return;
         }
 
+        // Debounce: refuse external map-change requests while another transition is already
+        // in flight. Stacking host_workshop_map / map commands across plugins is a known
+        // CS2 server crash trigger during the map-transition window.
+        var currentState = _mixScrims.mixScrimsService.GetCurrentMatchState();
+        if (currentState == MatchState.MapLoading || currentState == MatchState.MapChosen)
+        {
+            _mixScrims.logger.LogWarning("ChangeMap: ignoring external request to {Map}/{Workshop} - map change already in progress (state={State}).", mapName, workshopId, currentState);
+            return;
+        }
+
         if (!string.IsNullOrEmpty(workshopId))
         {
             var map = _mixScrims.GetMapByWorkshopId(workshopId);

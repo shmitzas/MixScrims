@@ -362,7 +362,7 @@ public partial class MixScrims
         captainCt = oldTCaptain;
         captainT = oldCtCaptain;
 
-        Core.Scheduler.DelayBySeconds(0.2f, () =>
+        var switchSidesToken = Core.Scheduler.DelayBySeconds(0.2f, () =>
         {
             Core.Scheduler.NextWorldUpdate(() => 
             {
@@ -426,6 +426,7 @@ public partial class MixScrims
 
             StartMatch();
         });
+        Core.Scheduler.StopOnMapChange(switchSidesToken);
     }
 
     /// <summary>
