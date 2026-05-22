@@ -50,12 +50,31 @@ public partial class MixScrims
 
         readyPlayers.Clear();
 
-        mixScrimsService.SetMatchState(MatchState.MapChosen);
+        // Restore the state captured before the MapLoading transition. If a manual map change
+        // was issued during Warmup, we stay in Warmup. If the map vote flow set MapChosen prior
+        // to LoadSelectedMap, we go back to MapChosen. Default to MapChosen for safety.
+        var targetState = stateBeforeMapLoading ?? MatchState.MapChosen;
+        stateBeforeMapLoading = null;
+
+        // MapLoading is a transient internal state - never restore it.
+        if (targetState == MatchState.MapLoading)
+            targetState = MatchState.MapChosen;
+
+        mixScrimsService.SetMatchState(targetState);
         if (cfg.DetailedLogging)
-            logger.LogInformation("HandleMapChosenNewMapLoad: Match state changed to MapChosen");
+            logger.LogInformation("HandleMapChosenNewMapLoad: Match state changed to {State}", targetState);
 
         var warmupToken = Core.Scheduler.DelayBySeconds(5, LoadWarmupConfig);
         Core.Scheduler.StopOnMapChange(warmupToken);
+
+        // Captain selection only makes sense once the map vote has produced a chosen map.
+        // Skip it for any other restored state (e.g. Warmup after a manual !map).
+        if (targetState != MatchState.MapChosen)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleMapChosenNewMapLoad: Skipping captain selection because restored state is {State}", targetState);
+            return;
+        }
 
         if (cfg.DisableCaptains)
         {

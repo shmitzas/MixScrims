@@ -70,6 +70,7 @@ public partial class MixScrims
         reservedTSlots.Clear();
         forcedToSpectator.Clear();
         resetMixOnFirstJoin = false;
+        stateBeforeMapLoading = null;
         CancelAutoResetOnLeaveTimer(announce: false);
         StopAllAnnouncmentTimers();
     }

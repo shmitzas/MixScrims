@@ -26,6 +26,11 @@ public sealed partial class MixScrims
     internal readonly Dictionary<ulong, CancellationTokenSource> _punishmentTimers = [];
     internal bool resetMixOnFirstJoin = false;
 
+    // State to restore after a MapLoading transition completes. Captured at the moment
+    // LoadSelectedMap is invoked so manual map changes during Warmup/MapChosen/etc. don't
+    // unconditionally promote the match to MapChosen on the subsequent OnMapLoad.
+    internal MatchState? stateBeforeMapLoading = null;
+
     // SteamID-based reservation tracking. Populated when a listed player disconnects during
     // an active match state so their slot remains theirs across the reconnect (new PlayerID/slot).
     // Released on rejoin, punishment execution, or plugin reset.
@@ -340,6 +345,11 @@ public sealed partial class MixScrims
             ScheduleMapLoadingAnnouncement(map);
             return;
         }
+
+        // Remember the state we are coming from so HandleMapChosenNewMapLoad can restore it.
+        // MapVoting flow sets state to MapChosen before invoking LoadSelectedMap, so MapChosen
+        // is captured there. Manual !map during Warmup captures Warmup, etc.
+        stateBeforeMapLoading = matchState;
 
         //Core.Engine.ExecuteCommand("tv_stoprecord");
         var loadMapToken = Core.Scheduler.DelayBySeconds(5, () => LoadMap(map));
