@@ -23,17 +23,31 @@ partial class MixScrims
     }
 
     /// <summary>
-    /// Clears auto-reset state on every map load so that a stale
-    /// <c>resetMixOnFirstJoin</c> flag (set when all players left during an active
-    /// match) cannot trigger an unintended reset on the new map, and so that any
-    /// running grace-period timer is cancelled before it can fire in a new context.
+    /// Reconciles deferred-reset state on every map load. If MixScrims itself drove
+    /// the map change (state == MapLoading) the flag is just cleared, since the
+    /// MapChosen path will restore the prior phase. If an external actor (e.g. another
+    /// plugin issuing changelevel/host_workshop_map while the server was empty) caused
+    /// the map load while the flag was set, run ResetPluginState now so warmup.cfg is
+    /// applied on the new map even before any player connects — otherwise CS2 starts
+    /// with default cvars and the next-join hook can no-op against drifted state.
     /// </summary>
     internal void HandleStateAgnosticMapLoad(IOnMapLoadEvent @event)
     {
         if (resetMixOnFirstJoin)
         {
-            logger.LogInformation("HandleStateAgnosticMapLoad: Clearing resetMixOnFirstJoin flag — map changed while flag was set.");
-            resetMixOnFirstJoin = false;
+            var currentState = mixScrimsService.GetCurrentMatchState();
+            if (currentState == MatchState.MapLoading)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("HandleStateAgnosticMapLoad: Clearing resetMixOnFirstJoin flag — MixScrims-driven map change in progress.");
+                resetMixOnFirstJoin = false;
+            }
+            else
+            {
+                logger.LogInformation("HandleStateAgnosticMapLoad: External map change with resetMixOnFirstJoin set (state={State}) — running ResetPluginState now.", currentState);
+                resetMixOnFirstJoin = false;
+                ResetPluginState();
+            }
         }
         CancelAutoResetOnLeaveTimer(announce: false);
     }
@@ -57,6 +71,21 @@ partial class MixScrims
             resetMixOnFirstJoin = false;
             ResetPluginState();
             return;
+        }
+
+        // Defensive re-apply of warmup config when the first human joins during Warmup.
+        // After a long hibernation or an externally driven map change, CS2 cvars can drift
+        // out of warmup state without firing OnMapLoad in a useful way for us. Re-execing
+        // warmup.cfg here guarantees the new player lands in a properly configured warmup.
+        if (mixScrimsService.GetCurrentMatchState() == MatchState.Warmup)
+        {
+            var humanCount = Core.PlayerManager.GetAllValidPlayers().Count(p => !p.IsFakeClient);
+            if (humanCount <= 1)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("HandleClientPutInServer: First human joined during Warmup (count={Count}) — re-applying warmup config.", humanCount);
+                LoadWarmupConfig();
+            }
         }
 
         try

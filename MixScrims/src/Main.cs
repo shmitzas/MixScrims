@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.7.6",
+    Version = "1.7.7",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
