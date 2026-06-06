@@ -8,7 +8,7 @@ public partial class MixScrims
     ///<summary>
     ///Changes the map to the specified map (if the map exists in the configuration)
     ///</summary>
-    [Command("map", true, "managemix", HelpText = "Changes the current map to the specified map. Usage: !map <mapname>")]
+    [Command("map", false, "managemix", HelpText = "Changes the current map to the specified map. Usage: !map <mapname>")]
     public void OnGoToMap(ICommandContext context)
     {
         var admin = context.Sender;

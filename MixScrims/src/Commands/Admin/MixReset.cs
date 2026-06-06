@@ -8,7 +8,7 @@ public partial class MixScrims
     ///<summary>
     ///Forcefully resets mix state to the warmup state
     ///</summary>
-    [Command("mix_reset", true, "managemix", HelpText = "Forcefully resets the plugin to the warmup state. Usage: !mix_reset")]
+    [Command("mix_reset", false, "managemix", HelpText = "Forcefully resets the plugin to the warmup state. Usage: !mix_reset")]
     public void OnResetPlugin(ICommandContext context)
     {
         var admin = context.Sender;

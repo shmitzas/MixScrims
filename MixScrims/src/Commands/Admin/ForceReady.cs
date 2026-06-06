@@ -9,7 +9,7 @@ public partial class MixScrims
     ///<summary>
     ///Forcefully marks all players as ready and starts the next mix state
     ///</summary>
-    [Command("forceready", true, "managemix", HelpText = "Forces all connected players into the ready state. Usage: !forceready")]
+    [Command("forceready", false, "managemix", HelpText = "Forces all connected players into the ready state. Usage: !forceready")]
     public void OnForceReady(ICommandContext context)
     {
         var admin = context.Sender;

@@ -10,7 +10,7 @@ public partial class MixScrims
     /// <summary>
     /// Players can revote map pick if the map picking is not over yet
     /// </summary>
-    [Command("revote", true, "", HelpText = "Reopens the map vote menu while map voting is active. Usage: !revote")]
+    [Command("revote", false, "", HelpText = "Reopens the map vote menu while map voting is active. Usage: !revote")]
     public void OnRevote(ICommandContext context)
     {
         if (!context.IsSentByPlayer)

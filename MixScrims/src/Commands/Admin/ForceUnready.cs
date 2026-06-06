@@ -9,7 +9,7 @@ public partial class MixScrims
     ///<summary>
     ///Forcefully marks all players as not ready
     ///</summary>
-    [Command("forceunready", true, "managemix", HelpText = "Forces all connected players into the unready state. Usage: !forceunready")]
+    [Command("forceunready", false, "managemix", HelpText = "Forces all connected players into the unready state. Usage: !forceunready")]
     public void OnForceUnready(ICommandContext context)
     {
         var admin = context.Sender;

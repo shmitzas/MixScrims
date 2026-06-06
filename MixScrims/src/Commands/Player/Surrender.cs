@@ -11,7 +11,7 @@ public partial class MixScrims
     /// <summary>
     /// Players can surrender the match if their team agrees
     /// </summary>
-    [Command("surrender", true, "", HelpText = "Starts a vote for your team to surrender the match. Usage: !surrender")]
+    [Command("surrender", false, "", HelpText = "Starts a vote for your team to surrender the match. Usage: !surrender")]
     public void OnSurrender(ICommandContext context)
     {
         if (!context.IsSentByPlayer)

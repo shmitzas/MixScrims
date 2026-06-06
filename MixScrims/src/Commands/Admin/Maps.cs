@@ -8,7 +8,7 @@ public partial class MixScrims
     ///<summary>
     ///Lists all the maps that are available for voting
     ///</summary>
-    [Command("maps", true, "managemix", HelpText = "Lists all maps available for voting. Usage: !maps")]
+    [Command("maps", false, "managemix", HelpText = "Lists all maps available for voting. Usage: !maps")]
     public void OnListVoteableMaps(ICommandContext context)
     {
         var admin = context.Sender;

@@ -9,7 +9,7 @@ public partial class MixScrims
     /// <summary>
     /// Sends an invite message to the discord webhook
     /// </summary>
-    [Command("invite", true, "", HelpText = "Sends a server invite message to the configured Discord webhook. Usage: !invite")]
+    [Command("invite", false, "", HelpText = "Sends a server invite message to the configured Discord webhook. Usage: !invite")]
     public void OnInvite(ICommandContext context)
     {
         if (!context.IsSentByPlayer)

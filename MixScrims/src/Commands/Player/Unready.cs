@@ -9,7 +9,7 @@ public partial class MixScrims
     /// <summary>
     /// Marks player as unready if they were ready (for example if a player disconnects while being ready)
     /// </summary>
-    [Command("unready", true, "", HelpText = "Marks you as no longer ready for the match. Usage: !unready")]
+    [Command("unready", false, "", HelpText = "Marks you as no longer ready for the match. Usage: !unready")]
     public void OnUnReady(ICommandContext context)
     {
         if (!context.IsSentByPlayer)
