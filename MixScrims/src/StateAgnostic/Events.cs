@@ -4,6 +4,7 @@ using SwiftlyS2.Shared.Commands;
 using SwiftlyS2.Shared.Events;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
+using SwiftlyS2.Shared.GameHooks;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
@@ -20,6 +21,7 @@ partial class MixScrims
         Core.Event.OnClientPutInServer += HandleClientPutInServer;
         Core.Event.OnClientDisconnected += OnPlayerDisconnect;
         Core.Event.OnMapLoad += HandleStateAgnosticMapLoad;
+        Core.GameHooks.Entities.TakeDamage.Pre += HandleTakeDamage;
     }
 
     /// <summary>
@@ -363,6 +365,7 @@ partial class MixScrims
         var playerName = IsPlayerValid(player) ? player.Controller.PlayerName : $"Player {player.PlayerID}";
 
         freshlyJoinedPlayers.Remove(player.Slot);
+        HandlePlayerDisconnectRtv(player.SteamID);
         forcedToSpectator.Remove(player.SteamID);
 
         if (pickedCtPlayers.Any(p => p.PlayerID == player.PlayerID))
@@ -923,17 +926,17 @@ partial class MixScrims
         return HookResult.Continue;
     }
 
-    [EventListener<EventDelegates.OnEntityTakeDamage>]
-    public void HandleTakeDamage(IOnEntityTakeDamageEvent @event)
+    
+    public void HandleTakeDamage(ref TakeDamageEntityPreContext ctx)
     {
         if (!cfg.FaceitLikeDamageControl)
         {
             return;
         }
 
-        var victim = @event.Entity.As<CCSPlayerPawn>();
-        var attacker = @event.Info.Attacker.Value?.As<CCSPlayerPawn>();
-        var weapon = @event.Info.DamageType;
+        var victim = ctx.Params.Entity.As<CCSPlayerPawn>();
+        var attacker = ctx.Params.Info.Attacker.Value?.As<CCSPlayerPawn>();
+        var weapon = ctx.Params.Info.DamageType;
 
         if (attacker == null)
         {
@@ -957,7 +960,7 @@ partial class MixScrims
                 if(cfg.DetailedLogging)
                     logger.LogInformation("HandleTakeDamage: Friendly fire or knife slash detected, skipping.");
 
-                @event.Info.Damage = 0;
+                ctx.Params.Info.Damage = 0;
             }
         }
     }
