@@ -71,12 +71,36 @@
 	    <Copy SourceFiles="$(ProjectDir)csgo_configs\production_overrides.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
     </Target>
 
+  <UsingTask TaskName="ExtractPluginVersion"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <FilePath ParameterType="System.String" Required="true" />
+      <PluginVersion ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+          var content = System.IO.File.ReadAllText(FilePath);
+          var m = System.Text.RegularExpressions.Regex.Match(content, "Version\\s*=\\s*\"([^\"]+)\"");
+          PluginVersion = m.Success ? m.Groups[1].Value : "";
+        ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
   <Target Name="CreateZip" AfterTargets="Publish">
+    <ExtractPluginVersion FilePath="$(MSBuildThisFileDirectory)src\Main.cs">
+      <Output TaskParameter="PluginVersion" PropertyName="_PluginVersion" />
+    </ExtractPluginVersion>
+    <Error Condition="'$(_PluginVersion)' == ''"
+           Text="CreateZip: failed to extract PluginMetadata.Version from src\Main.cs." />
+
     <ItemGroup>
       <PublishFiles Include="$(PublishDir)**\*.*" />
     </ItemGroup>
-    
-    <ZipDirectory SourceDirectory="$(PublishDir)../" DestinationFile="$(OutputPath)../$(AssemblyName).zip" Overwrite="true" />
+
+    <ZipDirectory SourceDirectory="$(PublishDir)../" DestinationFile="$(OutputPath)../$(AssemblyName)-v$(_PluginVersion).zip" Overwrite="true" />
   </Target>
 
 </Project> 
