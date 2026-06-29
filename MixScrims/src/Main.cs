@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.7.9",
+    Version = "1.8.0",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -126,6 +126,8 @@ public partial class MixScrims : BasePlugin
             if (commandName == "volunteer_captain" && !cfg.AllowVolunteerCaptains)
                 continue;
             if (commandName == "votekick" && !cfg.VoteKick.Enabled)
+                continue;
+            if (commandName == "rtv" && !cfg.Rtv.Enabled)
                 continue;
 
             foreach (var alias in commandInfo.Aliases)

@@ -57,6 +57,7 @@ public partial class MixScrims
         surrenderVoteTeam = Team.None;
         ResetVoteKickState(Team.CT);
         ResetVoteKickState(Team.T);
+        ResetRtvState();
         canPlayerBeRespawned = true;
         isMovingPlayersToTeams = false;
         isFreezeTime = false;

@@ -21,6 +21,7 @@ public partial class MixScrims
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState != MatchState.Warmup)
             return;
+        ResetRtvState();
         LoadWarmupConfig();
     }
 }

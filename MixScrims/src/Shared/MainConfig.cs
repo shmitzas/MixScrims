@@ -36,11 +36,15 @@ public class MainConfig
     [
         "timeout",
         "ready",
-        "invite"
+        "invite",
+        "rtv"
     ];
 
     // Vote kick settings
     public VoteKickConfig VoteKick { get; set; } = new();
+
+    // Rock the vote settings
+    public RtvConfig Rtv { get; set; } = new();
 
     // Auto reset when players leave during match
     public AutoResetOnLeaveConfig AutoResetOnLeave { get; set; } = new();
@@ -66,6 +70,7 @@ public class MainConfig
         { "ready", new() { Permission = "", Aliases = ["r"] } },
         { "unready", new() { Permission = "", Aliases = ["u", "ur"] } },
         { "revote", new() { Permission = "", Aliases = ["rv"] } },
+        { "rtv", new() { Permission = "", Aliases = ["rockthevote"] } },
         { "timeout", new() { Permission = "", Aliases = ["pause"] } },
         { "surrender", new() { Permission = "", Aliases = ["gg"] }  },
         { "invite", new() { Permission = "", Aliases = ["inv"] } },
@@ -118,6 +123,14 @@ public class VoteKickConfig
 {
     public bool Enabled { get; set; } = true;
     public int VoteKickTime { get; set; } = 30;
+}
+
+public class RtvConfig
+{
+    public bool Enabled { get; set; } = false;
+    public int MinimumPlayersRequired { get; set; } = 1;
+    public int MinimumVotesRequired { get; set; } = 1;
+    public double VoteThresholdRatio { get; set; } = 0.5;
 }
 
 public class AutoResetOnLeaveConfig
