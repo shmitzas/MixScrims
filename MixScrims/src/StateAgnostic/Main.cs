@@ -66,10 +66,11 @@ public sealed partial class MixScrims
     /// </summary>
     internal bool HasReservedOrActiveSlot(IPlayer player, Team team)
     {
+        var sid = player.SteamID;
         if (team == Team.CT)
-            return reservedCtSlots.Contains(player.SteamID) || playingCtPlayers.Any(p => p.SteamID == player.SteamID);
+            return reservedCtSlots.Contains(sid) || playingCtPlayers.Any(p => SafeSteamId(p) == sid);
         if (team == Team.T)
-            return reservedTSlots.Contains(player.SteamID) || playingTPlayers.Any(p => p.SteamID == player.SteamID);
+            return reservedTSlots.Contains(sid) || playingTPlayers.Any(p => SafeSteamId(p) == sid);
         return false;
     }
 
@@ -79,10 +80,10 @@ public sealed partial class MixScrims
     /// </summary>
     internal bool IsPlayerTrackedForActiveMatch(ulong steamId)
     {
-        return playingCtPlayers.Any(p => p.SteamID == steamId)
-            || playingTPlayers.Any(p => p.SteamID == steamId)
-            || pickedCtPlayers.Any(p => p.SteamID == steamId)
-            || pickedTPlayers.Any(p => p.SteamID == steamId)
+        return playingCtPlayers.Any(p => SafeSteamId(p) == steamId)
+            || playingTPlayers.Any(p => SafeSteamId(p) == steamId)
+            || pickedCtPlayers.Any(p => SafeSteamId(p) == steamId)
+            || pickedTPlayers.Any(p => SafeSteamId(p) == steamId)
             || reservedCtSlots.Contains(steamId)
             || reservedTSlots.Contains(steamId);
     }
@@ -115,67 +116,74 @@ public sealed partial class MixScrims
         {
             var token = Core.Scheduler.DelayBySeconds(delaySeconds, async () =>
             {
-                // If someone else already cleared the flag (e.g. disconnect / reset / success), exit.
-                if (!forcedToSpectator.Contains(steamId))
-                    return;
-
-                // Stop retrying if they got legitimately listed.
-                if (IsPlayerTrackedForActiveMatch(steamId))
+                try
                 {
-                    forcedToSpectator.Remove(steamId);
-                    return;
-                }
+                    // If someone else already cleared the flag (e.g. disconnect / reset / success), exit.
+                    if (!forcedToSpectator.Contains(steamId))
+                        return;
 
-                // Stop retrying if the match state is no longer active.
-                var state = mixScrimsService.GetCurrentMatchState();
-                if (state == MatchState.Warmup || state == MatchState.MapVoting || state == MatchState.MapChosen
-                    || state == MatchState.PickingTeam || state == MatchState.MapLoading || state == MatchState.Reset
-                    || state == MatchState.Ended)
-                {
-                    forcedToSpectator.Remove(steamId);
-                    return;
-                }
-
-                var live = Core.PlayerManager.GetPlayer(initialSlot);
-                if (live == null || !live.IsValid || live.SteamID != steamId)
-                {
-                    // Try to locate by SteamID as a fallback - player may have reconnected to a new slot.
-                    live = GetPlayerBySteamId(steamId);
-                }
-                if (live == null || !live.IsValid)
-                    return;
-
-                var currentTeam = (Team)live.Controller.TeamNum;
-                if (currentTeam == Team.T || currentTeam == Team.CT)
-                {
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("ScheduleForceToSpectator: Moving {PlayerName} (SteamID {SteamId}) from {Team} to Spectator.", live.Controller.PlayerName, steamId, currentTeam);
-
-                    isMovingPlayersToTeams = true;
-                    try
+                    // Stop retrying if they got legitimately listed.
+                    if (IsPlayerTrackedForActiveMatch(steamId))
                     {
-                        await live.SwitchTeamAsync(Team.Spectator);
-                    }
-                    finally
-                    {
-                        var resetFlagToken = Core.Scheduler.DelayBySeconds(1, () => isMovingPlayersToTeams = false);
-                        Core.Scheduler.StopOnMapChange(resetFlagToken);
+                        forcedToSpectator.Remove(steamId);
+                        return;
                     }
 
-                    if (!informed)
+                    // Stop retrying if the match state is no longer active.
+                    var state = mixScrimsService.GetCurrentMatchState();
+                    if (state == MatchState.Warmup || state == MatchState.MapVoting || state == MatchState.MapChosen
+                        || state == MatchState.PickingTeam || state == MatchState.MapLoading || state == MatchState.Reset
+                        || state == MatchState.Ended)
                     {
-                        PrintMessageToPlayer(live, Core.Localizer[reasonKey]);
-                        informed = true;
+                        forcedToSpectator.Remove(steamId);
+                        return;
+                    }
+
+                    var live = Core.PlayerManager.GetPlayer(initialSlot);
+                    if (live == null || !live.IsValid || live.SteamID != steamId)
+                    {
+                        // Try to locate by SteamID as a fallback - player may have reconnected to a new slot.
+                        live = GetPlayerBySteamId(steamId);
+                    }
+                    if (live == null || !live.IsValid)
+                        return;
+
+                    var currentTeam = (Team)live.Controller.TeamNum;
+                    if (currentTeam == Team.T || currentTeam == Team.CT)
+                    {
+                        if (cfg.DetailedLogging)
+                            logger.LogInformation("ScheduleForceToSpectator: Moving {PlayerName} (SteamID {SteamId}) from {Team} to Spectator.", live.Controller.PlayerName, steamId, currentTeam);
+
+                        isMovingPlayersToTeams = true;
+                        try
+                        {
+                            await live.SwitchTeamAsync(Team.Spectator);
+                        }
+                        finally
+                        {
+                            var resetFlagToken = Core.Scheduler.DelayBySeconds(1, () => isMovingPlayersToTeams = false);
+                            Core.Scheduler.StopOnMapChange(resetFlagToken);
+                        }
+
+                        if (!informed)
+                        {
+                            PrintMessageToPlayer(live, Core.Localizer[reasonKey]);
+                            informed = true;
+                        }
+                    }
+                    else if (currentTeam == Team.Spectator || currentTeam == Team.None)
+                    {
+                        // Target state reached — player is on Spectator and untracked. Clear the flag
+                        // so the player is not stuck: they can still legitimately claim a free slot
+                        // later through normal validation.
+                        forcedToSpectator.Remove(steamId);
+                        if (cfg.DetailedLogging)
+                            logger.LogInformation("ScheduleForceToSpectator: SteamID {SteamId} confirmed on Spectator, clearing flag.", steamId);
                     }
                 }
-                else if (currentTeam == Team.Spectator || currentTeam == Team.None)
+                catch (Exception ex)
                 {
-                    // Target state reached — player is on Spectator and untracked. Clear the flag
-                    // so the player is not stuck: they can still legitimately claim a free slot
-                    // later through normal validation.
-                    forcedToSpectator.Remove(steamId);
-                    if (cfg.DetailedLogging)
-                        logger.LogInformation("ScheduleForceToSpectator: SteamID {SteamId} confirmed on Spectator, clearing flag.", steamId);
+                    logger.LogError(ex, "ScheduleForceToSpectator retry (delay {DelaySeconds}s, steamId {SteamId}) threw; swallowing to protect the process.", delaySeconds, steamId);
                 }
             });
             Core.Scheduler.StopOnMapChange(token);
@@ -284,7 +292,8 @@ public sealed partial class MixScrims
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
-            if (readyPlayers.Any(p => p.SteamID == player.SteamID))
+            var sid = player.SteamID;
+            if (readyPlayers.Any(p => SafeSteamId(p) == sid))
             {
                 if (announce)
                 {
@@ -321,7 +330,8 @@ public sealed partial class MixScrims
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
-            var existing = readyPlayers.FirstOrDefault(p => p.SteamID == player.SteamID);
+            var sid = player.SteamID;
+            var existing = readyPlayers.FirstOrDefault(p => SafeSteamId(p) == sid);
 
             if (existing == null)
             {
@@ -696,8 +706,8 @@ public sealed partial class MixScrims
         // Release any reserved slot held by the punished player and drop the stale list entry
         // so a new player can claim the freed-up seat.
         ReleaseReservedSlot(steamId);
-        playingCtPlayers.RemoveAll(p => p.SteamID == steamId);
-        playingTPlayers.RemoveAll(p => p.SteamID == steamId);
+        playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
+        playingTPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
     }
 
     internal void KickPlayer(ulong steamId, string? reason)

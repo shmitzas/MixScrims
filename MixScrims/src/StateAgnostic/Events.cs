@@ -535,8 +535,14 @@ partial class MixScrims
         // is being destroyed). Do NOT early-return on null pawn - HandlePlayerChangeTeam will
         // handle that case per state (Spec branch doesn't need a pawn).
         int teamTojoin = @event.Team;
+        // EventPlayerTeam payload carries both OldTeam (pre-swap) and Team (new). Threading
+        // OldTeam here removes the adopt block's dependence on engine timing for
+        // player.Controller.TeamNum - the payload value is authoritative regardless of when
+        // Source2 updates the schema field. Sibling plugins (BotsManager, K4-Arenas) use the
+        // same payload shape.
+        int preSwapTeam = @event.OldTeam;
 
-        return HandlePlayerChangeTeam(player, teamTojoin);
+        return HandlePlayerChangeTeam(player, teamTojoin, preSwapTeam);
     }
 
     /// <summary>
@@ -606,7 +612,13 @@ partial class MixScrims
     /// Handles a player's request to change teams during a match, enforcing team selection rules based on the current
     /// match state.
     /// </summary>
-    public HookResult HandlePlayerChangeTeam(IPlayer? player, int teamTojoin)
+    /// <param name="preSwapTeam">
+    /// Authoritative pre-swap team from <c>EventPlayerTeam.OldTeam</c> when this call originates
+    /// from the game-event Pre hook. Pass -1 (default) when unavailable (jointeam console command,
+    /// deferred spec move); the silent-restore adopt block will then fall back to reading
+    /// <c>player.Controller.TeamNum</c>.
+    /// </param>
+    public HookResult HandlePlayerChangeTeam(IPlayer? player, int teamTojoin, int preSwapTeam = -1)
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("HandlePlayerChangeTeam: Called for player {PlayerName} (slot {Slot}), teamTojoin={Team}", player?.Controller.PlayerName, player?.Slot, teamTojoin);
@@ -662,8 +674,62 @@ partial class MixScrims
                 return HookResult.Continue;
             }
 
+            // Silent-restore rescue: CS2 auto-restores a mid-match reconnecter's previous team
+            // without firing EventPlayerTeam through our validation path, so their SteamID never
+            // lands in playingCtPlayers/playingTPlayers. When the engine's halftime swap later
+            // fires EventPlayerTeam for them, this handler sees them as untracked and the
+            // untracked branch below rejects the swap + ScheduleForceToSpectator kicks in - the
+            // exact "halftime dumps late joiners to spec" symptom. Adopt them into the playing
+            // list of their pre-swap engine team so the swap goes through, then leave it to
+            // ResyncPlayingListsFromEngine (Match/Main.cs, called from HandleRoundStart+1s in
+            // Match/Events.cs) to move them to the correct post-swap side by SteamID reconciliation.
+            //
+            // Only adopt for halftime / side-pick moves (teamTojoin is a playing team). When
+            // teamTojoin is Spec, this is a deliberate spec-force move (e.g. from
+            // ScheduleForceToSpectator's SwitchTeamAsync(Team.Spectator) call) - adopting would
+            // create a stale playing-list entry AND cause the ScheduleForceToSpectator retry to
+            // see the player as tracked (via IsPlayerTrackedForActiveMatch) and exit early,
+            // leaving the player on Spec while the plugin still lists them on a playing team.
+            // Let those moves fall through to the normal validation path, which correctly
+            // removes stale entries via the Spectator branch of HandlePlayerJoinTeam.
+            //
+            // Prefer the payload's OldTeam (threaded from HandleEventPlayerTeam) over reading
+            // player.Controller.TeamNum, since the schema field's update timing relative to the
+            // Pre hook is engine-version dependent while the payload value is not.
+            int adoptTeam = preSwapTeam;
+            if (adoptTeam < 0)
+            {
+                try
+                {
+                    if (player.Controller != null)
+                        adoptTeam = player.Controller.TeamNum;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "HandlePlayerChangeTeam: failed reading pre-swap team for {PlayerName} during adopt check.", SafePlayerName(player));
+                }
+            }
+
+            if (teamTojoin == (int)Team.CT || teamTojoin == (int)Team.T)
+            {
+                if (adoptTeam == (int)Team.CT)
+                {
+                    playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+                    playingCtPlayers.Add(player);
+                    logger.LogInformation("HandlePlayerChangeTeam: Adopted untracked {PlayerName} into playingCtPlayers (pre-swap team CT) during programmatic move - likely a silent CS2 team restore on reconnect.", SafePlayerName(player));
+                    return HookResult.Continue;
+                }
+                if (adoptTeam == (int)Team.T)
+                {
+                    playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+                    playingTPlayers.Add(player);
+                    logger.LogInformation("HandlePlayerChangeTeam: Adopted untracked {PlayerName} into playingTPlayers (pre-swap team T) during programmatic move - likely a silent CS2 team restore on reconnect.", SafePlayerName(player));
+                    return HookResult.Continue;
+                }
+            }
+
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandlePlayerChangeTeam: Programmatic move active but {PlayerName} is untracked - validating normally", player.Controller.PlayerName);
+                logger.LogInformation("HandlePlayerChangeTeam: Programmatic move active but {PlayerName} is untracked (pre-swap team {PreSwap}, target team {Target}) - validating normally", SafePlayerName(player), adoptTeam, teamTojoin);
         }
 
         var matchState = mixScrimsService.GetCurrentMatchState();
@@ -676,18 +742,18 @@ partial class MixScrims
         {
             bool isInFreshlyJoined = freshlyJoinedPlayers.Contains(player.Slot);
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandlePlayerChangeTeam: Player {PlayerName} in freshlyJoinedPlayers: {InList}", player.Controller.PlayerName, isInFreshlyJoined);
+                logger.LogInformation("HandlePlayerChangeTeam: Player {PlayerName} in freshlyJoinedPlayers: {InList}", SafePlayerName(player), isInFreshlyJoined);
 
             if (isInFreshlyJoined)
             {
                 HandlePlayerChangeTeamOnJoin(player);
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("HandlePlayerChangeTeam: {MatchState}. {PlayerName} joined team {Team}", matchState, player.Controller.PlayerName, teamTojoin);
+                    logger.LogInformation("HandlePlayerChangeTeam: {MatchState}. {PlayerName} joined team {Team}", matchState, SafePlayerName(player), teamTojoin);
             }
             else
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("HandlePlayerChangeTeam: {MatchState}. {PlayerName} not freshly joined, allowing change to {Team}", matchState, player.Controller.PlayerName, teamTojoin);
+                    logger.LogInformation("HandlePlayerChangeTeam: {MatchState}. {PlayerName} not freshly joined, allowing change to {Team}", matchState, SafePlayerName(player), teamTojoin);
             }
 
             if (cfg.ShowReadyStatusInScoreboard)
@@ -711,13 +777,13 @@ partial class MixScrims
                 if (pickedCtPlayers.Any(p => p.SteamID == player.SteamID))
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} re-joined CT team.", player.Controller.PlayerName);
+                        logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} re-joined CT team.", SafePlayerName(player));
                     return HookResult.Continue;
                 }
                 else
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} attempted to join CT without being picked.", player.Controller.PlayerName);
+                        logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} attempted to join CT without being picked.", SafePlayerName(player));
                     PrintMessageToPlayer(player, Core.Localizer["error.team.join_denied.ct"]);
                     return HookResult.Stop;
                 }
@@ -727,13 +793,13 @@ partial class MixScrims
                 if (pickedTPlayers.Any(p => p.SteamID == player.SteamID))
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} re-joined T team.", player.Controller.PlayerName);
+                        logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} re-joined T team.", SafePlayerName(player));
                     return HookResult.Continue;
                 }
                 else
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} attempted to join T without being picked.", player.Controller.PlayerName);
+                        logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} attempted to join T without being picked.", SafePlayerName(player));
                     PrintMessageToPlayer(player, Core.Localizer["error.team.join_denied.t"]);
                     return HookResult.Stop;
                 }
@@ -759,20 +825,20 @@ partial class MixScrims
                     // Player is in CT team, treat auto-select as CT team selection
                     teamTojoin = 3;
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} used auto-select, converting to CT (3).", player.Controller.PlayerName);
+                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} used auto-select, converting to CT (3).", SafePlayerName(player));
                 }
                 else if (isInTTeam)
                 {
                     // Player is in T team, treat auto-select as T team selection
                     teamTojoin = 2;
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} used auto-select, converting to T (2).", player.Controller.PlayerName);
+                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} used auto-select, converting to T (2).", SafePlayerName(player));
                 }
                 else
                 {
                     // Player is not in any team list - block the attempt
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} used auto-select but is not in any team list. Blocking.", player.Controller.PlayerName);
+                        logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} used auto-select but is not in any team list. Blocking.", SafePlayerName(player));
                     PrintMessageToPlayer(player, Core.Localizer["error.tried_to_bypass_team_check"]);
                     return HookResult.Stop;
                 }
@@ -801,7 +867,7 @@ partial class MixScrims
             if (teamTojoin == 1)
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} joined Spectators.", player.Controller.PlayerName);
+                    logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} joined Spectators.", SafePlayerName(player));
 
                 // Voluntary move to Spectator fully releases the slot so any other connected
                 // player can take it. No reservation is held: returning to a team uses the
@@ -815,7 +881,7 @@ partial class MixScrims
 
                 if (cfg.DetailedLogging && (wasInCt || wasInT))
                     logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} moved to Spectator - released slot (CT:{Ct} T:{T}).",
-                        player.Controller.PlayerName, wasInCt, wasInT);
+                        SafePlayerName(player), wasInCt, wasInT);
 
                 return HookResult.Continue;
             }

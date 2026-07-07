@@ -102,17 +102,9 @@ public partial class MixScrims
         // they were added to the list and this resync (e.g. a player disconnected after
         // the round-prestart). Accessing .SteamID on a disposed Player throws
         // ObjectDisposedException, which previously killed the entire resync and left the
-        // playing lists desynced from the engine.
-        ulong SafeSteamId(IPlayer p)
-        {
-            try { return p.SteamID; }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "ResyncPlayingListsFromEngine: failed reading SteamID from tracked player reference (likely disposed).");
-                return 0UL;
-            }
-        }
-
+        // playing lists desynced from the engine. The plugin-wide SafeSteamId helper
+        // (Shared/Helpers.cs) wraps the read in try/catch and returns 0UL on failure,
+        // with dedup'd warning logging via LogDisposedIfNew.
         var ctSnapshot = playingCtPlayers
             .Select(p => (player: p, steamId: SafeSteamId(p)))
             .ToList();
@@ -194,6 +186,38 @@ public partial class MixScrims
                 movedTToCt++;
         }
 
+        // Second reconciliation pass - the first pass only walks TRACKED SteamIDs and cannot
+        // detect a physical-on-team player that was never added to the playing list. This
+        // happens when a player connects mid-match and gets placed by the engine (via
+        // silent-restore reconnect, auto-fill, or a race with ScheduleForceToSpectator)
+        // without their team change hitting HandleActiveMatchJoin's add path. Without this
+        // pass, the tracked list under-counts vs the engine, HandleActiveMatchJoin blocks
+        // legitimate join attempts ("list 5/5, actual 5"), and the resync's own log detects
+        // the drift ("Round start resync complete ... CT:5 T:4, actual CT:5 T:5") but never
+        // corrects it. This pass adopts every authenticated engine player onto the plugin's
+        // tracked list - the correct semantic is "if you're physically on this team when the
+        // round starts, you're playing this round".
+        int adoptedCt = 0;
+        int adoptedT = 0;
+        foreach (var p in GetPlayersInTeam(Team.CT))
+        {
+            if (!IsPlayerValid(p) || IsBot(p)) continue;
+            var sid = SafeSteamId(p);
+            if (sid == 0UL) continue;
+            if (newCt.Any(existing => SafeSteamId(existing) == sid)) continue;
+            newCt.Add(p);
+            adoptedCt++;
+        }
+        foreach (var p in GetPlayersInTeam(Team.T))
+        {
+            if (!IsPlayerValid(p) || IsBot(p)) continue;
+            var sid = SafeSteamId(p);
+            if (sid == 0UL) continue;
+            if (newT.Any(existing => SafeSteamId(existing) == sid)) continue;
+            newT.Add(p);
+            adoptedT++;
+        }
+
         playingCtPlayers = newCt;
         playingTPlayers = newT;
 
@@ -210,9 +234,13 @@ public partial class MixScrims
             foreach (var s in oldReservedT) reservedCtSlots.Add(s);
         }
 
-        if (cfg.DetailedLogging && (movedCtToT > 0 || movedTToCt > 0))
-            logger.LogInformation("ResyncPlayingListsFromEngine: side swap detected - moved {CtToT} CT->T, {TToCt} T->CT (now CT:{CT} T:{T})",
-                movedCtToT, movedTToCt, playingCtPlayers.Count, playingTPlayers.Count);
+        // Un-gated from DetailedLogging: this is the operator's primary drift-visibility
+        // signal for side switches at halftime / OT halftime / OT-period boundaries and for
+        // the second-pass adopt-untracked pass above. The no-drift steady state stays silent
+        // because the guard requires at least one move or adoption.
+        if (movedCtToT > 0 || movedTToCt > 0 || adoptedCt > 0 || adoptedT > 0)
+            logger.LogInformation("ResyncPlayingListsFromEngine: reconciliation complete - moved {CtToT} CT->T, {TToCt} T->CT, adopted {AdoptedCt} untracked CT, {AdoptedT} untracked T (now CT:{CT} T:{T})",
+                movedCtToT, movedTToCt, adoptedCt, adoptedT, playingCtPlayers.Count, playingTPlayers.Count);
     }
 
     /// <summary>

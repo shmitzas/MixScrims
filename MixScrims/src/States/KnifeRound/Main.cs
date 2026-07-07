@@ -116,11 +116,20 @@ public partial class MixScrims
 
         UnpauseMatch();
 
-        if (Core.Engine is { } knifeEngine)
-            knifeEngine.ExecuteCommand("exec mixscrims/knife_round.cfg");
-        else
-            logger.LogWarning("StartKnifeRound: Core.Engine unavailable; skipping knife_round.cfg.");
-        Core.Scheduler.NextTick(() => RelaxEngineTeamLimits("StartKnifeRound"));
+        // Defer the config exec (and the RelaxEngineTeamLimits that must land right after
+        // the cvars settle) to next tick, matching the StartMatch pattern. Running the exec
+        // synchronously on the same tick as SetMatchState + list rebuilds +
+        // RemoveReadyClanTagsFromAllPlayers + menu closes bundles all the plugin's
+        // heavy work with knife_round.cfg's mp_warmup_end + mp_restartgame 1 into a single
+        // game frame - the source of the ~1s visible freeze at knife round entry.
+        Core.Scheduler.NextTick(() =>
+        {
+            if (Core.Engine is { } knifeEngine)
+                knifeEngine.ExecuteCommand("exec mixscrims/knife_round.cfg");
+            else
+                logger.LogWarning("StartKnifeRound: Core.Engine unavailable; skipping knife_round.cfg.");
+            RelaxEngineTeamLimits("StartKnifeRound");
+        });
 
         if (cfg.KickPlayersNotInMatch)
         {

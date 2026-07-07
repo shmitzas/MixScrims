@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Players;
 
@@ -382,5 +383,109 @@ public sealed partial class MixScrims
         command = command.Replace("{duration}", cfg.PlayerLeavePunishment.BanDurationMinutes.ToString());
         command = command.Replace("{reason}", cfg.PlayerLeavePunishment.BanReason);
         return command;
+    }
+
+    // Throttles disposed-reference warnings: one warning per unique IPlayer instance (identity
+    // hash from RuntimeHelpers.GetHashCode, which is safe on disposed objects because it does
+    // not touch the disposed instance's own state). Prevents log floods when a disposed ref
+    // stays in a tracked list and is polled on every tick.
+    private readonly HashSet<int> _loggedDisposedPlayerHashes = new();
+
+    /// <summary>
+    /// Safely reads <see cref="IPlayer.SteamID"/> from a possibly-null or possibly-disposed
+    /// player reference. Returns <c>0UL</c> on any failure (null, ObjectDisposedException,
+    /// or any other exception). Use this for LINQ predicates and projections over the plugin's
+    /// stored roster lists (<c>playingCtPlayers</c>, <c>playingTPlayers</c>, <c>pickedCtPlayers</c>,
+    /// <c>pickedTPlayers</c>, <c>readyPlayers</c>) — SwiftlyS2 may dispose the underlying Player
+    /// object between the time we added it and the time we read it, and every direct property
+    /// access throws <see cref="ObjectDisposedException"/> on a disposed object.
+    /// </summary>
+    /// <remarks>
+    /// Real players always have a non-zero SteamID; only bots return <c>0UL</c> from a live
+    /// read. Rosters never contain bots (they are filtered upstream), so a returned <c>0UL</c>
+    /// from a roster entry unambiguously means "disposed".
+    /// </remarks>
+    internal ulong SafeSteamId(IPlayer? player)
+    {
+        if (player is null) return 0UL;
+        try
+        {
+            return player.SteamID;
+        }
+        catch (ObjectDisposedException)
+        {
+            LogDisposedIfNew(player, "SafeSteamId");
+            return 0UL;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "SafeSteamId: unexpected error reading SteamID from tracked player reference.");
+            return 0UL;
+        }
+    }
+
+    /// <summary>
+    /// Safely reads <see cref="IPlayer.PlayerID"/> from a possibly-null or possibly-disposed
+    /// player reference. Returns <c>-1</c> on any failure. Same disposal-safety rationale as
+    /// <see cref="SafeSteamId"/>.
+    /// </summary>
+    internal int SafePlayerId(IPlayer? player)
+    {
+        if (player is null) return -1;
+        try
+        {
+            return player.PlayerID;
+        }
+        catch (ObjectDisposedException)
+        {
+            LogDisposedIfNew(player, "SafePlayerId");
+            return -1;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "SafePlayerId: unexpected error reading PlayerID from tracked player reference.");
+            return -1;
+        }
+    }
+
+    /// <summary>
+    /// Safely reads <see cref="IPlayer.Controller"/>.<c>PlayerName</c> from a possibly-null or
+    /// possibly-disposed player reference. Returns a sentinel string (<c>&lt;null&gt;</c>,
+    /// <c>&lt;disposed&gt;</c>, or <c>&lt;error&gt;</c>) on any failure, and a <c>Slot {id}</c>
+    /// fallback (via <see cref="SafePlayerId"/>) when the controller itself is null or its
+    /// <c>PlayerName</c> is null. Use this for structured-log <c>{PlayerName}</c> placeholders
+    /// over the plugin's stored roster lists so log formatting never throws when SwiftlyS2 has
+    /// disposed the underlying Player object between the time we added it and the time we read
+    /// it. Same disposal-safety rationale as <see cref="SafeSteamId"/>.
+    /// </summary>
+    internal string SafePlayerName(IPlayer? player)
+    {
+        if (player is null) return "<null>";
+        try
+        {
+            var controller = player.Controller;
+            if (controller is null) return $"Slot {SafePlayerId(player)}";
+            return controller.PlayerName ?? $"Slot {SafePlayerId(player)}";
+        }
+        catch (ObjectDisposedException)
+        {
+            LogDisposedIfNew(player, "SafePlayerName");
+            return "<disposed>";
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "SafePlayerName: unexpected error reading PlayerName from tracked player reference.");
+            return "<error>";
+        }
+    }
+
+    private void LogDisposedIfNew(IPlayer player, string context)
+    {
+        var identity = RuntimeHelpers.GetHashCode(player);
+        if (_loggedDisposedPlayerHashes.Add(identity))
+        {
+            logger.LogWarning("{Context}: encountered disposed IPlayer reference (identity=0x{Identity:X}) in a tracked collection; skipping this entry. Subsequent hits on the same reference are suppressed. See HandleDisconnectedPlayer roster cleanup for the release path.",
+                context, identity);
+        }
     }
 }
