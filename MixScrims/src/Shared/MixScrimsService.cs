@@ -196,12 +196,14 @@ public class MixScrimsService : IMixScrims
 
     public void RemovePlayerFromPickedCtPlayers(ulong steamId)
     {
-        _mixScrims.pickedCtPlayers.RemoveAll(p => p.SteamID == steamId);
+        // SafeSteamId on roster entries so a disposed IPlayer ref can't throw from the
+        // RemoveAll predicate (same crash class fixed in Events.cs / ForceReady.cs).
+        _mixScrims.pickedCtPlayers.RemoveAll(p => _mixScrims.SafeSteamId(p) == steamId);
     }
 
     public void RemovePlayerFromPickedTPlayers(ulong steamId)
     {
-        _mixScrims.pickedTPlayers.RemoveAll(p => p.SteamID == steamId);
+        _mixScrims.pickedTPlayers.RemoveAll(p => _mixScrims.SafeSteamId(p) == steamId);
     }
 
     public List<ulong> GetPlayingCtPlayers()
@@ -238,12 +240,14 @@ public class MixScrimsService : IMixScrims
 
     public void RemovePlayerFromPlayingCtPlayers(ulong steamId)
     {
-        _mixScrims.playingCtPlayers.RemoveAll(p => p.SteamID == steamId);
+        // SafeSteamId on roster entries so a disposed IPlayer ref can't throw from the
+        // RemoveAll predicate.
+        _mixScrims.playingCtPlayers.RemoveAll(p => _mixScrims.SafeSteamId(p) == steamId);
     }
 
     public void RemovePlayerFromPlayingTPlayers(ulong steamId)
     {
-        _mixScrims.playingTPlayers.RemoveAll(p => p.SteamID == steamId);
+        _mixScrims.playingTPlayers.RemoveAll(p => _mixScrims.SafeSteamId(p) == steamId);
     }
 
     public List<ulong> GetPlayersWaitingForPunishment(ulong steamId)

@@ -361,23 +361,41 @@ partial class MixScrims
         var recentlyDisconnectedToken = Core.Scheduler.DelayBySeconds(1, () => recentlyDisconnectedPlayers.Remove(disconnectingPlayerSlot));
         Core.Scheduler.StopOnMapChange(recentlyDisconnectedToken);
 
+        // Defensive sweep: purge disposed IPlayer refs from every tracked roster before
+        // running the per-player cleanup below. A previous disconnect that failed mid-cleanup
+        // (or a mid-match dispose the plugin didn't catch) can otherwise leave ghost entries
+        // that make later reads throw ObjectDisposedException from LINQ predicates - the exact
+        // crash class the log showed at ForceReady.cs:69. SafeSteamId returns 0 on disposed
+        // refs so the RemoveAll itself never throws on the entries it's removing.
+        readyPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+        pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+        pickedTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+        playingCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+        playingTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+
+        // Cache the disconnecting player's SteamID once. If the IPlayer is already disposed
+        // by the time this handler runs, steamId will be 0 and the targeted per-player
+        // removals below become no-ops - but the sweep above will already have taken care
+        // of any ghost entries this player left behind.
+        var steamId = SafeSteamId(player);
+
         // Cache player name for logging since Controller might become invalid during disconnect
         var playerName = IsPlayerValid(player) ? player.Controller.PlayerName : $"Player {player.PlayerID}";
 
         freshlyJoinedPlayers.Remove(player.Slot);
-        HandlePlayerDisconnectRtv(player.SteamID);
-        forcedToSpectator.Remove(player.SteamID);
+        HandlePlayerDisconnectRtv(steamId);
+        forcedToSpectator.Remove(steamId);
 
-        if (pickedCtPlayers.Any(p => p.SteamID == player.SteamID))
+        if (steamId != 0 && pickedCtPlayers.Any(p => SafeSteamId(p) == steamId))
         {
-            pickedCtPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedCtPlayers.", playerName);
         }
 
-        if (pickedTPlayers.Any(p => p.SteamID == player.SteamID))
+        if (steamId != 0 && pickedTPlayers.Any(p => SafeSteamId(p) == steamId))
         {
-            pickedTPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            pickedTPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedTPlayers.", playerName);
         }
@@ -393,19 +411,19 @@ partial class MixScrims
         // playing list and the live engine team count, so removing here cannot overflow.
         // Also drop any stale reservation/forced-spectator marker for this SteamID.
         _ = isActivMatchState; // retained for readability; behavior no longer branches on it here
-        reservedCtSlots.Remove(player.SteamID);
-        reservedTSlots.Remove(player.SteamID);
+        reservedCtSlots.Remove(steamId);
+        reservedTSlots.Remove(steamId);
 
-        if (playingCtPlayers.Any(p => p.SteamID == player.SteamID))
+        if (steamId != 0 && playingCtPlayers.Any(p => SafeSteamId(p) == steamId))
         {
-            playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingCtPlayers.", playerName);
         }
 
-        if (playingTPlayers.Any(p => p.SteamID == player.SteamID))
+        if (steamId != 0 && playingTPlayers.Any(p => SafeSteamId(p) == steamId))
         {
-            playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            playingTPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingTPlayers.", playerName);
         }
@@ -445,7 +463,9 @@ partial class MixScrims
                         logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is CT captain");
 
                     captainCt = null;
-                    var newCaptain = playingCtPlayers.Where(p => p.SteamID != player.SteamID).FirstOrDefault();
+                    // steamId is the disconnecting player's ID; use SafeSteamId on roster entries
+                    // to skip disposed ghosts when picking the successor captain.
+                    var newCaptain = playingCtPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
                     {
@@ -463,7 +483,7 @@ partial class MixScrims
                         logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is T captain");
 
                     captainT = null;
-                    var newCaptain = playingTPlayers.Where(p => p.SteamID != player.SteamID).FirstOrDefault();
+                    var newCaptain = playingTPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
                     {
@@ -487,7 +507,7 @@ partial class MixScrims
             }
         }
 
-        if (readyPlayers.Any(p => p.SteamID == player.SteamID))
+        if (steamId != 0 && readyPlayers.Any(p => SafeSteamId(p) == steamId))
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removing {PlayerName} from readyPlayers.", playerName);
@@ -589,18 +609,23 @@ partial class MixScrims
         // Committed team for this player. Use event value (Team=new) which is authoritative here.
         int committedTeam = @event.Team;
 
+        // Cache the live event player's SteamID once and use SafeSteamId on roster entries -
+        // playingCt/TPlayers can hold disposed IPlayer refs and a raw .SteamID read on those
+        // throws ObjectDisposedException from LINQ predicates.
+        var playerSteamId = player.SteamID;
+
         // If the player is no longer on CT but is still in playingCtPlayers, prune.
-        if (committedTeam != (int)Team.CT && playingCtPlayers.Any(p => p.SteamID == player.SteamID))
+        if (committedTeam != (int)Team.CT && playingCtPlayers.Any(p => SafeSteamId(p) == playerSteamId))
         {
-            playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            playingCtPlayers.RemoveAll(p => SafeSteamId(p) == playerSteamId);
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleEventPlayerTeamPost: Pruned {PlayerName} from playingCtPlayers (committed team {Team}).", player.Controller.PlayerName, committedTeam);
         }
 
         // If the player is no longer on T but is still in playingTPlayers, prune.
-        if (committedTeam != (int)Team.T && playingTPlayers.Any(p => p.SteamID == player.SteamID))
+        if (committedTeam != (int)Team.T && playingTPlayers.Any(p => SafeSteamId(p) == playerSteamId))
         {
-            playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+            playingTPlayers.RemoveAll(p => SafeSteamId(p) == playerSteamId);
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleEventPlayerTeamPost: Pruned {PlayerName} from playingTPlayers (committed team {Team}).", player.Controller.PlayerName, committedTeam);
         }
@@ -660,12 +685,16 @@ partial class MixScrims
         // otherwise they could exploit the window (e.g. halftime) to bypass team size limits.
         if (isMovingPlayersToTeams)
         {
-            bool isTracked = playingCtPlayers.Any(p => p.SteamID == player.SteamID)
-                          || playingTPlayers.Any(p => p.SteamID == player.SteamID)
-                          || pickedCtPlayers.Any(p => p.SteamID == player.SteamID)
-                          || pickedTPlayers.Any(p => p.SteamID == player.SteamID)
-                          || reservedCtSlots.Contains(player.SteamID)
-                          || reservedTSlots.Contains(player.SteamID);
+            // Cache the live event player's SteamID once and use SafeSteamId on roster
+            // entries; the picked/playing lists may carry disposed IPlayer refs whose raw
+            // .SteamID read throws ObjectDisposedException per iteration.
+            var moveSteamId = player.SteamID;
+            bool isTracked = playingCtPlayers.Any(p => SafeSteamId(p) == moveSteamId)
+                          || playingTPlayers.Any(p => SafeSteamId(p) == moveSteamId)
+                          || pickedCtPlayers.Any(p => SafeSteamId(p) == moveSteamId)
+                          || pickedTPlayers.Any(p => SafeSteamId(p) == moveSteamId)
+                          || reservedCtSlots.Contains(moveSteamId)
+                          || reservedTSlots.Contains(moveSteamId);
 
             if (isTracked)
             {
@@ -714,14 +743,14 @@ partial class MixScrims
             {
                 if (adoptTeam == (int)Team.CT)
                 {
-                    playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+                    playingCtPlayers.RemoveAll(p => SafeSteamId(p) == moveSteamId);
                     playingCtPlayers.Add(player);
                     logger.LogInformation("HandlePlayerChangeTeam: Adopted untracked {PlayerName} into playingCtPlayers (pre-swap team CT) during programmatic move - likely a silent CS2 team restore on reconnect.", SafePlayerName(player));
                     return HookResult.Continue;
                 }
                 if (adoptTeam == (int)Team.T)
                 {
-                    playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID);
+                    playingTPlayers.RemoveAll(p => SafeSteamId(p) == moveSteamId);
                     playingTPlayers.Add(player);
                     logger.LogInformation("HandlePlayerChangeTeam: Adopted untracked {PlayerName} into playingTPlayers (pre-swap team T) during programmatic move - likely a silent CS2 team restore on reconnect.", SafePlayerName(player));
                     return HookResult.Continue;
@@ -772,9 +801,13 @@ partial class MixScrims
 
         if (matchState == MatchState.PickingTeam)
         {
+            // Cache the live event player's SteamID once and use SafeSteamId on picked lists
+            // to keep the .Any checks safe against disposed IPlayer refs (same crash class as
+            // ForceReady.cs:69).
+            var pickSteamId = player.SteamID;
             if (teamTojoin == 3)
             {
-                if (pickedCtPlayers.Any(p => p.SteamID == player.SteamID))
+                if (pickedCtPlayers.Any(p => SafeSteamId(p) == pickSteamId))
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} re-joined CT team.", SafePlayerName(player));
@@ -790,7 +823,7 @@ partial class MixScrims
             }
             if (teamTojoin == 2)
             {
-                if (pickedTPlayers.Any(p => p.SteamID == player.SteamID))
+                if (pickedTPlayers.Any(p => SafeSteamId(p) == pickSteamId))
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandlePlayerJoinTeam - PickingTeam: Player {PlayerName} re-joined T team.", SafePlayerName(player));
@@ -815,10 +848,12 @@ partial class MixScrims
             // This prevents players from bypassing team limit checks
             if (teamTojoin == 0)
             {
-                // Determine which team the player belongs to based on playing lists / reservations
-                // (match by SteamID so reconnected players with new PlayerID/slot still resolve correctly)
-                bool isInCtTeam = playingCtPlayers.Any(p => p.SteamID == player.SteamID) || reservedCtSlots.Contains(player.SteamID);
-                bool isInTTeam = playingTPlayers.Any(p => p.SteamID == player.SteamID) || reservedTSlots.Contains(player.SteamID);
+                // Cache live event player SteamID once and use SafeSteamId on playing lists
+                // (may hold disposed refs). HashSet lookups against reservedCt/TSlots use the
+                // live parameter directly - reservations are keyed by ulong, not IPlayer.
+                var autoSteamId = player.SteamID;
+                bool isInCtTeam = playingCtPlayers.Any(p => SafeSteamId(p) == autoSteamId) || reservedCtSlots.Contains(autoSteamId);
+                bool isInTTeam = playingTPlayers.Any(p => SafeSteamId(p) == autoSteamId) || reservedTSlots.Contains(autoSteamId);
 
                 if (isInCtTeam)
                 {
@@ -873,11 +908,13 @@ partial class MixScrims
                 // player can take it. No reservation is held: returning to a team uses the
                 // normal capacity-checked join path. Any stale reservation/force-spec marker
                 // for this SteamID is also cleared so it cannot block their own rejoin later.
-                bool wasInCt = playingCtPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
-                bool wasInT = playingTPlayers.RemoveAll(p => p.SteamID == player.SteamID) > 0;
-                reservedCtSlots.Remove(player.SteamID);
-                reservedTSlots.Remove(player.SteamID);
-                forcedToSpectator.Remove(player.SteamID);
+                // Cache live SteamID once; SafeSteamId on roster removals to skip disposed ghosts.
+                var specSteamId = player.SteamID;
+                bool wasInCt = playingCtPlayers.RemoveAll(p => SafeSteamId(p) == specSteamId) > 0;
+                bool wasInT = playingTPlayers.RemoveAll(p => SafeSteamId(p) == specSteamId) > 0;
+                reservedCtSlots.Remove(specSteamId);
+                reservedTSlots.Remove(specSteamId);
+                forcedToSpectator.Remove(specSteamId);
 
                 if (cfg.DetailedLogging && (wasInCt || wasInT))
                     logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} moved to Spectator - released slot (CT:{Ct} T:{T}).",
@@ -900,8 +937,12 @@ partial class MixScrims
     {
         int maxTeamSize = cfg.MinimumReadyPlayers / 2;
 
-        bool isInPlayingList = playingList.Any(p => p.SteamID == player.SteamID);
-        bool hasReservation = reservedSlots.Contains(player.SteamID);
+        // Cache the live event player's SteamID once and use SafeSteamId on the playing list
+        // (may hold disposed IPlayer refs). Reservations are HashSet<ulong> so the live value
+        // is used directly.
+        var joinSteamId = player.SteamID;
+        bool isInPlayingList = playingList.Any(p => SafeSteamId(p) == joinSteamId);
+        bool hasReservation = reservedSlots.Contains(joinSteamId);
 
         int listCount = playingList.Count;
         int actualCount = GetPlayersInTeam(team).Count;
@@ -929,10 +970,10 @@ partial class MixScrims
 
             // Refresh the IPlayer reference in the list (stale ref from before disconnect would have
             // different PlayerID/slot). This keeps list identity aligned with the current connected player.
-            playingList.RemoveAll(p => p.SteamID == player.SteamID);
+            playingList.RemoveAll(p => SafeSteamId(p) == joinSteamId);
             playingList.Add(player);
-            reservedSlots.Remove(player.SteamID);
-            forcedToSpectator.Remove(player.SteamID);
+            reservedSlots.Remove(joinSteamId);
+            forcedToSpectator.Remove(joinSteamId);
 
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} re-joined.", team, player.Controller.PlayerName);

@@ -52,7 +52,10 @@ public partial class MixScrims
 
         if (captainCt != null && IsPlayerValid(captainCt))
         {
-            if (!playingCtPlayers.Any(p => p.SteamID == captainCt.SteamID))
+            // Cache captain SteamID once; playingCtPlayers can carry disposed IPlayer refs so
+            // predicate reads use SafeSteamId to avoid ObjectDisposedException per iteration.
+            var captainCtId = captainCt.SteamID;
+            if (!playingCtPlayers.Any(p => SafeSteamId(p) == captainCtId))
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation("StartKnifeRound: Adding manually-set CT Captain {PlayerName} to playingCtPlayers.", captainCt.Controller.PlayerName);
@@ -62,7 +65,8 @@ public partial class MixScrims
 
         if (captainT != null && IsPlayerValid(captainT))
         {
-            if (!playingTPlayers.Any(p => p.SteamID == captainT.SteamID))
+            var captainTId = captainT.SteamID;
+            if (!playingTPlayers.Any(p => SafeSteamId(p) == captainTId))
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation("StartKnifeRound: Adding manually-set T Captain {PlayerName} to playingTPlayers.", captainT.Controller.PlayerName);

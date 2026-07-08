@@ -29,17 +29,6 @@ public partial class MixScrims
             return;
         }
 
-        if (admin == null)
-        {
-            logger.LogInformation("Players were forced into unready state by force by Console");
-            PrintMessageToAllPlayers(Core.Localizer["command.force.unready", "Console"]);
-        }
-        else
-        {
-            logger.LogInformation("Players were forced into unready state by {AdminName}", admin.Controller.PlayerName);
-            PrintMessageToAllPlayers(Core.Localizer["command.force.unready", admin.Controller.PlayerName]);
-        }
-
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState != MatchState.Warmup && matchState != MatchState.MapChosen)
@@ -53,6 +42,19 @@ public partial class MixScrims
         }
 
         ForceUnreadyAllPlayers();
+
+        // Success announcement runs after ForceUnreadyAllPlayers so an aborted run
+        // (invalid state, exception) never fires a misleading "players were forced" message.
+        if (admin == null)
+        {
+            logger.LogInformation("Players were forced into unready state by force by Console");
+            PrintMessageToAllPlayers(Core.Localizer["command.force.unready", "Console"]);
+        }
+        else
+        {
+            logger.LogInformation("Players were forced into unready state by {AdminName}", admin.Controller.PlayerName);
+            PrintMessageToAllPlayers(Core.Localizer["command.force.unready", admin.Controller.PlayerName]);
+        }
     }
 
     internal void ForceUnreadyAllPlayers()
@@ -66,9 +68,11 @@ public partial class MixScrims
 
         foreach (var player in players)
         {
-            if (readyPlayers.Any(rp => rp.SteamID == player.SteamID))
+            // Cache live loop-var SteamID and use SafeSteamId on roster entries: readyPlayers
+            // may hold disposed IPlayer refs (see ForceReady.cs:69 crash) so raw .SteamID throws.
+            var playerId = player.SteamID;
+            if (readyPlayers.Any(rp => SafeSteamId(rp) == playerId))
             {
-                logger.LogInformation("ForceUnreadyAllPlayers: Removing players from ready list");
                 RemovePlayerFromReadyList(player, false);
             }
         }

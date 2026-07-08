@@ -29,17 +29,6 @@ public partial class MixScrims
             return;
         }
 
-        if (admin == null)
-        {
-            logger.LogInformation("Players were forced into ready state by force by Console");
-            PrintMessageToAllPlayers(Core.Localizer["command.force.ready", "Console"]);
-        }
-        else
-        {
-            logger.LogInformation("Players were forced into ready state by {AdminName}", admin.Controller.PlayerName);
-            PrintMessageToAllPlayers(Core.Localizer["command.force.ready", admin.Controller.PlayerName]);
-        }
-
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState != MatchState.Warmup && matchState != MatchState.MapChosen)
@@ -53,6 +42,19 @@ public partial class MixScrims
         }
 
         ForceReadyAllPlayers();
+
+        // Success announcement runs after ForceReadyAllPlayers so an aborted run
+        // (invalid state, exception) never fires a misleading "players were forced" message.
+        if (admin == null)
+        {
+            logger.LogInformation("Players were forced into ready state by force by Console");
+            PrintMessageToAllPlayers(Core.Localizer["command.force.ready", "Console"]);
+        }
+        else
+        {
+            logger.LogInformation("Players were forced into ready state by {AdminName}", admin.Controller.PlayerName);
+            PrintMessageToAllPlayers(Core.Localizer["command.force.ready", admin.Controller.PlayerName]);
+        }
     }
 
     internal void ForceReadyAllPlayers()
@@ -66,9 +68,14 @@ public partial class MixScrims
 
         foreach (var player in players)
         {
-            if (!readyPlayers.Any(rp => rp.SteamID == player.SteamID))
+            // Cache the live loop-var SteamID and use SafeSteamId on roster entries: readyPlayers
+            // can carry disposed IPlayer references and reading .SteamID on those throws
+            // ObjectDisposedException, which is the crash the log at ForceReady.cs:69 showed.
+            var playerId = player.SteamID;
+            if (!readyPlayers.Any(rp => SafeSteamId(rp) == playerId))
             {
-                logger.LogInformation("OnForceReady: Adding players to ready list");
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("OnForceReady: Adding {PlayerName} (SteamID={SteamID}) to ready list", SafePlayerName(player), playerId);
                 AddPlayerToReadyList(player, false);
             }
         }

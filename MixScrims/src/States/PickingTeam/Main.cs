@@ -48,15 +48,20 @@ public partial class MixScrims
 
             if (cfg.DetailedLogging)
             {
+                // Cache captain SteamIDs once and use SafeSteamId on roster entries; picked lists
+                // can hold disposed IPlayer refs and a raw .SteamID read on those throws.
+                var captainCtIdLog = SafeSteamId(captainCt);
+                var captainTIdLog = SafeSteamId(captainT);
                 logger.LogInformation("StartTeamPickingPhase: Before validation - pickedCt: {CtCount}, pickedT: {TCount}", pickedCtPlayers.Count, pickedTPlayers.Count);
-                logger.LogInformation("StartTeamPickingPhase: CT captain in picked list: {InList}", pickedCtPlayers.Any(p => p.SteamID == captainCt.SteamID));
-                logger.LogInformation("StartTeamPickingPhase: T captain in picked list: {InList}", pickedTPlayers.Any(p => p.SteamID == captainT.SteamID));
+                logger.LogInformation("StartTeamPickingPhase: CT captain in picked list: {InList}", captainCtIdLog != 0 && pickedCtPlayers.Any(p => SafeSteamId(p) == captainCtIdLog));
+                logger.LogInformation("StartTeamPickingPhase: T captain in picked list: {InList}", captainTIdLog != 0 && pickedTPlayers.Any(p => SafeSteamId(p) == captainTIdLog));
             }
 
             // Ensure captains are in picked lists (handles captains set during Warmup state)
             if (captainCt != null && IsPlayerValid(captainCt))
             {
-                if (!pickedCtPlayers.Any(p => p.SteamID == captainCt.SteamID))
+                var captainCtId = captainCt.SteamID;
+                if (!pickedCtPlayers.Any(p => SafeSteamId(p) == captainCtId))
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation("StartTeamPickingPhase: Adding CT Captain {PlayerName} to pickedCtPlayers.", captainCt.Controller.PlayerName);
@@ -66,7 +71,8 @@ public partial class MixScrims
 
             if (captainT != null && IsPlayerValid(captainT))
             {
-                if (!pickedTPlayers.Any(p => p.SteamID == captainT.SteamID))
+                var captainTId = captainT.SteamID;
+                if (!pickedTPlayers.Any(p => SafeSteamId(p) == captainTId))
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation("StartTeamPickingPhase: Adding T Captain {PlayerName} to pickedTPlayers.", captainT.Controller.PlayerName);
@@ -142,13 +148,17 @@ public partial class MixScrims
         {
             if (captainCt != null && captainCt.IsValid)
             {
-                players.RemoveAll(p => p.SteamID == captainCt.SteamID);
+                // Cache captain SteamID once and use SafeSteamId on roster entries to keep the
+                // RemoveAll safe against disposed IPlayer refs surfaced by GetPlayingPlayers.
+                var captainCtId = captainCt.SteamID;
+                players.RemoveAll(p => SafeSteamId(p) == captainCtId);
                 playingCtPlayers.Add(captainCt);
             }
 
             if (captainT != null && captainT.IsValid)
             {
-                players.RemoveAll(p => p.SteamID == captainT.SteamID);
+                var captainTId = captainT.SteamID;
+                players.RemoveAll(p => SafeSteamId(p) == captainTId);
                 playingTPlayers.Add(captainT);
             }
         }
@@ -159,7 +169,10 @@ public partial class MixScrims
                 && player.IsValid
                 && player.PlayerPawn != null)
             {
-                if ((Team)player.PlayerPawn.TeamNum == Team.T && !playingTPlayers.Any(p => p.SteamID == player.SteamID))
+                // Cache the live loop-var SteamID once; playingCt/TPlayers may hold disposed
+                // refs so predicate reads use SafeSteamId.
+                var playerId = player.SteamID;
+                if ((Team)player.PlayerPawn.TeamNum == Team.T && !playingTPlayers.Any(p => SafeSteamId(p) == playerId))
                 {
                     if (cfg.MoveOverflowPlayersToSpec)
                     {
@@ -176,7 +189,7 @@ public partial class MixScrims
                     playingTPlayers.Add(player);
                 }
 
-                if ((Team)player.PlayerPawn.TeamNum == Team.CT && !playingCtPlayers.Any(p => p.SteamID == player.SteamID))
+                if ((Team)player.PlayerPawn.TeamNum == Team.CT && !playingCtPlayers.Any(p => SafeSteamId(p) == playerId))
                 {
                     if (cfg.MoveOverflowPlayersToSpec)
                     {
@@ -216,7 +229,16 @@ public partial class MixScrims
         }
 
         var players = GetPlayers();
-        players.RemoveAll(p => pickedCtPlayers.Any(pp => pp.SteamID == p.SteamID) || pickedTPlayers.Any(pp => pp.SteamID == p.SteamID) || p.SteamID == captain.SteamID);
+        // Cache the captain SteamID once and use SafeSteamId on picked roster entries; the
+        // picked lists can hold disposed IPlayer refs that would throw on a raw .SteamID read.
+        var captainId = captain.SteamID;
+        players.RemoveAll(p =>
+        {
+            var pid = p.SteamID;
+            return pickedCtPlayers.Any(pp => SafeSteamId(pp) == pid)
+                || pickedTPlayers.Any(pp => SafeSteamId(pp) == pid)
+                || pid == captainId;
+        });
 
         if (players.Count == 0)
         {
@@ -329,16 +351,23 @@ public partial class MixScrims
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (captainCt != null)
         {
+            // Cache the outgoing captain's SteamID once and use SafeSteamId on roster entries;
+            // captainCt itself and the roster items can both be disposed here (stale ref from
+            // before a map change / reconnect). Skip the containment check when the outgoing
+            // captain has no readable SteamID - .Remove(captainCt) below still works by
+            // reference identity, but the .Any check would otherwise match every disposed
+            // ghost that shares SafeSteamId == 0.
+            var outgoingCtId = SafeSteamId(captainCt);
             if (matchState == MatchState.PickingTeam || matchState == MatchState.MapChosen)
             {
-                if (pickedCtPlayers.Any(p => p.SteamID == captainCt.SteamID))
+                if (outgoingCtId != 0 && pickedCtPlayers.Any(p => SafeSteamId(p) == outgoingCtId))
                 {
                     pickedCtPlayers.Remove(captainCt);
                 }
             }
             if (matchState == MatchState.KnifeRound)
             {
-                if (playingCtPlayers.Any(p => p.SteamID == captainCt.SteamID))
+                if (outgoingCtId != 0 && playingCtPlayers.Any(p => SafeSteamId(p) == outgoingCtId))
                 {
                     playingCtPlayers.Remove(captainCt);
                 }
@@ -364,7 +393,8 @@ public partial class MixScrims
             }
             if (matchState == MatchState.KnifeRound)
             {
-                if (!playingCtPlayers.Any(p => p.SteamID == captainCt.SteamID))
+                var newCtId = captainCt.SteamID;
+                if (!playingCtPlayers.Any(p => SafeSteamId(p) == newCtId))
                     playingCtPlayers.Add(captainCt);
             }
 
@@ -388,16 +418,20 @@ public partial class MixScrims
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (captainT != null)
         {
+            // Cache outgoing captain's SteamID once and use SafeSteamId on roster entries; same
+            // disposed-ref safety as PickCtCaptain. Skip the containment check when the outgoing
+            // captain has no readable SteamID so the .Any doesn't falsely match disposed ghosts.
+            var outgoingTId = SafeSteamId(captainT);
             if (matchState == MatchState.PickingTeam || matchState == MatchState.MapChosen)
             {
-                if (pickedTPlayers.Any(p => p.SteamID == captainT.SteamID))
+                if (outgoingTId != 0 && pickedTPlayers.Any(p => SafeSteamId(p) == outgoingTId))
                 {
                     pickedTPlayers.Remove(captainT);
                 }
             }
             if (matchState == MatchState.KnifeRound)
             {
-                if (playingTPlayers.Any(p => p.SteamID == captainT.SteamID))
+                if (outgoingTId != 0 && playingTPlayers.Any(p => SafeSteamId(p) == outgoingTId))
                 {
                     playingTPlayers.Remove(captainT);
                 }
@@ -423,7 +457,8 @@ public partial class MixScrims
             }
             if (matchState == MatchState.KnifeRound)
             {
-                if (!playingTPlayers.Any(p => p.SteamID == captainT.SteamID))
+                var newTId = captainT.SteamID;
+                if (!playingTPlayers.Any(p => SafeSteamId(p) == newTId))
                     playingTPlayers.Add(captainT);
             }
 
@@ -461,10 +496,21 @@ public partial class MixScrims
             players = GetPlayers().Where(IsPlayerValid).ToList();
         }
 
+        // Exclude the current captains from the draw. Cache each captain's SteamID once
+        // and use SafeSteamId on `players` predicates to stay safe against disposed refs
+        // (captainCt/captainT can be stale from a prior round/map).
         if (captainCt != null)
-            players.RemoveAll(p => p.SteamID == captainCt.SteamID);
+        {
+            var excludeCtId = SafeSteamId(captainCt);
+            if (excludeCtId != 0)
+                players.RemoveAll(p => SafeSteamId(p) == excludeCtId);
+        }
         if (captainT != null)
-            players.RemoveAll(p => p.SteamID == captainT.SteamID);
+        {
+            var excludeTId = SafeSteamId(captainT);
+            if (excludeTId != 0)
+                players.RemoveAll(p => SafeSteamId(p) == excludeTId);
+        }
 
         if (players.Count == 0)
         {

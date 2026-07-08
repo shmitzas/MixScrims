@@ -221,7 +221,19 @@ public sealed partial class MixScrims
 
         return allPlayers
             .Where(player => !(cfg.TestMode && IsBot(player)))
-            .Where(player => !readyPlayers.Any(rp => rp.SteamID == player.SteamID))
+            .Where(player =>
+            {
+                // Cache the live player's SteamID once, and use SafeSteamId on each roster
+                // entry: readyPlayers can carry disposed IPlayer refs, and a raw .SteamID
+                // read on a disposed entry throws ObjectDisposedException. The != 0 guard
+                // skips disposed ghosts so a real player never gets falsely matched to one.
+                var playerId = player.SteamID;
+                return !readyPlayers.Any(rp =>
+                {
+                    var rpId = SafeSteamId(rp);
+                    return rpId != 0 && rpId == playerId;
+                });
+            })
             .ToList();
     }
 
