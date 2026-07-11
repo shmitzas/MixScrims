@@ -34,6 +34,12 @@ public partial class MixScrims
                 logger.LogWarning("LoadWarmupConfig: Core.Engine unavailable; skipping warmup.cfg.");
         });
 
+        // Single point of truth for "warmup cvars have just been re-applied". Set here
+        // (not inside the NextTick) so the flag reflects committed intent even if the
+        // exec itself is skipped due to a null engine — the LogWarning above already
+        // surfaces that diagnostic path.
+        warmupCvarsDirty = false;
+
         var pluginState = mixScrimsService.GetCurrentPluginState();
 
         if (pluginState == PluginState.Staging)

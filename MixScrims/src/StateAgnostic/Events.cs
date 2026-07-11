@@ -35,15 +35,31 @@ partial class MixScrims
     /// </summary>
     internal void HandleStateAgnosticMapLoad(IOnMapLoadEvent @event)
     {
+        // Compute plugin-driven vs external once so both the warmup-cvar-dirty marker
+        // (below) and the resetMixOnFirstJoin reconciliation (further down) share the
+        // same classification. MixScrims-driven changes can land here in either
+        // MapLoading (if this handler runs before HandleMapChosenNewMapLoad) or MapChosen
+        // (if it runs after, since the MapChosen handler promotes state on match-flow
+        // loads). Any other state is an external map change.
+        var currentState = mixScrimsService.GetCurrentMatchState();
+        var isPluginDriven = currentState == MatchState.MapLoading || currentState == MatchState.MapChosen;
+
+        if (!isPluginDriven)
+        {
+            // External map load (another plugin issued changelevel / host_workshop_map,
+            // or the RCON/console did). Warmup cvars have reset to CS2 defaults on the
+            // new map — mark them dirty so the next OnClientPutInServer during Warmup
+            // re-execs warmup.cfg. Plugin-driven loads reach StartWarmup() on the new
+            // map through their own state machine and will clear the flag via
+            // LoadWarmupConfig(), so no set is needed for the plugin-driven branch.
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleStateAgnosticMapLoad: External map load detected (state={State}); marking warmup cvars dirty.", currentState);
+            warmupCvarsDirty = true;
+        }
+
         if (resetMixOnFirstJoin)
         {
-            var currentState = mixScrimsService.GetCurrentMatchState();
-            // MixScrims-driven changes can land here in either MapLoading (if this handler
-            // runs before HandleMapChosenNewMapLoad) or MapChosen (if it runs after, since
-            // the MapChosen handler promotes state on match-flow loads). Both must be
-            // treated as plugin-driven; only an external map change (any other state) should
-            // trigger a deferred reset.
-            if (currentState == MatchState.MapLoading || currentState == MatchState.MapChosen)
+            if (isPluginDriven)
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandleStateAgnosticMapLoad: Clearing resetMixOnFirstJoin flag — MixScrims-driven map change in progress (state={State}).", currentState);
@@ -80,19 +96,18 @@ partial class MixScrims
             return;
         }
 
-        // Defensive re-apply of warmup config when the first human joins during Warmup.
-        // After a long hibernation or an externally driven map change, CS2 cvars can drift
-        // out of warmup state without firing OnMapLoad in a useful way for us. Re-execing
-        // warmup.cfg here guarantees the new player lands in a properly configured warmup.
-        if (mixScrimsService.GetCurrentMatchState() == MatchState.Warmup)
+        // Defensive re-apply of warmup config when cvars have been marked dirty by an
+        // upstream event (external map load in HandleStateAgnosticMapLoad, or any reset
+        // path via ResetVariables). Replaces the previous "humanCount <= 1" heuristic,
+        // which incorrectly fired on every 1→2 join because the joining player is not
+        // yet counted at OnClientPutInServer — teleporting existing warmup players back
+        // to spawn every time a second player connected. warmupCvarsDirty is cleared by
+        // LoadWarmupConfig() below, so this branch is self-quiescing.
+        if (mixScrimsService.GetCurrentMatchState() == MatchState.Warmup && warmupCvarsDirty)
         {
-            var humanCount = Core.PlayerManager.GetAllValidPlayers().Count(p => !p.IsFakeClient);
-            if (humanCount <= 1)
-            {
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleClientPutInServer: First human joined during Warmup (count={Count}) — re-applying warmup config.", humanCount);
-                LoadWarmupConfig();
-            }
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleClientPutInServer: Warmup cvars marked dirty — re-applying warmup config.");
+            LoadWarmupConfig();
         }
 
         try
@@ -104,39 +119,35 @@ partial class MixScrims
             {
                 if (MatchState != MatchState.Warmup && MatchState != MatchState.MapVoting && MatchState != MatchState.MapChosen && MatchState != MatchState.PickingTeam)
                 {
-                    // Active match state. Resolve roster membership by SteamID (reconnects get new PlayerID/slot).
-                    bool isListed = playingCtPlayers.Any(p => p.SteamID == player.SteamID)
-                                 || playingTPlayers.Any(p => p.SteamID == player.SteamID)
-                                 || pickedCtPlayers.Any(p => p.SteamID == player.SteamID)
-                                 || pickedTPlayers.Any(p => p.SteamID == player.SteamID)
-                                 || reservedCtSlots.Contains(player.SteamID)
-                                 || reservedTSlots.Contains(player.SteamID);
+                    // Active match state. The only players allowed on a playing team are those
+                    // in pickedCt/T (the static "who was picked into this match" snapshot, kept
+                    // populated for the whole match). Everyone else is decided by the
+                    // preventNotPickedPlayersFromJoiningOngoingMatch flag: on -> kick, off ->
+                    // preemptively land on Spectator so the engine's auto-place onto a previous
+                    // team doesn't produce a visible flash on a full side (the Post handler in
+                    // HandleEventPlayerTeamPost is still the primary backstop).
+                    bool isPicked = pickedCtPlayers.Any(p => SafeSteamId(p) == player.SteamID)
+                                 || pickedTPlayers.Any(p => SafeSteamId(p) == player.SteamID);
 
                     if (preventNotPickedPlayersFromJoiningOngoingMatch)
                     {
-                        if (isListed)
+                        if (isPicked)
                         {
                             if (cfg.DetailedLogging)
-                                logger.LogInformation("HandleClientPutInServer: {PlayerName} is tracked/reserved, allowing.", player.Controller.PlayerName);
+                                logger.LogInformation("HandleClientPutInServer: {PlayerName} is picked, allowing.", player.Controller.PlayerName);
                         }
                         else
                         {
                             if (cfg.DetailedLogging)
-                                logger.LogInformation("HandleClientPutInServer: {PlayerName} joined mid-match and is not tracked, kicking.", player.Controller.PlayerName);
+                                logger.LogInformation("HandleClientPutInServer: {PlayerName} joined mid-match and is not picked, kicking.", player.Controller.PlayerName);
                             KickPlayer(player.SteamID, Core.Localizer["info.kick_reason.not_picked"]);
                             return;
                         }
                     }
-                    else if (!isListed)
+                    else if (!isPicked)
                     {
-                        // Prevention disabled but slots may still be full. The engine typically places a
-                        // reconnecting player back onto their previous team automatically even though our
-                        // validation would have rejected it, and the exact timing of that placement is
-                        // not reliable to intercept via the Pre hook alone. Mark this SteamID as forced
-                        // to spectator - any join attempt will be rejected AND a retrying scheduler will
-                        // actively switch them to Spectator until they're confirmed there.
                         if (cfg.DetailedLogging)
-                            logger.LogInformation("HandleClientPutInServer: {PlayerName} is not tracked during active match - forcing to Spectator.", player.Controller.PlayerName);
+                            logger.LogInformation("HandleClientPutInServer: {PlayerName} is not picked during active match - forcing to Spectator.", player.Controller.PlayerName);
 
                         ScheduleForceToSpectator(player);
                         return;
@@ -400,20 +411,6 @@ partial class MixScrims
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedTPlayers.", playerName);
         }
 
-        var matchState = mixScrimsService.GetCurrentMatchState();
-        bool isActivMatchState = matchState == MatchState.KnifeRound ||
-                                 matchState == MatchState.Match ||
-                                 matchState == MatchState.PickingStartingSide ||
-                                 matchState == MatchState.Timeout;
-
-        // Always free the slot on disconnect so any connected spectator can take it.
-        // The team-size cap is enforced strictly in HandleActiveMatchJoin using both the
-        // playing list and the live engine team count, so removing here cannot overflow.
-        // Also drop any stale reservation/forced-spectator marker for this SteamID.
-        _ = isActivMatchState; // retained for readability; behavior no longer branches on it here
-        reservedCtSlots.Remove(steamId);
-        reservedTSlots.Remove(steamId);
-
         if (steamId != 0 && playingCtPlayers.Any(p => SafeSteamId(p) == steamId))
         {
             playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
@@ -430,7 +427,7 @@ partial class MixScrims
 
         playerColors.Remove(player.PlayerID);
 
-        matchState = mixScrimsService.GetCurrentMatchState();
+        var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.PickingTeam)
         {
@@ -566,17 +563,39 @@ partial class MixScrims
     }
 
     /// <summary>
-    /// Post-mode reconciler: after a team change has actually been committed by the engine,
-    /// ensure the playing lists match physical team membership. Prunes entries for players that
-    /// the engine placed on a team other than the one they're tracked on (e.g. a voluntary
-    /// move to Spectator). Only runs during active match states and only when prevention is off -
-    /// with prevention on, reservations are intentionally held for the original occupant.
+    /// Post-mode reconciler: after a team change has actually been committed by the engine, do
+    /// two things:
+    /// (1) Overflow demote - if the just-committed player is on CT or T but is NOT in that team's
+    ///     plugin roster, force them back to Spectator via <see cref="ScheduleForceToSpectator"/>.
+    ///     This catches CS2's silent restore-at-round-start where a specced player is auto-placed
+    ///     onto their old team without going through <see cref="HandlePlayerChangeTeam"/>. Fires
+    ///     regardless of <see cref="preventNotPickedPlayersFromJoiningOngoingMatch"/> as
+    ///     defense-in-depth against that bypass. The deferred-spec-then-fresh-join scenario is
+    ///     unaffected because the fresh joiner is added to the roster by
+    ///     <see cref="HandleActiveMatchJoin"/>'s Pre hook before this Post hook runs.
+    /// (2) Prune - if a tracked player has moved off their tracked team (e.g. voluntary
+    ///     Spectator move, or CT-&gt;T switch), remove them from the old team's roster. Only
+    ///     runs when prevention is off - with prevention on, reservations are intentionally held
+    ///     for the original occupant.
+    /// Both branches are skipped while <see cref="isMovingPlayersToTeams"/> is set (halftime
+    /// side-swap / knife-&gt;match / stay-or-switch), because those programmatic swaps commit
+    /// team changes for tracked players without going through <see cref="HandleActiveMatchJoin"/>.
+    /// The <see cref="ScheduleForceToSpectator"/> recursion is short-circuited because its own
+    /// <c>SwitchTeamAsync(Spectator)</c> commit hits this hook with <c>committedTeam=Spectator</c>,
+    /// which is neither CT nor T.
     /// </summary>
     [GameEventHandler(HookMode.Post)]
     public HookResult HandleEventPlayerTeamPost(EventPlayerTeam @event)
     {
         var player = @event.UserIdPlayer;
         if (player == null || !IsPlayerValid(player) || IsBot(player) || player.IsFakeClient)
+            return HookResult.Continue;
+
+        // Guard against connecting/uninitialised slots whose SteamID hasn't landed yet -
+        // acting on SteamID=0 would either dedup incorrectly in forcedToSpectator or match
+        // stale ghost entries in the rosters.
+        var playerSteamId = player.SteamID;
+        if (playerSteamId == 0)
             return HookResult.Continue;
 
         var matchState = mixScrimsService.GetCurrentMatchState();
@@ -587,21 +606,17 @@ partial class MixScrims
         if (!isActive)
             return HookResult.Continue;
 
-        if (preventNotPickedPlayersFromJoiningOngoingMatch)
-            return HookResult.Continue;
-
         // While the plugin is performing a programmatic team move (side-swap at halftime
         // or OT period boundaries, knife->match transition, stay/switch sides) we MUST NOT
-        // prune entries from the playing lists. The pre-handler bypasses with Continue
-        // without re-adding to the new list, so pruning here would leave the player
-        // untracked until ResyncPlayingListsFromEngine runs (1s after EventRoundStart).
-        // Any team event firing in that window would then treat them as untracked and
-        // force them to spec - the exact symptom of "OT side switch dumps half the
-        // players to spec". Resync will reconcile the lists with engine reality.
+        // demote or prune. The pre-handler bypasses tracked players with Continue without
+        // re-adding to the new list; running either branch here would either dump the whole
+        // roster to spec or leave them untracked until ResyncPlayingListsFromEngine runs
+        // (1s after EventRoundStart in Match/Events.cs) - the exact "OT side switch dumps
+        // half the players to spec" symptom this file already guards against.
         if (isMovingPlayersToTeams)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandleEventPlayerTeamPost: skipping prune for {PlayerName} during programmatic move (committed team {Team}).",
+                logger.LogInformation("HandleEventPlayerTeamPost: skipping reconcile for {PlayerName} during programmatic move (committed team {Team}).",
                     player.Controller.PlayerName, @event.Team);
             return HookResult.Continue;
         }
@@ -609,10 +624,29 @@ partial class MixScrims
         // Committed team for this player. Use event value (Team=new) which is authoritative here.
         int committedTeam = @event.Team;
 
-        // Cache the live event player's SteamID once and use SafeSteamId on roster entries -
-        // playingCt/TPlayers can hold disposed IPlayer refs and a raw .SteamID read on those
-        // throws ObjectDisposedException from LINQ predicates.
-        var playerSteamId = player.SteamID;
+        // Overflow demote: player physically landed on CT or T but is not in that team's roster.
+        // This catches CS2 auto-restoring a specced/reconnecting player back onto their old team
+        // without firing HandlePlayerChangeTeam - the Pre-hook capacity gate never runs, so the
+        // physical team can exceed the plugin's picked roster. Force them back to Spectator.
+        // Runs even when prevention is on: HandleActiveMatchJoin blocks the gated path there,
+        // but a silent-restore bypasses that gate entirely.
+        if (committedTeam == (int)Team.CT || committedTeam == (int)Team.T)
+        {
+            var roster = committedTeam == (int)Team.CT ? playingCtPlayers : playingTPlayers;
+            if (!roster.Any(p => SafeSteamId(p) == playerSteamId))
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("HandleEventPlayerTeamPost: {PlayerName} committed to {Team} but not in roster - forcing to Spectator.",
+                        player.Controller.PlayerName, (Team)committedTeam);
+                ScheduleForceToSpectator(player, "error.team.slot_unavailable");
+                return HookResult.Continue;
+            }
+        }
+
+        // Prune: reservations are intentionally held when prevention is on, so tracked players
+        // that moved off their tracked team stay in the list.
+        if (preventNotPickedPlayersFromJoiningOngoingMatch)
+            return HookResult.Continue;
 
         // If the player is no longer on CT but is still in playingCtPlayers, prune.
         if (committedTeam != (int)Team.CT && playingCtPlayers.Any(p => SafeSteamId(p) == playerSteamId))
@@ -692,9 +726,7 @@ partial class MixScrims
             bool isTracked = playingCtPlayers.Any(p => SafeSteamId(p) == moveSteamId)
                           || playingTPlayers.Any(p => SafeSteamId(p) == moveSteamId)
                           || pickedCtPlayers.Any(p => SafeSteamId(p) == moveSteamId)
-                          || pickedTPlayers.Any(p => SafeSteamId(p) == moveSteamId)
-                          || reservedCtSlots.Contains(moveSteamId)
-                          || reservedTSlots.Contains(moveSteamId);
+                          || pickedTPlayers.Any(p => SafeSteamId(p) == moveSteamId);
 
             if (isTracked)
             {
@@ -849,11 +881,10 @@ partial class MixScrims
             if (teamTojoin == 0)
             {
                 // Cache live event player SteamID once and use SafeSteamId on playing lists
-                // (may hold disposed refs). HashSet lookups against reservedCt/TSlots use the
-                // live parameter directly - reservations are keyed by ulong, not IPlayer.
+                // (may hold disposed refs).
                 var autoSteamId = player.SteamID;
-                bool isInCtTeam = playingCtPlayers.Any(p => SafeSteamId(p) == autoSteamId) || reservedCtSlots.Contains(autoSteamId);
-                bool isInTTeam = playingTPlayers.Any(p => SafeSteamId(p) == autoSteamId) || reservedTSlots.Contains(autoSteamId);
+                bool isInCtTeam = playingCtPlayers.Any(p => SafeSteamId(p) == autoSteamId);
+                bool isInTTeam = playingTPlayers.Any(p => SafeSteamId(p) == autoSteamId);
 
                 if (isInCtTeam)
                 {
@@ -885,7 +916,6 @@ partial class MixScrims
                     player,
                     Team.CT,
                     playingCtPlayers,
-                    reservedCtSlots,
                     "error.team.full.ct");
             }
 
@@ -895,7 +925,6 @@ partial class MixScrims
                     player,
                     Team.T,
                     playingTPlayers,
-                    reservedTSlots,
                     "error.team.full.t");
             }
 
@@ -905,20 +934,14 @@ partial class MixScrims
                     logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} joined Spectators.", SafePlayerName(player));
 
                 // Voluntary move to Spectator fully releases the slot so any other connected
-                // player can take it. No reservation is held: returning to a team uses the
-                // normal capacity-checked join path. Any stale reservation/force-spec marker
-                // for this SteamID is also cleared so it cannot block their own rejoin later.
+                // player can take it. Returning to a team uses the normal capacity-checked join
+                // path. Any stale forced-spectator marker for this SteamID is also cleared so it
+                // cannot block their own rejoin later.
                 // Cache live SteamID once; SafeSteamId on roster removals to skip disposed ghosts.
                 var specSteamId = player.SteamID;
-                bool wasInCt = playingCtPlayers.RemoveAll(p => SafeSteamId(p) == specSteamId) > 0;
-                bool wasInT = playingTPlayers.RemoveAll(p => SafeSteamId(p) == specSteamId) > 0;
-                reservedCtSlots.Remove(specSteamId);
-                reservedTSlots.Remove(specSteamId);
+                playingCtPlayers.RemoveAll(p => SafeSteamId(p) == specSteamId);
+                playingTPlayers.RemoveAll(p => SafeSteamId(p) == specSteamId);
                 forcedToSpectator.Remove(specSteamId);
-
-                if (cfg.DetailedLogging && (wasInCt || wasInT))
-                    logger.LogInformation("HandlePlayerJoinTeam - Match: {PlayerName} moved to Spectator - released slot (CT:{Ct} T:{T}).",
-                        SafePlayerName(player), wasInCt, wasInT);
 
                 return HookResult.Continue;
             }
@@ -929,50 +952,43 @@ partial class MixScrims
 
     /// <summary>
     /// Shared implementation for validating a team-join request during an active match state
-    /// (KnifeRound, Match, PickingStartingSide, Timeout) for either CT or T.
-    /// Handles re-joins (existing listed players OR reserved SteamIDs) and caps capacity at
-    /// <c>max(listCount, actualCount)</c> so the engine's live team never exceeds the configured limit.
+    /// (KnifeRound, Match, PickingStartingSide, Timeout) for either CT or T. Handles re-joins
+    /// (existing listed players) and caps capacity at <c>listCount &lt; MinimumReadyPlayers/2</c>.
+    /// Plugin roster is authoritative: <c>actualCount</c> from <see cref="GetPlayersInTeam"/>
+    /// reads <c>PlayerPawn.TeamNum</c> which CS2 defers for alive players (a self-spec via
+    /// <c>jointeam 1</c> does not update the pawn until round transition, death, or disconnect),
+    /// so it lags behind reality and MUST NOT gate the join decision. <see cref="HandleEventPlayerTeamPost"/>
+    /// handles the reverse case (an untracked physical join via CS2 silent-restore) by demoting
+    /// to Spectator.
     /// </summary>
-    private HookResult HandleActiveMatchJoin(IPlayer player, Team team, List<IPlayer> playingList, HashSet<ulong> reservedSlots, string fullErrorKey)
+    private HookResult HandleActiveMatchJoin(IPlayer player, Team team, List<IPlayer> playingList, string fullErrorKey)
     {
         int maxTeamSize = cfg.MinimumReadyPlayers / 2;
 
         // Cache the live event player's SteamID once and use SafeSteamId on the playing list
-        // (may hold disposed IPlayer refs). Reservations are HashSet<ulong> so the live value
-        // is used directly.
+        // (may hold disposed IPlayer refs).
         var joinSteamId = player.SteamID;
         bool isInPlayingList = playingList.Any(p => SafeSteamId(p) == joinSteamId);
-        bool hasReservation = reservedSlots.Contains(joinSteamId);
 
         int listCount = playingList.Count;
+        // actualCount is retained only for the diagnostic log line. Do not gate on it -
+        // see the class remarks above for why.
         int actualCount = GetPlayersInTeam(team).Count;
 
         if (cfg.DetailedLogging)
-            logger.LogInformation("HandleActiveMatchJoin - {Team}: list {ListCount}/{Max}, actual {Actual}, inList={InList}, reserved={Reserved}",
-                team, listCount, maxTeamSize, actualCount, isInPlayingList, hasReservation);
+            logger.LogInformation("HandleActiveMatchJoin - {Team}: list {ListCount}/{Max}, actual {Actual}, inList={InList}",
+                team, listCount, maxTeamSize, actualCount, isInPlayingList);
 
-        // Rejoin path: already in the playing list OR has a SteamID-based reservation.
-        if (isInPlayingList || hasReservation)
+        // Rejoin path: already in the playing list. Physical team may lag due to CS2's
+        // deferred team-switch for alive players (a departing self-spec's pawn still occupies
+        // the seat until round transition / death / disconnect). Roster is authoritative -
+        // always admit the list owner.
+        if (isInPlayingList)
         {
-            // If the player is not currently on this team and the engine team is already at capacity,
-            // reject. This covers the window where an untracked reconnect is still physically occupying
-            // a seat (ScheduleForceToSpectator hasn't yet moved them off) - allowing the list-owner to
-            // rejoin here would push the physical team above the configured limit.
-            var currentTeam = (Team)player.Controller.TeamNum;
-            if (currentTeam != team && actualCount >= maxTeamSize)
-            {
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} has slot but team is physically full (actual:{Actual}/{Max}) - rejecting.",
-                        team, player.Controller.PlayerName, actualCount, maxTeamSize);
-                PrintMessageToPlayer(player, Core.Localizer[fullErrorKey]);
-                return HookResult.Stop;
-            }
-
             // Refresh the IPlayer reference in the list (stale ref from before disconnect would have
             // different PlayerID/slot). This keeps list identity aligned with the current connected player.
             playingList.RemoveAll(p => SafeSteamId(p) == joinSteamId);
             playingList.Add(player);
-            reservedSlots.Remove(joinSteamId);
             forcedToSpectator.Remove(joinSteamId);
 
             if (cfg.DetailedLogging)
@@ -993,13 +1009,11 @@ partial class MixScrims
             return HookResult.Stop;
         }
 
-        // Strict capacity: both the tracked list AND the live engine team must have a free
-        // seat. listCount can lag behind reality (e.g. a CT->Spec event whose Post-prune has
-        // not committed yet) and actualCount can lag too (engine commit happens after the
-        // Pre hook). Requiring BOTH to be under the cap prevents two concurrent joiners from
-        // overflowing the team through the gap and matches the user-visible expectation
-        // that the team count never exceeds MinimumReadyPlayers/2.
-        if (listCount < maxTeamSize && actualCount < maxTeamSize)
+        // Capacity gate: plugin roster is the source of truth. HandlePlayerChangeTeam runs
+        // synchronously per event via the Pre hook, so two concurrent joiners cannot both pass -
+        // the first mutates listCount before the second's Pre hook reads it. actualCount is
+        // deliberately NOT part of the gate; see the class remarks above.
+        if (listCount < maxTeamSize)
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} joined (list:{List}, actual:{Actual}, max:{Max}).",

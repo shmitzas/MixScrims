@@ -70,10 +70,13 @@ public partial class MixScrims
         foreach (var token in _punishmentTimers.Values) token.Cancel();
         _punishmentTimers.Clear();
         playersWaitingForPunishment.Clear();
-        reservedCtSlots.Clear();
-        reservedTSlots.Clear();
         forcedToSpectator.Clear();
         resetMixOnFirstJoin = false;
+        // Assume cvars might be dirty across any reset path (plugin load, explicit reset,
+        // auto-reset-on-leave). The immediate StartWarmup() -> LoadWarmupConfig() that
+        // follows every ResetVariables() call clears the flag once warmup.cfg is scheduled
+        // for exec, so the steady-state after a clean boot is false.
+        warmupCvarsDirty = true;
         stateBeforeMapLoading = null;
         mapLoadedFromMatchFlow = false;
         CancelAutoResetOnLeaveTimer(announce: false);

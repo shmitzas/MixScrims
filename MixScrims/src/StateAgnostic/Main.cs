@@ -26,6 +26,15 @@ public sealed partial class MixScrims
     internal readonly Dictionary<ulong, CancellationTokenSource> _punishmentTimers = [];
     internal bool resetMixOnFirstJoin = false;
 
+    // Set to true when warmup cvars may have drifted from mixscrims/warmup.cfg (external
+    // map change while state was Warmup, plugin startup / explicit reset). Consumed by
+    // HandleClientPutInServer during Warmup to re-exec warmup.cfg on the next join;
+    // cleared by LoadWarmupConfig() as soon as the config is scheduled. Replaces the
+    // previous "humanCount <= 1" heuristic in HandleClientPutInServer, which fired on
+    // every 1→2 join because the joining player is not yet in the player list at that
+    // hook — teleporting existing warmup players back to spawn on every connect.
+    internal bool warmupCvarsDirty = false;
+
     // State to restore after a MapLoading transition completes. Captured at the moment
     // LoadSelectedMap is invoked so manual map changes during Warmup/MapChosen/etc. don't
     // unconditionally promote the match to MapChosen on the subsequent OnMapLoad.
@@ -36,63 +45,19 @@ public sealed partial class MixScrims
     // the warmup ready loop from looping back into MapVoting on the new map.
     internal bool mapLoadedFromMatchFlow = false;
 
-    // SteamID-based reservation tracking. Populated when a listed player disconnects during
-    // an active match state so their slot remains theirs across the reconnect (new PlayerID/slot).
-    // Released on rejoin, punishment execution, or plugin reset.
-    internal readonly HashSet<ulong> reservedCtSlots = [];
-    internal readonly HashSet<ulong> reservedTSlots = [];
-
     // SteamIDs of players that must be forced to spectator during the current active match.
-    // Populated when an untracked / full-team reconnect is detected - the engine often places
-    // the reconnecting client back onto their previous team automatically, so we need to both
-    // reject any T/CT join attempts AND actively move them back to spectator at multiple delays
-    // because the exact moment the engine sets their team varies.
+    // Team-cap enforcement is otherwise physics-only (see HandleActiveMatchJoin +
+    // HandleEventPlayerTeamPost), but CS2's engine can silently restore a reconnecting client
+    // onto their previous team at a timing the plugin cannot always intercept. This dedup set
+    // + the retry chain in ScheduleForceToSpectator guarantee the player lands on Spectator
+    // even if the restore happens across multiple ticks.
     internal readonly HashSet<ulong> forcedToSpectator = [];
-
-    /// <summary>
-    /// Removes any reservation held by the given SteamID on either team.
-    /// </summary>
-    internal void ReleaseReservedSlot(ulong steamId)
-    {
-        bool removedCt = reservedCtSlots.Remove(steamId);
-        bool removedT = reservedTSlots.Remove(steamId);
-        if (cfg.DetailedLogging && (removedCt || removedT))
-            logger.LogInformation("ReleaseReservedSlot: Released reservation for SteamID {SteamId} (CT:{Ct} T:{T})", steamId, removedCt, removedT);
-    }
-
-    /// <summary>
-    /// True if the player has a reserved slot on the given team (by SteamID) OR is currently
-    /// listed in the team's playing roster (by SteamID). Either state entitles them to rejoin.
-    /// </summary>
-    internal bool HasReservedOrActiveSlot(IPlayer player, Team team)
-    {
-        var sid = player.SteamID;
-        if (team == Team.CT)
-            return reservedCtSlots.Contains(sid) || playingCtPlayers.Any(p => SafeSteamId(p) == sid);
-        if (team == Team.T)
-            return reservedTSlots.Contains(sid) || playingTPlayers.Any(p => SafeSteamId(p) == sid);
-        return false;
-    }
-
-    /// <summary>
-    /// True if the player is currently tracked by the plugin for the active match:
-    /// either listed in a playing/picked roster (by SteamID) or has a SteamID-based reservation.
-    /// </summary>
-    internal bool IsPlayerTrackedForActiveMatch(ulong steamId)
-    {
-        return playingCtPlayers.Any(p => SafeSteamId(p) == steamId)
-            || playingTPlayers.Any(p => SafeSteamId(p) == steamId)
-            || pickedCtPlayers.Any(p => SafeSteamId(p) == steamId)
-            || pickedTPlayers.Any(p => SafeSteamId(p) == steamId)
-            || reservedCtSlots.Contains(steamId)
-            || reservedTSlots.Contains(steamId);
-    }
 
     /// <summary>
     /// Marks a player as must-be-spectator for the remainder of this active match and schedules
     /// multiple forced team moves to Spectator. The engine may auto-place a reconnecting client
     /// onto their previous team at a timing we can't predict, so we retry at several delays
-    /// and stop as soon as the player is confirmed on Spectator or becomes legitimately tracked.
+    /// and stop as soon as the player is confirmed on Spectator.
     /// </summary>
     internal void ScheduleForceToSpectator(IPlayer player, string reasonKey = "error.team.slot_unavailable")
     {
@@ -121,13 +86,6 @@ public sealed partial class MixScrims
                     // If someone else already cleared the flag (e.g. disconnect / reset / success), exit.
                     if (!forcedToSpectator.Contains(steamId))
                         return;
-
-                    // Stop retrying if they got legitimately listed.
-                    if (IsPlayerTrackedForActiveMatch(steamId))
-                    {
-                        forcedToSpectator.Remove(steamId);
-                        return;
-                    }
 
                     // Stop retrying if the match state is no longer active.
                     var state = mixScrimsService.GetCurrentMatchState();
@@ -702,12 +660,6 @@ public sealed partial class MixScrims
         });
         playersWaitingForPunishment.Remove(steamId);
         _punishmentTimers.Remove(steamId);
-
-        // Release any reserved slot held by the punished player and drop the stale list entry
-        // so a new player can claim the freed-up seat.
-        ReleaseReservedSlot(steamId);
-        playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-        playingTPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
     }
 
     internal void KickPlayer(ulong steamId, string? reason)

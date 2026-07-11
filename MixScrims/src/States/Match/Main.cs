@@ -197,14 +197,34 @@ public partial class MixScrims
         // corrects it. This pass adopts every authenticated engine player onto the plugin's
         // tracked list - the correct semantic is "if you're physically on this team when the
         // round starts, you're playing this round".
+        //
+        // Cap enforcement: the CS2 silent-restore reconnect places a returning player back on
+        // their previous team WITHOUT firing HandlePlayerChangeTeam, so HandleActiveMatchJoin's
+        // capacity check never runs. Without a cap check here, this pass would blindly adopt
+        // the returning player and push the team above MinimumReadyPlayers/2. When the target
+        // side is already at cap we evict the untracked player to Spectator via the same
+        // ScheduleForceToSpectator helper HandleActiveMatchJoin uses for its own "team full"
+        // reject path, and drop any stale SteamID reservation so a next-round rejoin can't
+        // re-admit them through the reservation door.
+        int maxTeamSize = cfg.MinimumReadyPlayers / 2;
         int adoptedCt = 0;
         int adoptedT = 0;
+        int evictedCt = 0;
+        int evictedT = 0;
         foreach (var p in GetPlayersInTeam(Team.CT))
         {
             if (!IsPlayerValid(p) || IsBot(p)) continue;
             var sid = SafeSteamId(p);
             if (sid == 0UL) continue;
             if (newCt.Any(existing => SafeSteamId(existing) == sid)) continue;
+            if (newCt.Count >= maxTeamSize)
+            {
+                logger.LogInformation("ResyncPlayingListsFromEngine: rejecting untracked CT adoption for {PlayerName} (SteamID {SteamId}) - team at cap ({Count}/{Max}), forcing to Spectator.",
+                    SafePlayerName(p), sid, newCt.Count, maxTeamSize);
+                ScheduleForceToSpectator(p, "error.team.slot_unavailable");
+                evictedCt++;
+                continue;
+            }
             newCt.Add(p);
             adoptedCt++;
         }
@@ -214,6 +234,14 @@ public partial class MixScrims
             var sid = SafeSteamId(p);
             if (sid == 0UL) continue;
             if (newT.Any(existing => SafeSteamId(existing) == sid)) continue;
+            if (newT.Count >= maxTeamSize)
+            {
+                logger.LogInformation("ResyncPlayingListsFromEngine: rejecting untracked T adoption for {PlayerName} (SteamID {SteamId}) - team at cap ({Count}/{Max}), forcing to Spectator.",
+                    SafePlayerName(p), sid, newT.Count, maxTeamSize);
+                ScheduleForceToSpectator(p, "error.team.slot_unavailable");
+                evictedT++;
+                continue;
+            }
             newT.Add(p);
             adoptedT++;
         }
@@ -221,26 +249,13 @@ public partial class MixScrims
         playingCtPlayers = newCt;
         playingTPlayers = newT;
 
-        // Reservations are SteamID-based and must follow side switches too. When we detect any
-        // movement of tracked players between sides, swap the reservation sets so a reserved
-        // player who is currently in Spectator returns to the correct (post-swap) side.
-        if (movedCtToT > 0 || movedTToCt > 0)
-        {
-            var oldReservedCt = reservedCtSlots.ToList();
-            var oldReservedT = reservedTSlots.ToList();
-            reservedCtSlots.Clear();
-            reservedTSlots.Clear();
-            foreach (var s in oldReservedCt) reservedTSlots.Add(s);
-            foreach (var s in oldReservedT) reservedCtSlots.Add(s);
-        }
-
         // Un-gated from DetailedLogging: this is the operator's primary drift-visibility
         // signal for side switches at halftime / OT halftime / OT-period boundaries and for
         // the second-pass adopt-untracked pass above. The no-drift steady state stays silent
-        // because the guard requires at least one move or adoption.
-        if (movedCtToT > 0 || movedTToCt > 0 || adoptedCt > 0 || adoptedT > 0)
-            logger.LogInformation("ResyncPlayingListsFromEngine: reconciliation complete - moved {CtToT} CT->T, {TToCt} T->CT, adopted {AdoptedCt} untracked CT, {AdoptedT} untracked T (now CT:{CT} T:{T})",
-                movedCtToT, movedTToCt, adoptedCt, adoptedT, playingCtPlayers.Count, playingTPlayers.Count);
+        // because the guard requires at least one move, adoption, or eviction.
+        if (movedCtToT > 0 || movedTToCt > 0 || adoptedCt > 0 || adoptedT > 0 || evictedCt > 0 || evictedT > 0)
+            logger.LogInformation("ResyncPlayingListsFromEngine: reconciliation complete - moved {CtToT} CT->T, {TToCt} T->CT, adopted {AdoptedCt} untracked CT, {AdoptedT} untracked T, evicted {EvictedCt} over-cap CT, {EvictedT} over-cap T (now CT:{CT} T:{T})",
+                movedCtToT, movedTToCt, adoptedCt, adoptedT, evictedCt, evictedT, playingCtPlayers.Count, playingTPlayers.Count);
     }
 
     /// <summary>
