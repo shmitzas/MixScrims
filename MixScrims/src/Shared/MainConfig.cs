@@ -40,6 +40,15 @@ public class MainConfig
         "rtv"
     ];
 
+    // Per-reminder suppression: phase names (MatchState enum names, case-insensitive) in which
+    // the reminder should NOT be broadcast. Reminders absent from this dict are always shown.
+    // Unknown phase names are ignored (no error), so it's safe to hand-edit config.jsonc.
+    public Dictionary<string, List<string>> HideCommandRemindersDuringPhases { get; set; } = new()
+    {
+        { "ready", new() { "PickingTeam", "KnifeRound", "Match", "Timeout" } },
+        { "rtv",   new() { "PickingTeam", "KnifeRound", "Match", "Timeout" } }
+    };
+
     // Vote kick settings
     public VoteKickConfig VoteKick { get; set; } = new();
 

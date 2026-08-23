@@ -280,12 +280,26 @@ public partial class MixScrims
 
     /// <summary>
     /// Prints command reminders to all players, cycling through all available reminders.
+    /// Reminders listed in <see cref="MainConfig.HideCommandRemindersDuringPhases"/> for the
+    /// current match state are filtered out before cycling.
     /// </summary>
     internal void PrintCommandReminders()
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("PrintCommandReminders");
-        var reminders = cfg.CommandRemindersLocalization;
+
+        var currentStateName = mixScrimsService.GetCurrentMatchState().ToString();
+        var reminders = cfg.CommandRemindersLocalization
+            .Where(r => !IsReminderSuppressedInPhase(r, currentStateName))
+            .ToList();
+
+        if (reminders.Count == 0)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("PrintCommandReminders: all reminders suppressed in phase {Phase}", currentStateName);
+            return;
+        }
+
         string? reminderToUse = reminders.FirstOrDefault(r => !usedReminders.Contains(r));
 
         if (reminderToUse == null)
@@ -299,6 +313,13 @@ public partial class MixScrims
             PrintMessageToAllPlayers(Core.Localizer[$"command_reminders.{reminderToUse}"]);
             usedReminders.Add(reminderToUse);
         }
+    }
+
+    private bool IsReminderSuppressedInPhase(string reminder, string phaseName)
+    {
+        if (!cfg.HideCommandRemindersDuringPhases.TryGetValue(reminder, out var phases) || phases.Count == 0)
+            return false;
+        return phases.Contains(phaseName, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
