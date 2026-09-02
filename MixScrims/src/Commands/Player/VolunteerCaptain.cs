@@ -40,50 +40,118 @@ public partial class MixScrims
             || matchState == MatchState.MapLoading
             || matchState == MatchState.MapChosen)
         {
-            if (context.Args.Length < 1)
+            // The bare (arg-less) form is only legal while built-in menus are suppressed:
+            // there the consumer plugin renders the side picker, so the team is chosen in
+            // its UI rather than on the command line.
+            Team? side = null;
+            if (context.Args.Length >= 1)
+            {
+                var teamArg = context.Args[0].ToLower();
+                if (teamArg != "t" && teamArg != "ct")
+                {
+                    PrintMessageToPlayer(player, Core.Localizer["error.invalid_args", "!vol_cap <t/ct>"]);
+                    return;
+                }
+                side = teamArg == "ct" ? Team.CT : Team.T;
+            }
+            else if (!suppressBuiltInMenus)
             {
                 PrintMessageToPlayer(player, Core.Localizer["error.invalid_args", "!vol_cap <t/ct>"]);
                 return;
             }
 
-            var team = context.Args[0].ToLower();
-            if (team != "t" && team != "ct")
+            if (suppressBuiltInMenus)
             {
-                PrintMessageToPlayer(player, Core.Localizer["error.invalid_args", "!vol_cap <t/ct>"]);
+                var requesterSid = SafeSteamId(player);
+                if (requesterSid != 0)
+                    mixScrimsService.RaiseVolunteerCaptainMenuRequested(requesterSid, side);
                 return;
             }
 
-            if (!cfg.AllowVolunteerCaptains)
-            {
-                PrintMessageToPlayer(player, Core.Localizer["error.captain.volunteering_disabled"]);
-                return;
-            }
-            if (captainCt != null && captainT != null)
-            {
-                PrintMessageToPlayer(player, Core.Localizer["error.captains_already_chosen"]);
-                return;
-            }
-            if (captainCt != null && captainCt.SteamID == player.SteamID)
-            {
-                PrintMessageToPlayer(player, Core.Localizer["error.already_captain.ct"]);
-                return;
-            }
-            if (captainT != null && captainT.SteamID == player.SteamID)
-            {
-                PrintMessageToPlayer(player, Core.Localizer["error.already_captain.t"]);
-                return;
-            }
-
-            if (team == "ct" && captainCt == null)
-                PickCtCaptain(player);
-
-            if (team == "t" && captainT == null)
-                PickTCaptain(player);
+            TryVolunteerCaptain(player, side!.Value);
         }
         else
         {
             logger.LogError("OnCaptainVolunteer: Invalid match state \"{matchState}\", must be MatchState.Warmup/MapChosen/MapLoading", matchState);
             PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "captain"]);
         }
+    }
+
+    /// <summary>
+    /// Runs the volunteer-captain eligibility chain and assigns the slot on success.
+    /// Shared by the <c>!volunteer_captain</c> command and <c>IMixScrims.VolunteerAsCaptain</c>
+    /// so both paths validate identically. Returns false (and messages the player) on rejection.
+    /// </summary>
+    internal bool TryVolunteerCaptain(IPlayer player, Team team)
+    {
+        if (!IsPlayerValid(player))
+        {
+            logger.LogWarning("TryVolunteerCaptain: player is invalid.");
+            return false;
+        }
+
+        if (team != Team.CT && team != Team.T)
+        {
+            logger.LogWarning("TryVolunteerCaptain: unsupported team {Team}.", team);
+            return false;
+        }
+
+        if (cfg.DisableCaptains)
+        {
+            PrintMessageToPlayer(player, Core.Localizer["error.captain.disabled"]);
+            return false;
+        }
+
+        var matchState = mixScrimsService.GetCurrentMatchState();
+        if (matchState != MatchState.Warmup
+            && matchState != MatchState.MapLoading
+            && matchState != MatchState.MapChosen)
+        {
+            logger.LogWarning("TryVolunteerCaptain: invalid match state {MatchState}.", matchState);
+            PrintMessageToPlayer(player, Core.Localizer["command.invalid_state", "captain"]);
+            return false;
+        }
+
+        if (!cfg.AllowVolunteerCaptains)
+        {
+            PrintMessageToPlayer(player, Core.Localizer["error.captain.volunteering_disabled"]);
+            return false;
+        }
+        if (captainCt != null && captainT != null)
+        {
+            PrintMessageToPlayer(player, Core.Localizer["error.captains_already_chosen"]);
+            return false;
+        }
+
+        var playerSteamId = SafeSteamId(player);
+        if (captainCt != null && SafeSteamId(captainCt) == playerSteamId)
+        {
+            PrintMessageToPlayer(player, Core.Localizer["error.already_captain.ct"]);
+            return false;
+        }
+        if (captainT != null && SafeSteamId(captainT) == playerSteamId)
+        {
+            PrintMessageToPlayer(player, Core.Localizer["error.already_captain.t"]);
+            return false;
+        }
+
+        if (team == Team.CT)
+        {
+            if (captainCt != null)
+            {
+                PrintMessageToPlayer(player, Core.Localizer["error.captains_already_chosen"]);
+                return false;
+            }
+            PickCtCaptain(player);
+            return true;
+        }
+
+        if (captainT != null)
+        {
+            PrintMessageToPlayer(player, Core.Localizer["error.captains_already_chosen"]);
+            return false;
+        }
+        PickTCaptain(player);
+        return true;
     }
 }

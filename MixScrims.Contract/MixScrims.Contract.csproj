@@ -16,8 +16,27 @@
 		<GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
 		<ProduceReferenceAssembly>false</ProduceReferenceAssembly>
 		<CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
-		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<!-- v2.0.0 adds events + snapshot queries + built-in presentation suppression.
+		     v2.1.0 adds match-flow drivers + menu-request events.
+		     v2.2.0 adds ChooseStartingSide.
+		     v2.3.0 adds the slot-keyed pick surface (bots have SteamID 0).
+		     v2.4.0 adds MapVoteMenuRequested.
+		     v2.5.0 adds the bot-aware ready counter reads.
+		     v2.6.0 adds the starting-side picker snapshot.
+		     All existing v1.x methods are preserved for backward compatibility. -->
+		<GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+		<Version>2.6.0</Version>
+		<AssemblyVersion>2.6.0.0</AssemblyVersion>
+		<FileVersion>2.6.0.0</FileVersion>
 		<GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Contract exposes SwiftlyS2.Shared.Players.Team on the interface.
+		     ExcludeAssets=runtime + PrivateAssets=all mirrors how consumer plugins
+		     reference SwiftlyS2.CS2, so the contract .dll doesn't ship any runtime
+		     assets. Same pattern as VIPCore.Contract. -->
+		<PackageReference Include="SwiftlyS2.CS2" Version="*" ExcludeAssets="runtime" PrivateAssets="all" />
+	</ItemGroup>
 
 </Project>

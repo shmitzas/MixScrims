@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.10.0",
+    Version = "1.17.0",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -21,12 +21,33 @@ public partial class MixScrims : BasePlugin
 {
     public static new ISwiftlyCore Core { get; internal set; } = null!;
     internal ILogger<MixScrims> logger = null!;
-    internal MainConfig cfg = new();
-    internal DiscordConfig discordConfig = new();
-    internal MapsConfig mapsConfig = new();
+
+    // Backed by IOptionsMonitor so edits to the jsonc files land on every read
+    // site without a plugin reload. The fallback instance preserves the old
+    // "defaults if the loader threw" behaviour, since each Load*Config() swallows
+    // its exception and would otherwise leave the monitor null.
+    private IOptionsMonitor<MainConfig>? cfgMonitor;
+    private IOptionsMonitor<DiscordConfig>? discordConfigMonitor;
+    private IOptionsMonitor<MapsConfig>? mapsConfigMonitor;
+    private readonly MainConfig cfgFallback = new();
+    private readonly DiscordConfig discordConfigFallback = new();
+    private readonly MapsConfig mapsConfigFallback = new();
+
+    internal MainConfig cfg => cfgMonitor?.CurrentValue ?? cfgFallback;
+    internal DiscordConfig discordConfig => discordConfigMonitor?.CurrentValue ?? discordConfigFallback;
+    internal MapsConfig mapsConfig => mapsConfigMonitor?.CurrentValue ?? mapsConfigFallback;
+
     internal MixScrimsService mixScrimsService = null!;
     internal MatchState MatchState { get; set; } = MatchState.Warmup;
     internal PluginState PluginState { get; set; } = PluginState.Production;
+
+    // Built-in presentation suppression toggles (v2.0.0 contract). Seeded from
+    // cfg in LoadMainConfig(); the shared API surface (SetBuiltInMenusSuppressed /
+    // SetBuiltInCenterHtmlSuppressed) mutates them at runtime, and the config
+    // seeding does NOT re-run on IOptions reload so a runtime override is sticky
+    // until plugin unload.
+    internal bool suppressBuiltInMenus = false;
+    internal bool suppressBuiltInCenterHtml = false;
 
     public MixScrims(ISwiftlyCore core) : base(core)
     {
@@ -201,10 +222,25 @@ public partial class MixScrims : BasePlugin
             var provider = services.BuildServiceProvider();
 
             logger = provider.GetRequiredService<ILogger<MixScrims>>();
-            var cfgOptions = provider.GetRequiredService<IOptions<MainConfig>>();
-            cfg = cfgOptions.Value;
+            cfgMonitor = provider.GetRequiredService<IOptionsMonitor<MainConfig>>();
             mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
             preventNotPickedPlayersFromJoiningOngoingMatch = cfg.PreventNotPickedPlayersFromJoiningOngoingMatch;
+            // Seed built-in presentation suppression from config. Runtime SetBuiltIn*
+            // calls mutate these fields directly; we deliberately don't re-seed on
+            // config reload so a runtime override survives a config edit.
+            suppressBuiltInMenus = cfg.SuppressBuiltInMenus;
+            suppressBuiltInCenterHtml = cfg.SuppressBuiltInCenterHtml;
+
+            cfgMonitor.OnChange(_ =>
+            {
+                // Only PluginState is re-derived. The three seeded bools above are
+                // deliberately left alone: each has a runtime setter on the shared
+                // API (SetBuiltInMenusSuppressed / SetBuiltInCenterHtmlSuppressed /
+                // PreventNewPlayersJoining), so re-seeding would silently revert a
+                // consumer's override on an unrelated config edit.
+                mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
+                logger.LogInformation("MixScrims: config.jsonc reloaded (command names stay bound until plugin reload).");
+            });
         }
         catch (Exception ex)
         {
@@ -238,8 +274,8 @@ public partial class MixScrims : BasePlugin
 
             var provider = services.BuildServiceProvider();
 
-            var cfgOptions = provider.GetRequiredService<IOptions<MapsConfig>>();
-            mapsConfig = cfgOptions.Value;
+            mapsConfigMonitor = provider.GetRequiredService<IOptionsMonitor<MapsConfig>>();
+            mapsConfigMonitor.OnChange(_ => logger.LogInformation("MixScrims: maps.jsonc reloaded."));
         }
         catch (Exception ex)
         {
@@ -273,8 +309,8 @@ public partial class MixScrims : BasePlugin
 
             var provider = services.BuildServiceProvider();
 
-            var cfgOptions = provider.GetRequiredService<IOptions<DiscordConfig>>();
-            discordConfig = cfgOptions.Value;
+            discordConfigMonitor = provider.GetRequiredService<IOptionsMonitor<DiscordConfig>>();
+            discordConfigMonitor.OnChange(_ => logger.LogInformation("MixScrims: discord_config.jsonc reloaded."));
         }
         catch (Exception ex)
         {

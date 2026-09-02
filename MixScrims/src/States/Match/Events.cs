@@ -2,6 +2,7 @@
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
+using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 using MixScrims.Contract;
@@ -19,6 +20,26 @@ public partial class MixScrims
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState != MatchState.Match)
             return HookResult.Continue;
+
+        // Fire MatchEnded synchronously here rather than inside the 10s delayed callback:
+        // scores are still readable, and IMixScrims consumers get the transition signal
+        // before the plugin starts tearing state down.
+        try
+        {
+            var md = Core.Game.MatchData;
+            int ctScore = md.CTScoreTotal;
+            int tScore = md.TerroristScoreTotal;
+            Team winner;
+            if (ctScore > tScore) winner = Team.CT;
+            else if (tScore > ctScore) winner = Team.T;
+            else winner = Team.None;
+            mixScrimsService.RaiseMatchEnded(winner, ctScore, tScore);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "HandleMatchEnd: failed to read MatchData for MatchEnded event; firing with zero scores.");
+            mixScrimsService.RaiseMatchEnded(Team.None, 0, 0);
+        }
 
         var token = Core.Scheduler.DelayBySeconds(10, () =>
         {
@@ -117,6 +138,12 @@ public partial class MixScrims
         if (matchState != MatchState.Match)
             return HookResult.Continue;
 
+        if (pendingMatchStartReset)
+        {
+            pendingMatchStartReset = false;
+            ResetMatchStartState();
+        }
+
         var resyncToken = Core.Scheduler.DelayBySeconds(1f, () =>
         {
             try
@@ -206,6 +233,106 @@ public partial class MixScrims
             // could theoretically surface as a managed exception. We must never let an
             // exception from this defense-in-depth helper crash the plugin's event flow.
             logger.LogError(ex, "RelaxEngineTeamLimits[{Site}]: failed to override engine team limits (exception swallowed)", callSite);
+        }
+    }
+
+    /// <summary>
+    /// Drives a round transition through <c>CCSGameRules::TerminateRound</c> instead of
+    /// <c>mp_restartgame</c>. Both reach <c>RestartRound()</c>, but only <c>mp_restartgame</c>
+    /// takes its complete-reset branch, which is the confirmed segfault site on the 3rd match
+    /// of a server process. Match-start callers must pair this with
+    /// <see cref="ResetMatchStartState"/> — TerminateRound does NOT zero scores, the round
+    /// counter, or player money the way <c>mp_restartgame</c> did.
+    /// </summary>
+    /// <remarks>
+    /// Safe from <c>MatchState.Match</c> and <c>MatchState.PickingTeam</c>. NOT safe during
+    /// <c>MatchState.KnifeRound</c> — the <c>round_end</c> it fires would land in
+    /// <c>HandleRoundEndOnKnifeRound</c> and abort the knife round, so that path deliberately
+    /// still uses <c>mp_restartgame 1</c>, which has never been observed crashing.
+    /// </remarks>
+    /// <returns>
+    /// <c>true</c> when <c>TerminateRound</c> was dispatched. Callers that lifted a pause in
+    /// anticipation of the restart must re-apply it on <c>false</c> — no restart means no
+    /// <c>round_prestart</c>, and the prestart hook is what makes a phase pause stick.
+    /// </returns>
+    internal bool RestartRoundManually(string callSite, RoundEndReason reason, float delay)
+    {
+        try
+        {
+            CCSGameRules? gameRules = Core.EntitySystem.GetGameRules();
+            if (gameRules is null || !gameRules.IsValid)
+            {
+                logger.LogWarning("RestartRoundManually[{Site}]: game rules invalid - skipping restart.", callSite);
+                return false;
+            }
+
+            // TerminateRound is a no-op during warmup, so a stuck warmup would silently
+            // swallow the match start rather than surfacing here.
+            if (gameRules.WarmupPeriod)
+            {
+                logger.LogWarning("RestartRoundManually[{Site}]: still in warmup - skipping restart.", callSite);
+                return false;
+            }
+
+            gameRules.TerminateRound(reason, delay);
+            logger.LogInformation("RestartRoundManually[{Site}]: TerminateRound({Reason}, delay={Delay:F2}s) queued.", callSite, reason, delay);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "RestartRoundManually[{Site}]: exception during TerminateRound dispatch", callSite);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Restores the state that <c>mp_restartgame</c>'s complete-reset branch used to hand us:
+    /// 0-0 scores, round counter at zero, and every playing player back to
+    /// <c>mp_startmoney</c>. Run once from <see cref="HandleRoundStart"/> after the match-start
+    /// transition lands, so it overwrites anything the round transition itself tallied.
+    /// </summary>
+    internal void ResetMatchStartState()
+    {
+        try
+        {
+            // AddCTScore / AddTerroristScore are the only APIs that reach the native CCSMatch
+            // buffer; bare CCSTeam writes update the scoreboard but leave CCSMatch stale, which
+            // is what every other plugin (MapChooser, ServerReporter) actually reads. There is
+            // no SetScore, hence the negative delta. AddCTWins / AddTerroristWins are
+            // deliberately avoided - they also bump ActualRoundsPlayed.
+            var md = Core.Game.MatchData;
+            int ctScore = md.CTScoreTotal;
+            int tScore = md.TerroristScoreTotal;
+            if (ctScore != 0) Core.Game.AddCTScore(-ctScore);
+            if (tScore != 0) Core.Game.AddTerroristScore(-tScore);
+
+            // Separate counter from the CCSMatch buckets above; this is the one the engine
+            // consults for the mp_maxrounds match-end check.
+            CCSGameRules? gameRules = Core.EntitySystem.GetGameRules();
+            if (gameRules is not null && gameRules.IsValid)
+            {
+                gameRules.TotalRoundsPlayed = 0;
+                gameRules.TotalRoundsPlayedUpdated();
+            }
+
+            int startMoney = Core.ConVar.Find<int>("mp_startmoney")?.Value ?? 800;
+            int reset = 0;
+            foreach (var player in playingCtPlayers.Concat(playingTPlayers))
+            {
+                if (!IsPlayerValid(player)) continue;
+                var money = player.Controller?.InGameMoneyServices;
+                if (money is null) continue;
+                money.Account = startMoney;
+                money.AccountUpdated();
+                reset++;
+            }
+
+            logger.LogInformation("ResetMatchStartState: scores {Ct}:{T} -> 0:0, rounds -> 0, {Count} players set to ${Money}.",
+                ctScore, tScore, reset, startMoney);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "ResetMatchStartState: failed to reset match-start state");
         }
     }
 }

@@ -435,12 +435,12 @@ partial class MixScrims
             {
                 if (player.SteamID == captainCt?.SteamID)
                 {
-                    captainCt = null;
+                    AssignCaptain(Team.CT, null);
                     StartTeamPickingPhase();
                 }
                 if (player.SteamID == captainT?.SteamID)
                 {
-                    captainT = null;
+                    AssignCaptain(Team.T, null);
                     StartTeamPickingPhase();
                 }
             }
@@ -459,7 +459,7 @@ partial class MixScrims
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is CT captain");
 
-                    captainCt = null;
+                    AssignCaptain(Team.CT, null);
                     // steamId is the disconnecting player's ID; use SafeSteamId on roster entries
                     // to skip disposed ghosts when picking the successor captain.
                     var newCaptain = playingCtPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
@@ -479,7 +479,7 @@ partial class MixScrims
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is T captain");
 
-                    captainT = null;
+                    AssignCaptain(Team.T, null);
                     var newCaptain = playingTPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
@@ -953,13 +953,22 @@ partial class MixScrims
     /// <summary>
     /// Shared implementation for validating a team-join request during an active match state
     /// (KnifeRound, Match, PickingStartingSide, Timeout) for either CT or T. Handles re-joins
-    /// (existing listed players) and caps capacity at <c>listCount &lt; MinimumReadyPlayers/2</c>.
-    /// Plugin roster is authoritative: <c>actualCount</c> from <see cref="GetPlayersInTeam"/>
-    /// reads <c>PlayerPawn.TeamNum</c> which CS2 defers for alive players (a self-spec via
-    /// <c>jointeam 1</c> does not update the pawn until round transition, death, or disconnect),
-    /// so it lags behind reality and MUST NOT gate the join decision. <see cref="HandleEventPlayerTeamPost"/>
-    /// handles the reverse case (an untracked physical join via CS2 silent-restore) by demoting
-    /// to Spectator.
+    /// (existing listed players) and caps capacity at
+    /// <c>min(listCount, actualCount) &lt; MinimumReadyPlayers/2</c> - the join is admitted
+    /// whenever EITHER the plugin roster OR the physical team has room. This lets an
+    /// untracked spec player fill a vacated slot as soon as the scoreboard shows the team
+    /// as understaffed (disconnected picked player, roster ghost that outlived cleanup,
+    /// picked player who self-spec'd), instead of stranding them behind a stale roster
+    /// count. Two mismatched-source hazards are handled explicitly:
+    ///   1. <c>actualCount</c> from <see cref="GetPlayersInTeam"/> reads
+    ///      <c>PlayerPawn.TeamNum</c>, which CS2 defers for alive players (self-spec via
+    ///      <c>jointeam 1</c> keeps the pawn on the old team until round transition, death,
+    ///      or disconnect). Using <c>min</c> lets a fresher <c>listCount</c> unblock the
+    ///      join in that window.
+    ///   2. Silent-restore reconnects add a physical player without hitting this method, so
+    ///      <c>actualCount</c> can exceed <c>listCount</c>. Using <c>min</c> avoids blocking
+    ///      a legitimate replacement in that window; <see cref="HandleEventPlayerTeamPost"/>
+    ///      still demotes the untracked physical join.
     /// </summary>
     private HookResult HandleActiveMatchJoin(IPlayer player, Team team, List<IPlayer> playingList, string fullErrorKey)
     {
@@ -971,13 +980,13 @@ partial class MixScrims
         bool isInPlayingList = playingList.Any(p => SafeSteamId(p) == joinSteamId);
 
         int listCount = playingList.Count;
-        // actualCount is retained only for the diagnostic log line. Do not gate on it -
-        // see the class remarks above for why.
         int actualCount = GetPlayersInTeam(team).Count;
+        // The gate: allow when EITHER count reads under-cap (see class remarks).
+        int effectiveCount = Math.Min(listCount, actualCount);
 
         if (cfg.DetailedLogging)
-            logger.LogInformation("HandleActiveMatchJoin - {Team}: list {ListCount}/{Max}, actual {Actual}, inList={InList}",
-                team, listCount, maxTeamSize, actualCount, isInPlayingList);
+            logger.LogInformation("HandleActiveMatchJoin - {Team}: list {ListCount}/{Max}, actual {Actual}, effective {Effective}, inList={InList}",
+                team, listCount, maxTeamSize, actualCount, effectiveCount, isInPlayingList);
 
         // Rejoin path: already in the playing list. Physical team may lag due to CS2's
         // deferred team-switch for alive players (a departing self-spec's pawn still occupies
@@ -1009,28 +1018,84 @@ partial class MixScrims
             return HookResult.Stop;
         }
 
-        // Capacity gate: plugin roster is the source of truth. HandlePlayerChangeTeam runs
-        // synchronously per event via the Pre hook, so two concurrent joiners cannot both pass -
-        // the first mutates listCount before the second's Pre hook reads it. actualCount is
-        // deliberately NOT part of the gate; see the class remarks above.
-        if (listCount < maxTeamSize)
+        // Capacity gate: uses min(listCount, actualCount) so either a fresh roster prune OR
+        // a shrunken physical team unblocks the join. HandlePlayerChangeTeam runs synchronously
+        // per event via the Pre hook, so two concurrent joiners cannot both pass - the first
+        // mutates listCount before the second's Pre hook reads it. See class remarks above for
+        // the pawn-vs-roster mismatch cases this deliberately handles.
+        if (effectiveCount < maxTeamSize)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} joined (list:{List}, actual:{Actual}, max:{Max}).",
-                    team, player.Controller.PlayerName, listCount, actualCount, maxTeamSize);
+                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} joined (list:{List}, actual:{Actual}, effective:{Effective}, max:{Max}).",
+                    team, player.Controller.PlayerName, listCount, actualCount, effectiveCount, maxTeamSize);
             playingList.Add(player);
             forcedToSpectator.Remove(player.SteamID);
             Core.Scheduler.NextTick(() => FixTeammateColors());
             CheckAutoResetOnLeave();
+            SchedulePostJoinOverflowCheck(player, team, playingList, maxTeamSize);
             return HookResult.Continue;
         }
 
         if (cfg.DetailedLogging)
-            logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} blocked - team full (list:{List}, actual:{Actual}, max:{Max}).",
-                team, player.Controller.PlayerName, listCount, actualCount, maxTeamSize);
+            logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} blocked - team full (list:{List}, actual:{Actual}, effective:{Effective}, max:{Max}).",
+                team, player.Controller.PlayerName, listCount, actualCount, effectiveCount, maxTeamSize);
         PrintMessageToPlayer(player, Core.Localizer[fullErrorKey]);
         ScheduleForceToSpectator(player, fullErrorKey);
         return HookResult.Stop;
+    }
+
+    /// <summary>
+    /// Belt-and-suspenders check fired 0.5s after <see cref="HandleActiveMatchJoin"/> admits a
+    /// join. The pre-hook gate uses <c>min(listCount, actualCount)</c>, which can under-count in
+    /// specific race windows (pawn TeamNum not yet updated for a self-spec'd tracked player, or
+    /// a silent-restore reconnect landing between the read and the commit). If the physical team
+    /// is over cap 0.5s later, revert the player we just admitted - they're the most recent
+    /// joiner via this path - by pruning them from the roster and force-moving them to Spectator.
+    /// </summary>
+    private void SchedulePostJoinOverflowCheck(IPlayer player, Team team, List<IPlayer> playingList, int maxTeamSize)
+    {
+        int playerSlot = player.Slot;
+        ulong playerSteamId = player.SteamID;
+        if (playerSteamId == 0UL)
+            return;
+
+        var token = Core.Scheduler.DelayBySeconds(0.5f, () =>
+        {
+            try
+            {
+                var live = Core.PlayerManager.GetPlayer(playerSlot);
+                if (live is null || !live.IsValid || live.SteamID != playerSteamId)
+                    return;
+
+                var state = mixScrimsService.GetCurrentMatchState();
+                bool isActive = state == MatchState.KnifeRound
+                              || state == MatchState.Match
+                              || state == MatchState.PickingStartingSide
+                              || state == MatchState.Timeout;
+                if (!isActive)
+                    return;
+
+                int physicalCount = GetPlayersInTeam(team).Count;
+                if (physicalCount <= maxTeamSize)
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("SchedulePostJoinOverflowCheck - {Team}: within cap ({Count}/{Max}) for {PlayerName}, no action.",
+                            team, physicalCount, maxTeamSize, SafePlayerName(live));
+                    return;
+                }
+
+                logger.LogInformation("SchedulePostJoinOverflowCheck - {Team}: over cap ({Count}/{Max}) after {PlayerName} joined - reverting most recent joiner to Spectator.",
+                    team, physicalCount, maxTeamSize, SafePlayerName(live));
+
+                playingList.RemoveAll(p => SafeSteamId(p) == playerSteamId);
+                ScheduleForceToSpectator(live, "error.team.slot_unavailable");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "SchedulePostJoinOverflowCheck - {Team}: delayed cap check for slot {Slot} threw.", team, playerSlot);
+            }
+        });
+        Core.Scheduler.StopOnMapChange(token);
     }
 
     /// <summary>

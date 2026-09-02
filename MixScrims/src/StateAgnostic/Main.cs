@@ -261,6 +261,7 @@ public sealed partial class MixScrims
             }
 
             readyPlayers.Add(player);
+            mixScrimsService.RaisePlayerReadyChanged(sid, true);
             if (announce)
             {
                 PrintMessageToAllPlayers(Core.Localizer["command.ready", name]);
@@ -305,6 +306,7 @@ public sealed partial class MixScrims
                 PrintMessageToAllPlayers(Core.Localizer["command.unready", name]);
             }
             readyPlayers.Remove(existing);
+            mixScrimsService.RaisePlayerReadyChanged(sid, false);
             CheckReadyPlayersToStart();
 
             if (cfg.ShowReadyStatusInScoreboard)
@@ -419,6 +421,14 @@ public sealed partial class MixScrims
     internal void SetTeamName(Team team, string? name = null)
     {
         var teamName = (name is null || string.IsNullOrWhiteSpace(name)) ? null : name.Trim();
+
+        // Update the cached override BEFORE queuing the engine command so the IMixScrims
+        // snapshot getter reflects the intent immediately (the engine cvar exec is
+        // NextTick, but consumers reading the snapshot might race that).
+        if (team == Team.CT)
+            ctTeamNameOverride = teamName;
+        else if (team == Team.T)
+            tTeamNameOverride = teamName;
 
         if (team == Team.CT)
         {

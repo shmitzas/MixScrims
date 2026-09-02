@@ -16,6 +16,8 @@ public partial class MixScrims
     internal CancellationTokenSource? surrenderVoteTimer = null;
     internal Team surrenderVoteTeam = Team.None;
     internal bool isSurrenderVoteInProgress = false;
+    // Who has already voted in the current surrender vote. See timeoutVoters for why.
+    internal HashSet<ulong> surrenderVoters = new();
 
     /// <summary>
     /// Initiates a surrender vote for the specified team.
@@ -46,6 +48,17 @@ public partial class MixScrims
         surrenderVoteTimer?.Cancel();
         surrenderVoteTimer = null;
         surrenderVoteTeam = team;
+        // Seed with the caller so their implicit YES can't be cast a second time.
+        surrenderVoters.Clear();
+        { ulong seedSid = SafeSteamId(caller); if (seedSid != 0) surrenderVoters.Add(seedSid); }
+
+        mixScrimsService.RaiseSurrenderVoteStarted(team);
+        // Fire the caller's implicit YES so consumers don't have to seed from tally state.
+        {
+            ulong callerSid; try { callerSid = caller.SteamID; } catch { callerSid = 0; }
+            if (callerSid != 0)
+                mixScrimsService.RaiseSurrenderVoteCast(callerSid, true, team);
+        }
 
         var players = GetPlayersInTeam(team);
         if (players.Count == 0)
@@ -121,7 +134,8 @@ public partial class MixScrims
 
             if (IsPlayerValid(player))
             {
-                Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                if (!suppressBuiltInMenus)
+                    Core.MenusAPI.OpenMenuForPlayer(player, menu);
                 menuOpenCount++;
             }
         }
@@ -154,6 +168,13 @@ public partial class MixScrims
             return;
         }
 
+        var voterSteamId = SafeSteamId(player);
+        if (voterSteamId != 0 && !surrenderVoters.Add(voterSteamId))
+        {
+            logger.LogWarning("HandleSurrenderVote: {Name} already voted, ignoring duplicate.", player.Name);
+            return;
+        }
+
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("HandleSurrenderVote: Player {Name} voted {Choice}. Current votes before: {Yes} yes, {No} no out of {Total}",
@@ -179,6 +200,13 @@ public partial class MixScrims
         else if (string.Equals(choice, "No", StringComparison.OrdinalIgnoreCase))
         {
             surrenderVoteNoCount++;
+        }
+
+        {
+            ulong voterSid; try { voterSid = player.SteamID; } catch { voterSid = 0; }
+            var voteYes = string.Equals(choice, "Yes", StringComparison.OrdinalIgnoreCase);
+            if (voterSid != 0)
+                mixScrimsService.RaiseSurrenderVoteCast(voterSid, voteYes, surrenderVoteTeam);
         }
 
         if (cfg.DetailedLogging)
@@ -252,6 +280,8 @@ public partial class MixScrims
                 votePassed ? "PASSED" : "FAILED", team, surrenderVoteYesCount, requiredVotes, votePassed);
         }
 
+        mixScrimsService.RaiseSurrenderVoteResult(team, votePassed);
+
         if (votePassed)
         {
             Surrender(team);
@@ -280,12 +310,14 @@ public partial class MixScrims
 
         if (team == Team.CT)
         {
-            Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.ct", matchResetDelay], matchResetDelay * 1000);
+            if (!suppressBuiltInCenterHtml)
+                Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.ct", matchResetDelay], matchResetDelay * 1000);
             logger.LogInformation("SurrenderVoteResult: CT voted for surrender, terminating round");
         }
         else if (team == Team.T)
         {
-            Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.t", matchResetDelay], matchResetDelay * 1000);
+            if (!suppressBuiltInCenterHtml)
+                Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.t", matchResetDelay], matchResetDelay * 1000);
             logger.LogInformation("SurrenderVoteResult: T voted for surrender, terminating round");
         }
 

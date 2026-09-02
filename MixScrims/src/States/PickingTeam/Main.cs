@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
 using SwiftlyS2.Core.Menus.OptionsBase;
+using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using System.Numerics;
 
@@ -12,6 +13,10 @@ public partial class MixScrims
     internal List<IPlayer> pickedTPlayers = [];
     internal IPlayer? captainCt { get; set; }
     internal IPlayer? captainT { get; set; }
+    // Snapshot fields for IMixScrims consumers (v2.0.0+). Reset in StartTeamPickingPhase
+    // and cleared when the phase ends or the plugin resets.
+    internal Team? activePickingTeam = null;
+    internal int currentPickIndex = 0;
 
     /// <summary>
     /// Initiates the team-picking phase of the match, assigning captains to teams and prompting the first captain to
@@ -112,10 +117,71 @@ public partial class MixScrims
 
         MovePlayersToDesignatedTeamsPrePick();
 
+        // Primed before the restart below so CCSGameRules::Think never observes a stale
+        // limit while the players just moved onto their picked sides are reconciled.
+        // Symmetric to StartMatch / StartKnifeRound.
+        RelaxEngineTeamLimits("StartTeamPickingPhase");
+
+        // teampick.cfg no longer ends with `mp_restartgame 1` - the plugin drives the round
+        // transition itself, same as StartMatch (see repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`). The pause is lifted first so the
+        // queued restart isn't held by it, and HandleRoundPrestartPreKnifeRound re-applies
+        // the pause on the round that lands.
+        //   T+1.5s  UnpauseMatch  (also lets teampick.cfg's mp_warmup_end settle first -
+        //                          TerminateRound is a no-op while WarmupPeriod is set)
+        //   T+2.0s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+3.0s
+        // Both callbacks bail if the phase already ended (bot captains auto-pick, so the
+        // whole ladder can complete and hand off to StartKnifeRound within a tick).
+        // If the restart does not dispatch, the pause is re-applied immediately - otherwise
+        // the unpause above is never compensated and the pick phase runs live.
+        var pickUnpauseToken = Core.Scheduler.DelayBySeconds(1.5f, () =>
+        {
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam)
+                return;
+            UnpauseMatch();
+        });
+        Core.Scheduler.StopOnMapChange(pickUnpauseToken);
+
+        var pickRestartToken = Core.Scheduler.DelayBySeconds(2f, () =>
+        {
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam)
+            {
+                logger.LogWarning("StartTeamPickingPhase: state changed before TerminateRound (now {State}); skipping manual restart.", mixScrimsService.GetCurrentMatchState());
+                return;
+            }
+            if (!RestartRoundManually("StartTeamPickingPhase", RoundEndReason.GameCommencing, 1.0f))
+            {
+                logger.LogWarning("StartTeamPickingPhase: restart did not dispatch; re-pausing so the pick phase stays frozen.");
+                PauseMatch();
+            }
+        });
+        Core.Scheduler.StopOnMapChange(pickRestartToken);
+
         SetTeamName(Team.CT, captainCt == null ? null : captainCt.Controller.PlayerName);
         SetTeamName(Team.T, captainT == null ? null :  captainT.Controller.PlayerName);
 
+        // Reset per-phase snapshot fields. currentPickIndex counts captains' implicit
+        // self-picks as 1 and 2 — increment now.
+        currentPickIndex = 0;
+        if (captainCt != null && IsPlayerValid(captainCt))
+        {
+            currentPickIndex++;
+            ulong sid; try { sid = captainCt.SteamID; } catch { sid = 0; }
+            if (sid != 0)
+                mixScrimsService.RaisePlayerPickedForTeam(Team.CT, sid, currentPickIndex);
+        }
+        if (captainT != null && IsPlayerValid(captainT))
+        {
+            currentPickIndex++;
+            ulong sid; try { sid = captainT.SteamID; } catch { sid = 0; }
+            if (sid != 0)
+                mixScrimsService.RaisePlayerPickedForTeam(Team.T, sid, currentPickIndex);
+        }
+
         int teamStarting = Random.Shared.Next(2, 4);
+        var startingTeam = teamStarting == 3 ? Team.CT : Team.T;
+        activePickingTeam = startingTeam;
+        mixScrimsService.RaiseTeamPickingStarted(startingTeam);
         if (teamStarting == 3)
         {
             PromptCaptainToPickPlayer(captainCt, Team.CT);
@@ -228,6 +294,9 @@ public partial class MixScrims
             return;
         }
 
+        // Track whose turn to pick is active so IMixScrims.GetActivePickingTeam reflects it.
+        activePickingTeam = team;
+
         var players = GetPlayers();
         // Cache the captain SteamID once and use SafeSteamId on picked roster entries; the
         // picked lists can hold disposed IPlayer refs that would throw on a raw .SteamID read.
@@ -308,7 +377,7 @@ public partial class MixScrims
         }
 
         var menu = builder.Build();
-        if (IsPlayerValid(captain))
+        if (IsPlayerValid(captain) && !suppressBuiltInMenus)
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("PromptCaptainToPickPlayer: Displaying picking menu to {CaptainName} for team {Team}", captain.Name, team == Team.CT ? "CT" : "T");
@@ -377,12 +446,12 @@ public partial class MixScrims
             RemoveCaptainClanTagFromPlayer(captainCt);
         }
 
-        captainCt = player;
+        AssignCaptain(Team.CT, player);
 
         if (captainCt == null || !IsPlayerValid(captainCt))
         {
             logger.LogError("PickCtCaptain: player is invalid, picking random captain for CT team.");
-            captainCt = PickRandomCaptain(Team.CT);
+            AssignCaptain(Team.CT, PickRandomCaptain(Team.CT));
         }
 
         if (captainCt != null)
@@ -441,12 +510,12 @@ public partial class MixScrims
             RemoveCaptainClanTagFromPlayer(captainT);
         }
 
-        captainT = player;
+        AssignCaptain(Team.T, player);
 
         if (captainT == null || !IsPlayerValid(captainT))
         {
             logger.LogError("PickTCaptain: player is invalid, picking random captain for T team.");
-            captainT = PickRandomCaptain(Team.T);
+            AssignCaptain(Team.T, PickRandomCaptain(Team.T));
         }
 
         if (captainT != null)
@@ -544,6 +613,12 @@ public partial class MixScrims
         }
 
         pickedCtPlayers.Add(player);
+        currentPickIndex++;
+        {
+            ulong pickedSid; try { pickedSid = player.SteamID; } catch { pickedSid = 0; }
+            if (pickedSid != 0)
+                mixScrimsService.RaisePlayerPickedForTeam(Team.CT, pickedSid, currentPickIndex);
+        }
 
         if (IsBot(player))
             player.SwitchTeamAsync(Team.CT);
@@ -556,6 +631,7 @@ public partial class MixScrims
 
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
         {
+            activePickingTeam = null;
             Core.Scheduler.NextTick(() => StartKnifeRound());
             return;
         }
@@ -580,6 +656,12 @@ public partial class MixScrims
         }
 
         pickedTPlayers.Add(player);
+        currentPickIndex++;
+        {
+            ulong pickedSid; try { pickedSid = player.SteamID; } catch { pickedSid = 0; }
+            if (pickedSid != 0)
+                mixScrimsService.RaisePlayerPickedForTeam(Team.T, pickedSid, currentPickIndex);
+        }
 
         if (IsBot(player))
             player.SwitchTeamAsync(Team.T);
@@ -598,6 +680,7 @@ public partial class MixScrims
 
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
         {
+            activePickingTeam = null;
             Core.Scheduler.NextTick(() => StartKnifeRound());
             return;
         }

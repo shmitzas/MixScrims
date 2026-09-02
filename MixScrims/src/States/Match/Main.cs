@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using MixScrims.Contract;
 
@@ -7,6 +8,9 @@ namespace MixScrims;
 public partial class MixScrims
 {
     internal Dictionary<int, int> playerColors = new();
+
+    // Consumed once by HandleRoundStart after the match-start round transition lands.
+    internal bool pendingMatchStartReset = false;
 
     /// <summary>
     /// Starts the match by updating the match state, notifying players, and executing the match_start cvar configuration.
@@ -19,26 +23,87 @@ public partial class MixScrims
 
         MovePlayersToDesignatedTeamsPreMatch();
 
+        // Primed before the restart so CCSGameRules::Think never observes a stale limit.
+        // HandleMatchRoundPrestart / HandleRoundStart re-apply it on the fresh round too.
+        RelaxEngineTeamLimits("StartMatch");
+
         StopPreMatchAnnouncementTimers();
 
-        if (cfg.ShowReadyStatusInScoreboard)
-            RemoveReadyClanTagsFromAllPlayers();
-
-        // Captain tags are set unconditionally during team-picking; strip them here so the
-        // match starts with the players' original clan tags restored (empty if none).
-        RemoveCaptainClanTagsFromAllPlayers();
-
         UnpauseMatch();
-        Core.Scheduler.NextTick(() =>
+
+        pendingMatchStartReset = true;
+
+        // Replaces `mp_restartgame 2`, which was the confirmed crash site (see repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`): it routes through
+        // CCSGameRules::RestartRound()'s complete-reset branch and segfaults on the 3rd match
+        // of a server process. TerminateRound reaches RestartRound via the normal round-end
+        // path instead, which every mid-match round-end already exercises safely on the same
+        // process. The score / round-counter / money reset that mp_restartgame used to do is
+        // now ResetMatchStartState(), run from HandleRoundStart once the transition lands.
+        //   T+0.5s  exec cfg  (cvars only)
+        //   T+2.5s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+3.5s
+        var cfgToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
         {
-            if (Core.Engine is { } engine)
-                engine.ExecuteCommand("exec mixscrims/match_start.cfg");
-            else
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.Match)
+            {
+                logger.LogWarning("StartMatch: state changed before cfg exec (now {State}); skipping match_start.cfg.", mixScrimsService.GetCurrentMatchState());
+                return;
+            }
+
+            if (Core.Engine is not { } engine)
+            {
                 logger.LogWarning("StartMatch: Core.Engine unavailable; skipping match_start.cfg.");
-            // Override engine team limits immediately after match cvars settle, so the
-            // very first side switch (and every subsequent one) cannot dump players to spec.
-            RelaxEngineTeamLimits("StartMatch");
+                return;
+            }
+
+            try
+            {
+                var gameRules = Core.EntitySystem.GetGameRules();
+                if (gameRules is null || !gameRules.IsValid)
+                {
+                    logger.LogWarning("StartMatch: game rules invalid before cfg exec; skipping match_start.cfg.");
+                    return;
+                }
+
+                engine.ExecuteCommand("exec mixscrims/match_start.cfg");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "StartMatch: exception dispatching match_start.cfg exec");
+            }
         });
+        Core.Scheduler.StopOnMapChange(cfgToken);
+
+        var restartToken = Core.Scheduler.DelayBySeconds(2.5f, () =>
+        {
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.Match)
+            {
+                logger.LogWarning("StartMatch: state changed before TerminateRound (now {State}); skipping manual restart.", mixScrimsService.GetCurrentMatchState());
+                return;
+            }
+            RestartRoundManually("StartMatch", RoundEndReason.GameCommencing, 1.0f);
+        });
+        Core.Scheduler.StopOnMapChange(restartToken);
+
+        var deferredToken = Core.Scheduler.DelayBySeconds(5f, () =>
+        {
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.Match) return;
+
+            try
+            {
+                if (cfg.ShowReadyStatusInScoreboard)
+                    RemoveReadyClanTagsFromAllPlayers();
+                // Captain tags are set unconditionally during team-picking; strip them here so the
+                // match starts with the players' original clan tags restored (empty if none).
+                RemoveCaptainClanTagsFromAllPlayers();
+                FixTeammateColors();
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "StartMatch: deferred cosmetic mutations failed");
+            }
+        });
+        Core.Scheduler.StopOnMapChange(deferredToken);
 
         if (Core.Engine is not { } matchEngine)
         {
@@ -79,8 +144,6 @@ public partial class MixScrims
         }
         playedMaps.Add(mapDetails);
 
-        FixTeammateColors();
-        
         if (cfg.KickPlayersNotInMatch)
         {
             mixScrimsService.KickNotPlayingPlayers(Core.Localizer["info.kick_reason.not_picked"]);
@@ -314,6 +377,7 @@ public partial class MixScrims
         {
             if (finalAssignments.TryGetValue(player.PlayerID, out int color))
             {
+                if (player.Controller is null) continue;
                 player.Controller.CompTeammateColor = color;
                 player.Controller.CompTeammateColorUpdated();
                 playerColors[player.PlayerID] = color;

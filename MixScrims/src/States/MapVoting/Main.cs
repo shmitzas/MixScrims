@@ -10,6 +10,10 @@ public partial class MixScrims
 {
     internal List<VotedMap> votedMaps { get; set; } = [];
     internal IMenuAPI? mapVotingMenu { get; set; } = null;
+    // Ballot + deadline snapshot for IMixScrims consumers (v2.0.0+). Rebuilt every
+    // StartMapVotingPhase and cleared when the vote closes.
+    internal List<string> currentBallotDisplayNames = new();
+    internal DateTime? mapVoteDeadline = null;
 
     /// <summary>
     /// Presents map voting options to players and starts the map voting phase
@@ -35,6 +39,11 @@ public partial class MixScrims
 
         // shuffle maps order
         mapsToVote = mapsToVote.OrderBy(_ => Guid.NewGuid()).ToList();
+
+        // Snapshot the ballot + deadline for IMixScrims consumers before we build the menu.
+        currentBallotDisplayNames = mapsToVote.Select(m => m.DisplayName).ToList();
+        mapVoteDeadline = DateTime.UtcNow.AddSeconds(cfg.DefaultVoteTimeSeconds);
+        mixScrimsService.RaiseMapVotingStarted(currentBallotDisplayNames.AsReadOnly(), cfg.DefaultVoteTimeSeconds);
 
         var builder = Core.MenusAPI
             .CreateBuilder()
@@ -97,6 +106,7 @@ public partial class MixScrims
         }
 
         var previouslyVoted = votedMaps.FirstOrDefault(m => m.VotedBy.Any(v => v == player.PlayerID));
+        string? previousDisplayName = previouslyVoted?.Map?.DisplayName;
         if (previouslyVoted != null)
         {
             if (cfg.DetailedLogging)
@@ -119,6 +129,13 @@ public partial class MixScrims
             votes = 1;
         }
 
+        // Fire AFTER tallies are updated so a subscriber reading GetMapVoteTallies inside
+        // the handler sees the post-cast counts.
+        ulong voterSid;
+        try { voterSid = player.SteamID; } catch { voterSid = 0; }
+        if (voterSid != 0)
+            mixScrimsService.RaiseMapVoteCast(voterSid, votedMap.DisplayName, previousDisplayName);
+
         PrintMessageToAllPlayers(Core.Localizer["announcement.map.voted", playerName, votedMap.DisplayName, votes]);
 
         CloseMenuForPlayer(player);
@@ -137,6 +154,14 @@ public partial class MixScrims
 
         if (player == null || !IsPlayerValid(player) || IsBot(player))
             return;
+
+        if (suppressBuiltInMenus)
+        {
+            // A consumer owns the ballot UI — announce the request instead of
+            // opening ours, so !revote keeps working under suppression.
+            mixScrimsService.RaiseMapVoteMenuRequested(player.SteamID);
+            return;
+        }
 
         try
         {
@@ -186,6 +211,11 @@ public partial class MixScrims
 
         VotedMap pickedMap = GetMostVotedMap();
         PrintMessageToAllPlayers(Core.Localizer["announcement.map.chosen", pickedMap.Map.DisplayName, pickedMap.Votes]);
+        mixScrimsService.RaiseMapVotingEnded(pickedMap.Map.DisplayName, pickedMap.Votes);
+        // Ballot is closed — clear the snapshot state so consumers get an empty ballot
+        // between votes rather than the stale one.
+        currentBallotDisplayNames.Clear();
+        mapVoteDeadline = null;
         LoadSelectedMap(pickedMap.Map);
     }
 

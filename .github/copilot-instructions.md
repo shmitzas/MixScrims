@@ -5,9 +5,13 @@
 MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches with in-game management. It's a **state machine-driven plugin** that progresses through match phases: Warmup → MapVoting → MapChosen → PickingTeam → KnifeRound → PickingStartingSide → Match.
 
 - **Plugin Framework**: [SwiftlyS2](https://swiftlys2.net) - CS2 server modification framework for .NET 10.0
-- **Plugin Version**: 1.6.1
+- **Plugin Version**: 1.12.0 (Contract API: 2.1.0)
 - **Architecture**: State-based partial classes with shared service layer
 - **Key Components**: Main plugin (`MixScrims`), Contract API (`MixScrims.Contract`), state handlers, shared services, announcement system
+
+**Contract v2.0.0 additions (2026-09):** Events, snapshot queries, presentation suppression toggles, and config value getters — see wiki [Events](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/Events) + [API Integration](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Integration). All v1.x methods preserved verbatim; the shared interface key stays `"MixScrims.API"` so existing consumers keep working.
+
+**Contract v2.1.0 additions (2026-09):** Six **match flow drivers** (`CastMapVote`, `CastTimeoutVote`, `CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `VolunteerAsCaptain`) that close the input hole left by menu suppression, plus two **menu request events** (`CaptainMenuRequested`, `VolunteerCaptainMenuRequested`). Still purely additive.
 
 **Documentation:**
 - [Project Wiki](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki) - Comprehensive guides for installation, configuration, features, and contributing
@@ -271,6 +275,8 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 **Environment:**
 - `TestMode` - Loads `staging_overrides.cfg` (bots, lower reqs), sets PluginState to Staging
 - `DetailedLogging` - Verbose debug logs
+- `SuppressBuiltInMenus` (v2.0.0) - Skip every `Core.MenusAPI.OpenMenuForPlayer` site so a consumer plugin can render its own UI. Opt-in (default false). Runtime override via `IMixScrims.SetBuiltInMenusSuppressed`.
+- `SuppressBuiltInCenterHtml` (v2.0.0) - Skip every `SendCenterHTML` broadcast. Same opt-in pattern.
 
 **Player Leave Punishment:**
 - `PunishPlayerLeaves` - Enable/disable punishment system
@@ -297,9 +303,11 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - [MixScrims/src/Shared/Helpers.cs](MixScrims/src/Shared/Helpers.cs) - Utility functions
 
 **Contract API:**
-- [MixScrims.Contract/IMixScrims.cs](MixScrims.Contract/IMixScrims.cs) - Public API interface (39 methods)
+- [MixScrims.Contract/IMixScrims.cs](MixScrims.Contract/IMixScrims.cs) - Public API interface (v2.1.0: match flow drivers + menu request events on top of v2.0.0's events + snapshot queries + suppression toggles + config getters, all on top of the v1.x method surface)
+- [MixScrims.Contract/VoteKickCastEventArgs.cs](MixScrims.Contract/VoteKickCastEventArgs.cs) - Payload record for the `VoteKickCast` event (only event with >3 payload fields)
 - [MixScrims.Contract/MatchState.cs](MixScrims.Contract/MatchState.cs) - Match state enum (`Ended`, `KnifeRound`, `MapChosen`, `MapLoading`, `MapVoting`, `Match`, `PickingStartingSide`, `PickingTeam`, `Timeout`, `Reset`, `Warmup`)
 - [MixScrims.Contract/PluginState.cs](MixScrims.Contract/PluginState.cs) - Plugin state enum (Staging/Production)
+- [MixScrims.Contract/MixScrims.Contract.csproj](MixScrims.Contract/MixScrims.Contract.csproj) - Now references `SwiftlyS2.CS2` (`ExcludeAssets="runtime" PrivateAssets="all"`) so the contract can expose `SwiftlyS2.Shared.Players.Team` directly. Assembly version pinned at `2.1.0`.
 
 **Commands:**
 - [MixScrims/src/Commands/Admin/](MixScrims/src/Commands/Admin/) - Admin command handlers (one file per command: Captain, ForceReady, ForceUnready, Map, MaplistAll, Maps, MixReset, MixStart)
@@ -316,7 +324,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - `!mix_start` / `!start` - Force start match
 - `!forceready` / `!fr` - Force all players ready
 - `!forceunready` / `!fur` - Force all players unready
-- `!captain <name> <t/ct>` - Set captain manually
+- `!captain <name> <t/ct>` - Set captain manually (team arg optional when `SuppressBuiltInMenus` is on — the bare form raises `CaptainMenuRequested` with a null side)
 - `!map <mapname>` - Change to specific map
 - `!maps` - List voteable maps
 - `!maplist_all` - List all configured maps
@@ -330,7 +338,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - `!invite` / `!inv` - Send Discord invite
 - `!stay` / `!st` - Stay on current side (knife winner)
 - `!switch` / `!swap` - Switch sides (knife winner)
-- `!volunteer_captain <t/ct>` - Volunteer as captain (if `AllowVolunteerCaptains` enabled)
+- `!volunteer_captain <t/ct>` - Volunteer as captain (if `AllowVolunteerCaptains` enabled; team arg optional when `SuppressBuiltInMenus` is on)
 - `!votekick <name>` / `!vk` - Vote to kick a player (if `VoteKick.Enabled`, during match)
 
 ## Integration Points
@@ -349,18 +357,45 @@ mixScrims.AddPlayerToPickedCtPlayers(steamId);
 mixScrims.KickNotPlayingPlayers("Not participating");
 ```
 
-**API Methods** (v1.6.1, 39 total):
+**API Methods** (v2.0.0 — 39 v1.x methods preserved + events + snapshot queries + suppression toggles + config getters):
+
+- **v1.x preserved** — everything below stays working for existing consumers.
+- **v2 events** — `MatchStateChanged`, `PluginStateChanged`, `PlayerReadyChanged`, `CaptainAssigned`, `CaptainRemoved`, `TeamPickingStarted`, `PlayerPickedForTeam`, `MapVotingStarted`, `MapVoteCast`, `MapVotingEnded`, `KnifeRoundStarted`, `KnifeRoundWon`, `PickingStartingSideStarted`, `StartingSideChosen`, `TimeoutStarted`, `TimeoutTick`, `TimeoutEnded`, `TimeoutVoteStarted`, `TimeoutVoteCast`, `TimeoutVoteResult`, `SurrenderVoteStarted`, `SurrenderVoteCast`, `SurrenderVoteResult`, `VoteKickStarted`, `VoteKickCast`, `VoteKickResult`, `MatchEnded`. Only `VoteKickCast` uses a payload record (`VoteKickCastEventArgs`).
+- **v2 snapshot queries** — `GetReadyPlayers`, `IsPlayerReady`, `GetMinimumReadyPlayers`, `GetRequireAllConnectedPlayersToBeReady`, `GetCtCaptain`, `GetTCaptain`, `GetCtTeamName`, `GetTTeamName`, `GetMatchScore`, `GetMapVoteTallies`, `GetVoteableMapDisplayNames`, `GetMapVoteSecondsRemaining`, `GetPlayerMapVote`, `GetActivePickingTeam`, `GetUnpickedPlayers`, `GetCurrentPickIndex`, `GetActiveTimeoutRemainingSeconds`, `GetActiveTimeoutTeam`, `GetRemainingTimeoutsCt`, `GetRemainingTimeoutsT`, `GetVoteKickTargetCt`, `GetVoteKickTargetT`, `GetVoteKickTallyCt`, `GetVoteKickTallyT`, `GetActiveSurrenderVoteTeam`, `GetSurrenderVoteTally`, `GetLocalizedString`.
+- **v2 built-in presentation suppression** — config keys `SuppressBuiltInMenus` + `SuppressBuiltInCenterHtml`, runtime overrides `SetBuiltInMenusSuppressed` / `SetBuiltInCenterHtmlSuppressed` / `AreBuiltInMenusSuppressed` / `IsBuiltInCenterHtmlSuppressed`. Config seeded at load; runtime setters override until unload.
+- **v2 config value getters** — `GetCaptainsEnabled`, `GetSkipTeamPickingEnabled`, `GetSkipMapVotingEnabled`, `GetAllowVolunteerCaptainsEnabled`, `GetTimeoutDurationSeconds`, `GetTotalTimeoutsPerTeam`, `GetDefaultVoteTimeSeconds`.
+- **v2.1 match flow drivers** — `CastMapVote`, `CastTimeoutVote`, `CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `VolunteerAsCaptain`. Guarded pass-throughs in `MixScrimsService` to `RegisterMapVoteByName` / `HandleTimeoutVote` / `HandleSurrenderVote` / `HandleVoteKickVote` / `AssignPickedPlayerToTeamCt|T` / `TryVolunteerCaptain`. Every rejection logs Warning and no-ops — never throw back into a consumer callback, never re-implement handler logic in the service layer.
+- **v2.1 menu request events** — `CaptainMenuRequested` / `VolunteerCaptainMenuRequested` (payload: requester SteamID64, `Team?` side). Fired from `Commands/Admin/Captain.cs` and `Commands/Player/VolunteerCaptain.cs` **only when `suppressBuiltInMenus` is true**, after all permission / state / arg validation. Under suppression both commands also accept a bare arg-less form (`side = null`) and stop acting themselves; with suppression off behaviour is byte-for-byte unchanged.
 - **State Management**: `GetCurrentMatchState()`, `SetMatchState()`, `GetCurrentPluginState()`, `SetPluginState()`
 - **Team Names**: `SetCounterTerroristsTeamName()`, `SetTerroristsTeamName()`
 - **Phase Control**: `StartWarmup()`, `StartMapVoting()`, `StartTeamPicking()`, `StartKnifeRound()`, `StartMatch()`, `CancelMatch()`
 - **Timeout/Surrender**: `StartTimeoutCt()`, `StartTimeoutT()`, `StopTimeout()`, `SurrenderCt()`, `SurrenderT()`
 - **Map Control**: `ChangeMap(string mapName = "", string workshopId = "")`
 - **Ready System**: `ForceAllPlayersToReady()`, `ForceAllPlayersToUnready()`
-- **Picked Players**: `GetPickedCtPlayers()`, `GetPickedTPlayers()`, `AddPlayerToPickedCtPlayers(steamId)`, `AddPlayerToPickedTPlayers(steamId)`, `RemovePlayerFromPickedCtPlayers(steamId)`, `RemovePlayerFromPickedTPlayers(steamId)`
-- **Playing Players**: `GetPlayingCtPlayers()`, `GetPlayingTPlayers()`, `AddPlayerToPlayingCtPlayers(steamId)`, `AddPlayerToPlayingTPlayers(steamId)`, `RemovePlayerFromPlayingCtPlayers(steamId)`, `RemovePlayerFromPlayingTPlayers(steamId)`
+- **Picked Players**: `GetPickedCtPlayers()`, `GetPickedTPlayers()`, `AddPlayerToPickedCtPlayers(steamId)`, `AddPlayerToPickedTPlayers(steamId)`, `RemovePlayerFromPickedCtPlayers(steamId)`, `RemovePlayerFromPickedTPlayers(steamId)` — **raw list manipulation only**; they do NOT move players or advance the picking phase. `PickPlayerForTeam` is the driver for that.
+- **Playing Players**: `GetPlayingCtPlayers()`, `GetPlayingTPlayers()`, `AddPlayerToPlayingCtPlayers(steamId)`, `AddPlayerToPlayingTPlayers(steamId)`, `RemovePlayerFromPlayingCtPlayers(steamId)`, `RemovePlayerFromPlayingTPlayers(steamId)` — same raw-list caveat.
 - **Punishment System**: `GetPlayersWaitingForPunishment(ulong steamId)`, `AddPlayerToWaitingForPunishmentList(steamId)`, `RemovePlayerFromWaitingForPunishmentList(steamId)`
 - **Captain Management**: `SetCtCaptain(steamId)`, `SetTCaptain(steamId)`
 - **Player Control**: `KickNotPlayingPlayers(reason)`, `KickNotPickedPlayers(reason)`, `PreventNewPlayersJoining(bool)`
+
+**v2.0.0 event firing chokepoints** (for maintainers touching the state machine — every mutation site should keep firing the matching event):
+
+- `MixScrimsService.SetMatchState` — fires `MatchStateChanged` on non-no-op transitions.
+- `MixScrimsService.SetPluginState` — fires `PluginStateChanged` on non-no-op transitions.
+- `AddPlayerToReadyList` / `RemovePlayerFromReadyList` (`StateAgnostic/Main.cs`) — fires `PlayerReadyChanged`. Mass helpers (`ForceReadyAllPlayers` / `ForceUnreadyAllPlayers`) delegate here, so the event fires once per affected player without extra plumbing.
+- `AssignCaptain(Team, IPlayer?)` (`Shared/Helpers.cs`) — the single field-write chokepoint for `captainCt` / `captainT`. Fires `CaptainRemoved` for the outgoing captain, then `CaptainAssigned` for the incoming one. Every `captainCt = ...` / `captainT = ...` assignment across the plugin routes through this helper.
+- `StartTeamPickingPhase` (`PickingTeam/Main.cs`) — fires `TeamPickingStarted` after the random-team coin toss. Captains' implicit self-picks fire `PlayerPickedForTeam` with `pickIndex = 1` and `pickIndex = 2`.
+- `AssignPickedPlayerToTeamCt` / `AssignPickedPlayerToTeamT` — fires `PlayerPickedForTeam` and increments `currentPickIndex`.
+- `StartMapVotingPhase`, `RegisterMapVoteByName`, `AnnouncePickedMap` (`MapVoting/Main.cs`) — fires the three map vote events. Ballot + deadline are cached in `currentBallotDisplayNames` + `mapVoteDeadline` for snapshot reads.
+- `StartKnifeRound`, `PromptWinnerTCaptainoChoseStartingSide`, `SwitchStartingSides` / `StayStartingSides` (`KnifeRound/Main.cs`) — fires `KnifeRoundStarted` / `KnifeRoundWon` / `PickingStartingSideStarted` / `StartingSideChosen`. `PickingStartingSideStarted` is intentionally suppressed when `DisableCaptains` is true.
+- `StartTimeout`, `EndTimeout`, `BroadcastRemainingTimeoutTime` (`Timeout/Main.cs`) — fires `TimeoutStarted` / `TimeoutTick` / `TimeoutEnded`. Snapshot fields `activeTimeoutTeam` + `activeTimeoutRemainingSeconds` mirror the per-tick counter for consumers.
+- Timeout / Surrender / VoteKick vote flows fire `*VoteStarted`, `*VoteCast` (including the caller's implicit YES seed), and `*VoteResult`.
+- `HandleMatchEnd` (`Match/Events.cs`) — fires `MatchEnded(winner, ctScore, tScore)` synchronously (BEFORE the 10s post-match delayed callback) using `Core.Game.MatchData.CTScoreTotal` / `TerroristScoreTotal`. Winner is derived from the higher score; equal scores yield `Team.None`.
+
+**Built-in presentation suppression gates** (never remove — consumers set `suppressBuiltInMenus` / `suppressBuiltInCenterHtml` to render their own UI):
+
+- 9 menu sites gate on `if (!suppressBuiltInMenus)` before `Core.MenusAPI.OpenMenuForPlayer`: `Commands/Admin/Captain.cs`, `States/KnifeRound/Main.cs` (winner CT + winner T + DisableCaptains team-vote), `States/MapVoting/Main.cs` (`DisplayMapVotingMenu`), `States/PickingTeam/Main.cs` (`PromptCaptainToPickPlayer`), `States/Surrender/Main.cs`, `States/Timeout/Main.cs`, `States/Match/VoteKick.cs`. `Commands/Admin/Captain.cs` early-returns on the suppressed branch (raising `CaptainMenuRequested`) rather than building a menu it would discard.
+- 6 CenterHTML sites gate on `if (!suppressBuiltInCenterHtml)` (early return where the method has nothing else to do, per-call gate where the surrounding code still runs): `StateAgnostic/Announcements.cs` (`DisplayReadyAndNotReadyPlayersInCenterHtml`), `States/Timeout/Main.cs` (`BroadcastRemainingTimeoutTime`), `States/Match/VoteKick.cs` (`SendVoteKickProgressCenterHtml`), `States/Surrender/Main.cs` (both CT + T success paths, one gate per team).
 
 ### Discord Webhooks
 Optional Discord notifications via `DiscordService.cs` — sends rich embed messages to configured webhooks when players use `!invite`. Configured in `discord_config.jsonc` (`DiscordConfig` section): `EnableDiscordInvites`, `DiscordInviteDelayMinutes`, and a list of `Invites` (each with `WebhookUrl`, `Username`, `AvatarUrl`, `Content`, and an `Embed` with title/description/color/fields).

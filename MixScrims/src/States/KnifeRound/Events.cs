@@ -34,14 +34,18 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Handles the prestart phase of a round before a knife round begins, allowing for match state adjustments as
-    /// needed.
+    /// Re-applies the pause on round prestart for phases that must stay frozen while
+    /// players interact with menus. Both phases enter through a round restart that clears
+    /// any pause issued alongside it - <c>PickingStartingSide</c> from knife_round.cfg's
+    /// <c>mp_restartgame 1</c>, <c>PickingTeam</c> from the plugin-driven TerminateRound in
+    /// StartTeamPickingPhase - so the pause only sticks when re-applied on the round it
+    /// produces.
     /// </summary>
     [GameEventHandler(HookMode.Pre)]
     public HookResult HandleRoundPrestartPreKnifeRound(EventRoundPrestart @event)
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
-        if (matchState == MatchState.PickingStartingSide)
+        if (matchState == MatchState.PickingStartingSide || matchState == MatchState.PickingTeam)
         {
             PauseMatch();
         }
