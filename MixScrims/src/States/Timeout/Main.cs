@@ -61,6 +61,10 @@ public partial class MixScrims
             return;
         }
 
+        // The request is being served now, so it is no longer pending. Without this
+        // the next round_prestart still sees the latch and queues a second timeout.
+        timeoutPending = TimeoutPending.None;
+
         isTimeoutActive = true;
         activeTimeoutTeam = team;
         activeTimeoutRemainingSeconds = cfg.TimeoutDurationSeconds;
@@ -303,7 +307,10 @@ public partial class MixScrims
                 menuOpenCount, botCount, timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes);
         }
 
-        PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes]);
+        PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, TimeoutRequiredVotes()]);
+
+        // Bots auto-vote yes, so the vote can already be settled before it opens.
+        if (TryResolveTimeoutVoteEarly()) return;
 
         timeoutVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => TimeoutVoteResult(team));
         Core.Scheduler.StopOnMapChange(timeoutVoteTimer);
@@ -312,6 +319,36 @@ public partial class MixScrims
         {
             logger.LogInformation("StartTimeoutVote: Vote timer scheduled for {Seconds} seconds", cfg.DefaultVoteTimeSeconds);
         }
+    }
+
+    /// <summary>
+    /// Majority of the whole team. The caller's implicit yes is seeded into the yes
+    /// count but excluded from the eligible count, so the team is eligible + 1.
+    /// </summary>
+    internal int TimeoutRequiredVotes() => (timeoutTotalEligibleVotes + 1) / 2 + 1;
+
+    /// <summary>
+    /// Resolves the vote the moment the outcome is settled, so players who never
+    /// click can't hold the team for the rest of the timer.
+    /// </summary>
+    internal bool TryResolveTimeoutVoteEarly()
+    {
+        if (!isTimeoutVoteInProgress) return false;
+
+        var required = TimeoutRequiredVotes();
+        // Every voter who hasn't answered could still say yes; only no votes cap it.
+        var maxReachableYes = timeoutTotalEligibleVotes + 1 - timeoutVoteNoCount;
+        if (timeoutVoteYesCount < required && maxReachableYes >= required) return false;
+
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("TryResolveTimeoutVoteEarly: settled at {Yes} yes / {No} no (required {Required}, max reachable {Max})",
+                timeoutVoteYesCount, timeoutVoteNoCount, required, maxReachableYes);
+        }
+
+        timeoutVoteTimer?.Cancel();
+        TimeoutVoteResult(timeoutVoteTeam);
+        return true;
     }
 
     /// <summary>
@@ -372,19 +409,9 @@ public partial class MixScrims
                 timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes, timeoutVoteYesCount + timeoutVoteNoCount);
         }
 
-        PrintMessageToTeam(timeoutVoteTeam, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes]);
+        PrintMessageToTeam(timeoutVoteTeam, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, TimeoutRequiredVotes()]);
 
-        // Check if all eligible players have voted
-        if (timeoutVoteYesCount + timeoutVoteNoCount >= timeoutTotalEligibleVotes)
-        {
-            if (cfg.DetailedLogging)
-            {
-                logger.LogInformation("HandleTimeoutVote: All eligible votes received ({Voted} >= {Total}), cancelling timer and processing result",
-                    timeoutVoteYesCount + timeoutVoteNoCount, timeoutTotalEligibleVotes);
-            }
-            timeoutVoteTimer?.Cancel();
-            TimeoutVoteResult(timeoutVoteTeam);
-        }
+        TryResolveTimeoutVoteEarly();
 
         CloseMenuForPlayer(player);
     }
@@ -412,7 +439,7 @@ public partial class MixScrims
         }
 
         isTimeoutVoteInProgress = false;
-        int requiredVotes = timeoutTotalEligibleVotes;
+        int requiredVotes = TimeoutRequiredVotes();
 
         var players = GetPlayersInTeam(team);
         foreach (var player in players)

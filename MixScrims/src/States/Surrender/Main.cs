@@ -146,7 +146,10 @@ public partial class MixScrims
                 menuOpenCount, botCount, surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes);
         }
 
-        PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes]);
+        PrintMessageToTeam(team, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, SurrenderRequiredVotes()]);
+
+        // Bots auto-vote yes, so the vote can already be settled before it opens.
+        if (TryResolveSurrenderVoteEarly()) return;
 
         surrenderVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => SurrenderVoteResult(team));
         Core.Scheduler.StopOnMapChange(surrenderVoteTimer);
@@ -155,6 +158,36 @@ public partial class MixScrims
         {
             logger.LogInformation("StartSurrenderVote: Vote timer scheduled for {Seconds} seconds", cfg.DefaultVoteTimeSeconds);
         }
+    }
+
+    /// <summary>
+    /// Majority of the whole team. The caller's implicit yes is seeded into the yes
+    /// count but excluded from the eligible count, so the team is eligible + 1.
+    /// </summary>
+    internal int SurrenderRequiredVotes() => (surrenderTotalEligibleVotes + 1) / 2 + 1;
+
+    /// <summary>
+    /// Resolves the vote the moment the outcome is settled, so players who never
+    /// click can't hold the team for the rest of the timer.
+    /// </summary>
+    internal bool TryResolveSurrenderVoteEarly()
+    {
+        if (!isSurrenderVoteInProgress) return false;
+
+        var required = SurrenderRequiredVotes();
+        // Every voter who hasn't answered could still say yes; only no votes cap it.
+        var maxReachableYes = surrenderTotalEligibleVotes + 1 - surrenderVoteNoCount;
+        if (surrenderVoteYesCount < required && maxReachableYes >= required) return false;
+
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("TryResolveSurrenderVoteEarly: settled at {Yes} yes / {No} no (required {Required}, max reachable {Max})",
+                surrenderVoteYesCount, surrenderVoteNoCount, required, maxReachableYes);
+        }
+
+        surrenderVoteTimer?.Cancel();
+        SurrenderVoteResult(surrenderVoteTeam);
+        return true;
     }
 
     /// <summary>
@@ -215,19 +248,9 @@ public partial class MixScrims
                 surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes, surrenderVoteYesCount + surrenderVoteNoCount);
         }
 
-        PrintMessageToTeam(surrenderVoteTeam, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes]);
+        PrintMessageToTeam(surrenderVoteTeam, Core.Localizer["announcement.surrender.vote.progress", surrenderVoteYesCount, surrenderVoteNoCount, SurrenderRequiredVotes()]);
 
-        // Check if all eligible players have voted
-        if (surrenderVoteYesCount + surrenderVoteNoCount >= surrenderTotalEligibleVotes)
-        {
-            if (cfg.DetailedLogging)
-            {
-                logger.LogInformation("HandleSurrenderVote: All eligible votes received ({Voted} >= {Total}), cancelling timer and processing result",
-                    surrenderVoteYesCount + surrenderVoteNoCount, surrenderTotalEligibleVotes);
-            }
-            surrenderVoteTimer?.Cancel();
-            SurrenderVoteResult(surrenderVoteTeam);
-        }
+        TryResolveSurrenderVoteEarly();
 
         CloseMenuForPlayer(player);
     }
@@ -255,7 +278,7 @@ public partial class MixScrims
         }
 
         isSurrenderVoteInProgress = false;
-        int requiredVotes = surrenderTotalEligibleVotes;
+        int requiredVotes = SurrenderRequiredVotes();
 
         var players = GetPlayersInTeam(team);
         foreach (var player in players)
@@ -322,7 +345,8 @@ public partial class MixScrims
         }
 
         // Trigger match canceled event
-        PauseMatch();
+        if (!ForceSurrenderMatchEnd(team))
+            PauseMatch();
 
         // Schedule reset
         var resetToken = Core.Scheduler.DelayBySeconds(matchResetDelay - 5, () =>
@@ -332,5 +356,45 @@ public partial class MixScrims
             ResetPluginState();
         });
         Core.Scheduler.StopOnMapChange(resetToken);
+    }
+
+    /// <summary>
+    /// Ends the match down CS2's own surrender path, so the win panel reads
+    /// "CTs surrender" / "Terrorists surrender" and the round is credited to the
+    /// opposing team rather than the match merely being paused and reset.
+    /// </summary>
+    /// <returns>
+    /// <c>false</c> when the round could not be terminated — the caller must fall
+    /// back to pausing, or the surrendering team would just keep playing.
+    /// </returns>
+    internal bool ForceSurrenderMatchEnd(Team team)
+    {
+        const float roundEndDelay = 1.0f;
+
+        if (team != Team.CT && team != Team.T)
+        {
+            logger.LogWarning("ForceSurrenderMatchEnd: unsupported team {Team} - skipping native match end.", team);
+            return false;
+        }
+
+        var reason = team == Team.CT ? RoundEndReason.CTsSurrender : RoundEndReason.TerroristsSurrender;
+        if (!RestartRoundManually("Surrender", reason, roundEndDelay))
+            return false;
+
+        // TerminateRound only settles the round; intermission is what ends the match.
+        var intermissionToken = Core.Scheduler.DelayBySeconds(roundEndDelay + 1.0f, () =>
+        {
+            try
+            {
+                Core.Game.GoToIntermission();
+                logger.LogInformation("ForceSurrenderMatchEnd: {Team} surrendered - match sent to intermission.", team);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "ForceSurrenderMatchEnd: GoToIntermission failed after {Team} surrendered.", team);
+            }
+        });
+        Core.Scheduler.StopOnMapChange(intermissionToken);
+        return true;
     }
 }
