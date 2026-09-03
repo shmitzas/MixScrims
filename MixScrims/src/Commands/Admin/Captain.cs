@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
 using SwiftlyS2.Core.Menus.OptionsBase;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
 
@@ -34,14 +35,19 @@ public partial class MixScrims
             || matchState == MatchState.MapLoading
             || matchState == MatchState.MapChosen)
         {
-            if (context.Args.Length < 1)
+            // The bare (arg-less) form is only legal while built-in menus are suppressed:
+            // there the consumer plugin renders both the side and the player picker.
+            string? team = null;
+            if (context.Args.Length >= 1)
             {
-                PrintMessageToPlayer(admin, Core.Localizer["error.invalid_args", "!captain <t/ct>"]);
-                return;
+                team = context.Args[0].ToLower();
+                if (team != "t" && team != "ct")
+                {
+                    PrintMessageToPlayer(admin, Core.Localizer["error.invalid_args", "!captain <t/ct>"]);
+                    return;
+                }
             }
-
-            var team = context.Args[0].ToLower();
-            if (team != "t" && team != "ct")
+            else if (!suppressBuiltInMenus)
             {
                 PrintMessageToPlayer(admin, Core.Localizer["error.invalid_args", "!captain <t/ct>"]);
                 return;
@@ -60,9 +66,17 @@ public partial class MixScrims
                 return;
             }
 
+            if (suppressBuiltInMenus)
+            {
+                var requesterSid = SafeSteamId(admin);
+                if (requesterSid != 0)
+                    mixScrimsService.RaiseCaptainMenuRequested(requesterSid, team == null ? null : (team == "ct" ? Team.CT : Team.T));
+                return;
+            }
+
             var builder = Core.MenusAPI
                 .CreateBuilder()
-                .Design.SetMenuTitle(Core.Localizer["menu.captain_pick", team.ToUpper()])
+                .Design.SetMenuTitle(Core.Localizer["menu.captain_pick", team!.ToUpper()])
                 .Design.SetMenuTitleVisible(true)
                 .Design.SetMenuFooterVisible(true)
                 .EnableSound()

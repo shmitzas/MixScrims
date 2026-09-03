@@ -6,6 +6,53 @@ namespace MixScrims;
 
 public sealed partial class MixScrims
 {
+    // Cached display names last written via SetTeamName so IMixScrims.GetCt/TTeamName
+    // can echo them back to consumers. Null means "engine default" (COUNTER-TERRORISTS / TERRORISTS).
+    internal string? ctTeamNameOverride = null;
+    internal string? tTeamNameOverride = null;
+
+    /// <summary>
+    /// Field-write helper that consolidates every <c>captainCt = ...</c> /
+    /// <c>captainT = ...</c> assignment across the plugin so a single place
+    /// fires the <see cref="MixScrimsService.CaptainAssigned"/> /
+    /// <see cref="MixScrimsService.CaptainRemoved"/> events. When replacing a
+    /// live captain: <c>CaptainRemoved</c> fires FIRST for the outgoing player,
+    /// then <c>CaptainAssigned</c> for the incoming one. No-op assignments
+    /// (same SteamID on the same team) don't refire either event.
+    /// </summary>
+    internal void AssignCaptain(Team team, IPlayer? player)
+    {
+        var current = team == Team.CT ? captainCt : captainT;
+        var newValid = player != null && IsPlayerValid(player);
+        var oldId = current != null && IsPlayerValid(current) ? SafeSteamId(current) : 0;
+        ulong newId = 0;
+        if (newValid)
+        {
+            try { newId = player!.SteamID; } catch { newId = 0; }
+        }
+
+        // No-op: same non-zero SteamID reassignment on the same team. Skip event fire so
+        // idempotent code paths (EnsureCaptainsAlive → PickRandomCaptain returning the
+        // same player) don't spam consumers.
+        if (oldId != 0 && oldId == newId)
+        {
+            if (team == Team.CT) captainCt = player;
+            else if (team == Team.T) captainT = player;
+            return;
+        }
+
+        // Field write first, then event dispatch — subscribers reading the
+        // corresponding snapshot getter (e.g. GetCtCaptain) inside their handler
+        // will see the post-assignment state.
+        if (team == Team.CT) captainCt = player;
+        else if (team == Team.T) captainT = player;
+
+        if (oldId != 0)
+            mixScrimsService.RaiseCaptainRemoved(team, oldId);
+        if (newId != 0)
+            mixScrimsService.RaiseCaptainAssigned(team, newId);
+    }
+
     /// <summary>
     /// Retrieves the server prefix to be used for command recognition or display.
     /// </summary>
@@ -112,31 +159,31 @@ public sealed partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogWarning("EnsureCaptainsAlive: CT captain reference is invalid/disposed, clearing.");
-            captainCt = null;
+            AssignCaptain(Team.CT, null);
         }
 
         if (captainT != null && !IsPlayerValid(captainT))
         {
             if (cfg.DetailedLogging)
                 logger.LogWarning("EnsureCaptainsAlive: T captain reference is invalid/disposed, clearing.");
-            captainT = null;
+            AssignCaptain(Team.T, null);
         }
 
         if (captainCt == null)
         {
-            IPlayer? replacement = null;
-            if (playingCtPlayers.Count > 0)
-                replacement = playingCtPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
-                              ?? playingCtPlayers.FirstOrDefault(p => IsPlayerValid(p));
-            if (replacement == null && pickedCtPlayers.Count > 0)
-                replacement = pickedCtPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
-                              ?? pickedCtPlayers.FirstOrDefault(p => IsPlayerValid(p));
-            if (replacement == null)
-                replacement = PickRandomCaptain(Team.CT);
+            // PickRandomCaptain is consulted before the bot fallbacks: a human sitting in
+            // Spectator is in neither roster list, and seating a bot here would let the
+            // pick ladder auto-resolve without prompting them.
+            IPlayer? replacement =
+                playingCtPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
+                ?? pickedCtPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
+                ?? PickRandomCaptain(Team.CT)
+                ?? playingCtPlayers.FirstOrDefault(IsPlayerValid)
+                ?? pickedCtPlayers.FirstOrDefault(IsPlayerValid);
             if (replacement != null)
             {
-                captainCt = replacement;
-                SetCaptainClanTag(captainCt, Team.CT);
+                AssignCaptain(Team.CT, replacement);
+                SetCaptainClanTag(replacement, Team.CT);
                 if (cfg.DetailedLogging)
                     logger.LogInformation("EnsureCaptainsAlive: Re-picked CT captain: {Name}", replacement.Name);
             }
@@ -144,19 +191,16 @@ public sealed partial class MixScrims
 
         if (captainT == null)
         {
-            IPlayer? replacement = null;
-            if (playingTPlayers.Count > 0)
-                replacement = playingTPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
-                              ?? playingTPlayers.FirstOrDefault(p => IsPlayerValid(p));
-            if (replacement == null && pickedTPlayers.Count > 0)
-                replacement = pickedTPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
-                              ?? pickedTPlayers.FirstOrDefault(p => IsPlayerValid(p));
-            if (replacement == null)
-                replacement = PickRandomCaptain(Team.T);
+            IPlayer? replacement =
+                playingTPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
+                ?? pickedTPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
+                ?? PickRandomCaptain(Team.T)
+                ?? playingTPlayers.FirstOrDefault(IsPlayerValid)
+                ?? pickedTPlayers.FirstOrDefault(IsPlayerValid);
             if (replacement != null)
             {
-                captainT = replacement;
-                SetCaptainClanTag(captainT, Team.T);
+                AssignCaptain(Team.T, replacement);
+                SetCaptainClanTag(replacement, Team.T);
                 if (cfg.DetailedLogging)
                     logger.LogInformation("EnsureCaptainsAlive: Re-picked T captain: {Name}", replacement.Name);
             }
@@ -181,14 +225,19 @@ public sealed partial class MixScrims
 
     /// <summary>
     /// Returns a list of players currently playing (CT or T).
+    /// Team membership is read from the CONTROLLER, not the pawn: a player who self-specs while
+    /// alive (<c>jointeam 1</c>) gets their controller moved to Spectator immediately, but their
+    /// pawn keeps the old TeamNum until it is destroyed - observed to outlive several rounds.
+    /// Reading the pawn makes the vacated slot look occupied, which blocks a replacement from
+    /// joining until the departing player disconnects.
     /// </summary>
     internal List<IPlayer> GetPlayingPlayers()
     {
         return GetPlayers()
             .Where(p => IsPlayerValid(p)
                 && p.PlayerPawn != null
-                && (p.PlayerPawn.TeamNum == 2
-                || p.PlayerPawn.TeamNum == 3))
+                && (p.Controller?.TeamNum == 2
+                || p.Controller?.TeamNum == 3))
                 .ToList()!;
     }
 
@@ -202,7 +251,7 @@ public sealed partial class MixScrims
         var result = new List<IPlayer>();
         foreach (var player in players)
         {
-            if (player.PlayerPawn != null && player.PlayerPawn.TeamNum == teamNum)
+            if (player.Controller?.TeamNum == teamNum)
                 result.Add(player);
         }
         return result;

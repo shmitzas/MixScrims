@@ -2,6 +2,7 @@
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
+using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.SchemaDefinitions;
 using MixScrims.Contract;
@@ -19,6 +20,26 @@ public partial class MixScrims
         var matchState = mixScrimsService.GetCurrentMatchState();
         if (matchState != MatchState.Match)
             return HookResult.Continue;
+
+        // Fire MatchEnded synchronously here rather than inside the 10s delayed callback:
+        // scores are still readable, and IMixScrims consumers get the transition signal
+        // before the plugin starts tearing state down.
+        try
+        {
+            var md = Core.Game.MatchData;
+            int ctScore = md.CTScoreTotal;
+            int tScore = md.TerroristScoreTotal;
+            Team winner;
+            if (ctScore > tScore) winner = Team.CT;
+            else if (tScore > ctScore) winner = Team.T;
+            else winner = Team.None;
+            mixScrimsService.RaiseMatchEnded(winner, ctScore, tScore);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "HandleMatchEnd: failed to read MatchData for MatchEnded event; firing with zero scores.");
+            mixScrimsService.RaiseMatchEnded(Team.None, 0, 0);
+        }
 
         var token = Core.Scheduler.DelayBySeconds(10, () =>
         {
@@ -115,7 +136,19 @@ public partial class MixScrims
         RelaxEngineTeamLimits("RoundStart");
 
         if (matchState != MatchState.Match)
+        {
+            // knife_round.cfg pins mp_maxmoney 0 but no longer runs mp_restartgame, so
+            // nothing zeroes the accounts players carried out of the pick phase.
+            if (matchState == MatchState.KnifeRound)
+                SetMoneyForPlayers(playingCtPlayers.Concat(playingTPlayers), 0);
             return HookResult.Continue;
+        }
+
+        if (pendingMatchStartReset)
+        {
+            pendingMatchStartReset = false;
+            ResetMatchStartState();
+        }
 
         var resyncToken = Core.Scheduler.DelayBySeconds(1f, () =>
         {
@@ -207,5 +240,129 @@ public partial class MixScrims
             // exception from this defense-in-depth helper crash the plugin's event flow.
             logger.LogError(ex, "RelaxEngineTeamLimits[{Site}]: failed to override engine team limits (exception swallowed)", callSite);
         }
+    }
+
+    /// <summary>
+    /// Drives a round transition through <c>CCSGameRules::TerminateRound</c> instead of
+    /// <c>mp_restartgame</c>. Both reach <c>RestartRound()</c>, but only <c>mp_restartgame</c>
+    /// takes its complete-reset branch, which is the confirmed segfault site on the 3rd match
+    /// of a server process. Match-start callers must pair this with
+    /// <see cref="ResetMatchStartState"/> — TerminateRound does NOT zero scores, the round
+    /// counter, or player money the way <c>mp_restartgame</c> did.
+    /// </summary>
+    /// <remarks>
+    /// Safe from <c>Match</c>, <c>PickingTeam</c> and <c>KnifeRound</c>. The knife round has to
+    /// arm <see cref="pendingKnifeRoundStart"/> first — the <c>round_end</c> this fires would
+    /// otherwise land in <c>HandleRoundEndOnKnifeRound</c> and be read as the knife round
+    /// having been won. Cannot be used from <c>Warmup</c>: <c>TerminateRound</c> is a no-op
+    /// while <c>WarmupPeriod</c> is set, so warmup resets through
+    /// <c>mp_warmup_start</c> + <see cref="ResetWarmupState"/> instead.
+    /// </remarks>
+    /// <returns>
+    /// <c>true</c> when <c>TerminateRound</c> was dispatched. Callers that lifted a pause in
+    /// anticipation of the restart must re-apply it on <c>false</c> — no restart means no
+    /// <c>round_prestart</c>, and the prestart hook is what makes a phase pause stick.
+    /// </returns>
+    internal bool RestartRoundManually(string callSite, RoundEndReason reason, float delay)
+    {
+        try
+        {
+            CCSGameRules? gameRules = Core.EntitySystem.GetGameRules();
+            if (gameRules is null || !gameRules.IsValid)
+            {
+                logger.LogWarning("RestartRoundManually[{Site}]: game rules invalid - skipping restart.", callSite);
+                return false;
+            }
+
+            // TerminateRound is a no-op during warmup, so a stuck warmup would silently
+            // swallow the match start rather than surfacing here.
+            if (gameRules.WarmupPeriod)
+            {
+                logger.LogWarning("RestartRoundManually[{Site}]: still in warmup - skipping restart.", callSite);
+                return false;
+            }
+
+            gameRules.TerminateRound(reason, delay);
+            logger.LogInformation("RestartRoundManually[{Site}]: TerminateRound({Reason}, delay={Delay:F2}s) queued.", callSite, reason, delay);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "RestartRoundManually[{Site}]: exception during TerminateRound dispatch", callSite);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Restores the state that <c>mp_restartgame</c>'s complete-reset branch used to hand us:
+    /// 0-0 scores, round counter at zero, and every playing player back to
+    /// <c>mp_startmoney</c>. Run once from <see cref="HandleRoundStart"/> after the match-start
+    /// transition lands, so it overwrites anything the round transition itself tallied.
+    /// </summary>
+    internal void ResetMatchStartState()
+        => ResetScoreboardAndMoney("ResetMatchStartState",
+                                   playingCtPlayers.Concat(playingTPlayers),
+                                   Core.ConVar.Find<int>("mp_startmoney")?.Value ?? 800);
+
+    /// <summary>
+    /// Warmup twin of <see cref="ResetMatchStartState"/>. warmup.cfg no longer ends with
+    /// <c>mp_restartgame 1</c>, and <c>TerminateRound</c> is a no-op during warmup, so the
+    /// reset is done directly. Covers every connected player because warmup has no roster.
+    /// Matters most on the surrender path, which reaches warmup without a changelevel.
+    /// </summary>
+    internal void ResetWarmupState()
+        => ResetScoreboardAndMoney("ResetWarmupState",
+                                   GetPlayers(),
+                                   Core.ConVar.Find<int>("mp_startmoney")?.Value ?? 0);
+
+    private void ResetScoreboardAndMoney(string callSite, IEnumerable<IPlayer> players, int money)
+    {
+        try
+        {
+            // AddCTScore / AddTerroristScore are the only APIs that reach the native CCSMatch
+            // buffer; bare CCSTeam writes update the scoreboard but leave CCSMatch stale, which
+            // is what every other plugin (MapChooser, ServerReporter) actually reads. There is
+            // no SetScore, hence the negative delta. AddCTWins / AddTerroristWins are
+            // deliberately avoided - they also bump ActualRoundsPlayed.
+            var md = Core.Game.MatchData;
+            int ctScore = md.CTScoreTotal;
+            int tScore = md.TerroristScoreTotal;
+            if (ctScore != 0) Core.Game.AddCTScore(-ctScore);
+            if (tScore != 0) Core.Game.AddTerroristScore(-tScore);
+
+            // Separate counter from the CCSMatch buckets above; this is the one the engine
+            // consults for the mp_maxrounds match-end check.
+            CCSGameRules? gameRules = Core.EntitySystem.GetGameRules();
+            if (gameRules is not null && gameRules.IsValid)
+            {
+                gameRules.TotalRoundsPlayed = 0;
+                gameRules.TotalRoundsPlayedUpdated();
+            }
+
+            int reset = SetMoneyForPlayers(players, money);
+
+            logger.LogInformation("{Site}: scores {Ct}:{T} -> 0:0, rounds -> 0, {Count} players set to ${Money}.",
+                callSite, ctScore, tScore, reset, money);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "{Site}: failed to reset match state", callSite);
+        }
+    }
+
+    /// <summary>Returns the number of players whose account was written.</summary>
+    internal int SetMoneyForPlayers(IEnumerable<IPlayer> players, int amount)
+    {
+        int reset = 0;
+        foreach (var player in players)
+        {
+            if (!IsPlayerValid(player)) continue;
+            var money = player.Controller?.InGameMoneyServices;
+            if (money is null) continue;
+            money.Account = amount;
+            money.AccountUpdated();
+            reset++;
+        }
+        return reset;
     }
 }

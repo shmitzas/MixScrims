@@ -26,8 +26,17 @@ public partial class MixScrims
     internal CancellationTokenSource? timeoutVoteTimer = null;
     internal bool isTimeoutVoteInProgress = false;
     internal Team timeoutVoteTeam = Team.None;
+    // Who has already voted in the current timeout vote. The built-in menu closes after a
+    // click so this never fires there; it exists because IMixScrims.CastTimeoutVote lets a
+    // consumer call in repeatedly. Mirrors voteKickVotersCt/T.
+    internal HashSet<ulong> timeoutVoters = new();
 
     internal bool isFreezeTime = false;
+
+    // Snapshot fields for IMixScrims consumers (v2.0.0+). Set by StartTimeout /
+    // BroadcastRemainingTimeoutTime; cleared by EndTimeout.
+    internal Team? activeTimeoutTeam = null;
+    internal int activeTimeoutRemainingSeconds = 0;
 
     /// <summary>
     /// Starts a timeout for the specified team
@@ -52,7 +61,13 @@ public partial class MixScrims
             return;
         }
 
+        // The request is being served now, so it is no longer pending. Without this
+        // the next round_prestart still sees the latch and queues a second timeout.
+        timeoutPending = TimeoutPending.None;
+
         isTimeoutActive = true;
+        activeTimeoutTeam = team;
+        activeTimeoutRemainingSeconds = cfg.TimeoutDurationSeconds;
         mixScrimsService.SetMatchState(MatchState.Timeout);
         PauseMatch();
 
@@ -69,6 +84,7 @@ public partial class MixScrims
             PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.timeout.t"]);
             PrintMessageToTeam(Team.T, Core.Localizer["command.timeout.remaining_timeouts", timeoutCountT, cfg.Timeouts]);
         }
+        mixScrimsService.RaiseTimeoutStarted(team, cfg.TimeoutDurationSeconds);
         BroadcastRemainingTimeoutTime(team);
         var endTimeoutToken = Core.Scheduler.DelayBySeconds(cfg.TimeoutDurationSeconds, EndTimeout);
         Core.Scheduler.StopOnMapChange(endTimeoutToken);
@@ -85,9 +101,17 @@ public partial class MixScrims
                 isTimeoutActive, timeoutPending, timeoutQueue.Count, isFreezeTime);
         }
 
+        // Capture the outgoing team before clearing so TimeoutEnded gets fired with it.
+        var endedTeam = activeTimeoutTeam;
+
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.timeout.ended"]);
         isTimeoutActive = false;
+        activeTimeoutTeam = null;
+        activeTimeoutRemainingSeconds = 0;
         timeoutPending = TimeoutPending.None;
+
+        if (endedTeam != null)
+            mixScrimsService.RaiseTimeoutEnded(endedTeam.Value);
 
         if (cfg.DetailedLogging)
         {
@@ -171,6 +195,18 @@ public partial class MixScrims
         timeoutVoteTeam = team;
         timeoutVoteTimer?.Cancel();
         timeoutVoteTimer = null;
+        // Seed with the caller so their implicit YES can't be cast a second time.
+        timeoutVoters.Clear();
+        { ulong seedSid = SafeSteamId(caller); if (seedSid != 0) timeoutVoters.Add(seedSid); }
+
+        mixScrimsService.RaiseTimeoutVoteStarted(team);
+        // Fire the caller's implicit YES vote through the same event surface so consumers
+        // don't have to special-case a "vote started with N=1 caller yes" seed.
+        {
+            ulong callerSid; try { callerSid = caller.SteamID; } catch { callerSid = 0; }
+            if (callerSid != 0)
+                mixScrimsService.RaiseTimeoutVoteCast(callerSid, true, team);
+        }
 
         var players = GetPlayersInTeam(team);
         if (players.Count == 0)
@@ -259,7 +295,8 @@ public partial class MixScrims
 
             if (IsPlayerValid(player))
             {
-                Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                if (!suppressBuiltInMenus)
+                    Core.MenusAPI.OpenMenuForPlayer(player, menu);
                 menuOpenCount++;
             }
         }
@@ -270,7 +307,10 @@ public partial class MixScrims
                 menuOpenCount, botCount, timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes);
         }
 
-        PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes]);
+        PrintMessageToTeam(team, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, TimeoutRequiredVotes()]);
+
+        // Bots auto-vote yes, so the vote can already be settled before it opens.
+        if (TryResolveTimeoutVoteEarly()) return;
 
         timeoutVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => TimeoutVoteResult(team));
         Core.Scheduler.StopOnMapChange(timeoutVoteTimer);
@@ -282,6 +322,36 @@ public partial class MixScrims
     }
 
     /// <summary>
+    /// Majority of the whole team. The caller's implicit yes is seeded into the yes
+    /// count but excluded from the eligible count, so the team is eligible + 1.
+    /// </summary>
+    internal int TimeoutRequiredVotes() => (timeoutTotalEligibleVotes + 1) / 2 + 1;
+
+    /// <summary>
+    /// Resolves the vote the moment the outcome is settled, so players who never
+    /// click can't hold the team for the rest of the timer.
+    /// </summary>
+    internal bool TryResolveTimeoutVoteEarly()
+    {
+        if (!isTimeoutVoteInProgress) return false;
+
+        var required = TimeoutRequiredVotes();
+        // Every voter who hasn't answered could still say yes; only no votes cap it.
+        var maxReachableYes = timeoutTotalEligibleVotes + 1 - timeoutVoteNoCount;
+        if (timeoutVoteYesCount < required && maxReachableYes >= required) return false;
+
+        if (cfg.DetailedLogging)
+        {
+            logger.LogInformation("TryResolveTimeoutVoteEarly: settled at {Yes} yes / {No} no (required {Required}, max reachable {Max})",
+                timeoutVoteYesCount, timeoutVoteNoCount, required, maxReachableYes);
+        }
+
+        timeoutVoteTimer?.Cancel();
+        TimeoutVoteResult(timeoutVoteTeam);
+        return true;
+    }
+
+    /// <summary>
     /// Handles a player's vote in a timeout voting process.
     /// </summary>
     internal void HandleTimeoutVote(IPlayer player, string choice)
@@ -289,6 +359,13 @@ public partial class MixScrims
         if (!IsPlayerValid(player))
         {
             logger.LogWarning("HandleTimeoutVote: ignoring vote from invalid/disconnected player {Slot}.", player?.Slot);
+            return;
+        }
+
+        var voterSteamId = SafeSteamId(player);
+        if (voterSteamId != 0 && !timeoutVoters.Add(voterSteamId))
+        {
+            logger.LogWarning("HandleTimeoutVote: {Name} already voted, ignoring duplicate.", player.Name);
             return;
         }
 
@@ -319,25 +396,22 @@ public partial class MixScrims
             timeoutVoteNoCount++;
         }
 
+        {
+            ulong voterSid; try { voterSid = player.SteamID; } catch { voterSid = 0; }
+            var voteYes = string.Equals(choice, "Yes", StringComparison.OrdinalIgnoreCase);
+            if (voterSid != 0)
+                mixScrimsService.RaiseTimeoutVoteCast(voterSid, voteYes, timeoutVoteTeam);
+        }
+
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("HandleTimeoutVote: After vote - {Yes} yes, {No} no out of {Total}. Total voted: {TotalVoted}",
                 timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes, timeoutVoteYesCount + timeoutVoteNoCount);
         }
 
-        PrintMessageToTeam(timeoutVoteTeam, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes]);
+        PrintMessageToTeam(timeoutVoteTeam, Core.Localizer["announcement.timeout.vote.progress", timeoutVoteYesCount, timeoutVoteNoCount, TimeoutRequiredVotes()]);
 
-        // Check if all eligible players have voted
-        if (timeoutVoteYesCount + timeoutVoteNoCount >= timeoutTotalEligibleVotes)
-        {
-            if (cfg.DetailedLogging)
-            {
-                logger.LogInformation("HandleTimeoutVote: All eligible votes received ({Voted} >= {Total}), cancelling timer and processing result",
-                    timeoutVoteYesCount + timeoutVoteNoCount, timeoutTotalEligibleVotes);
-            }
-            timeoutVoteTimer?.Cancel();
-            TimeoutVoteResult(timeoutVoteTeam);
-        }
+        TryResolveTimeoutVoteEarly();
 
         CloseMenuForPlayer(player);
     }
@@ -365,7 +439,7 @@ public partial class MixScrims
         }
 
         isTimeoutVoteInProgress = false;
-        int requiredVotes = timeoutTotalEligibleVotes;
+        int requiredVotes = TimeoutRequiredVotes();
 
         var players = GetPlayersInTeam(team);
         foreach (var player in players)
@@ -389,6 +463,8 @@ public partial class MixScrims
             logger.LogInformation("TimeoutVoteResult: Vote {Result} for team {Team}. {Yes} >= {Required}? {Passed}",
                 votePassed ? "PASSED" : "FAILED", team, timeoutVoteYesCount, requiredVotes, votePassed);
         }
+
+        mixScrimsService.RaiseTimeoutVoteResult(team, votePassed);
 
         if (team == Team.CT)
         {
@@ -448,6 +524,7 @@ public partial class MixScrims
     internal void BroadcastRemainingTimeoutTime(Team team)
     {
         int remainingSeconds = cfg.TimeoutDurationSeconds;
+        activeTimeoutRemainingSeconds = remainingSeconds;
         if (cfg.DetailedLogging)
         {
             logger.LogInformation("BroadcastRemainingTimeoutTime: Broadcasting CenterHTML for remaining timeout time: {Time}, team: {Team}", remainingSeconds, team);
@@ -456,7 +533,16 @@ public partial class MixScrims
         var locKey = team == Team.CT ? "info.center.timeout_remaining.ct" : "info.center.timeout_remaining.t";
         var timer = Core.Scheduler.RepeatBySeconds(1, () =>
         {
-            Core.PlayerManager.SendCenterHTML(Core.Localizer[locKey, remainingSeconds], 1000);
+            // Fire TimeoutTick every second WHILE the timeout is still active. Guard against
+            // stray ticks after EndTimeout has cleared state (timer may fire once more before
+            // the CancelAfter kicks in).
+            if (mixScrimsService.GetCurrentMatchState() == MatchState.Timeout && isTimeoutActive)
+            {
+                activeTimeoutRemainingSeconds = remainingSeconds;
+                mixScrimsService.RaiseTimeoutTick(remainingSeconds);
+            }
+            if (!suppressBuiltInCenterHtml)
+                Core.PlayerManager.SendCenterHTML(Core.Localizer[locKey, remainingSeconds], 1000);
             remainingSeconds--;
         });
         timer.CancelAfter(cfg.TimeoutDurationSeconds * 1000);

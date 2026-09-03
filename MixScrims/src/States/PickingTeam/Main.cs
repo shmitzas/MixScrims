@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
 using SwiftlyS2.Core.Menus.OptionsBase;
+using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using System.Numerics;
 
@@ -12,6 +13,10 @@ public partial class MixScrims
     internal List<IPlayer> pickedTPlayers = [];
     internal IPlayer? captainCt { get; set; }
     internal IPlayer? captainT { get; set; }
+    // Snapshot fields for IMixScrims consumers (v2.0.0+). Reset in StartTeamPickingPhase
+    // and cleared when the phase ends or the plugin resets.
+    internal Team? activePickingTeam = null;
+    internal int currentPickIndex = 0;
 
     /// <summary>
     /// Initiates the team-picking phase of the match, assigning captains to teams and prompting the first captain to
@@ -112,10 +117,68 @@ public partial class MixScrims
 
         MovePlayersToDesignatedTeamsPrePick();
 
+        // Primed before the restart below so CCSGameRules::Think never observes a stale
+        // limit while the players just moved onto their picked sides are reconciled.
+        // Symmetric to StartMatch / StartKnifeRound.
+        RelaxEngineTeamLimits("StartTeamPickingPhase");
+
+        // teampick.cfg no longer ends with `mp_restartgame 1` - the plugin drives the round
+        // transition itself, same as StartMatch (see repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`). The pause is lifted first so the
+        // queued restart isn't held by it, and HandleRoundPrestartPreKnifeRound re-applies
+        // the pause on the round that lands.
+        //   T+1.5s  UnpauseMatch  (also lets teampick.cfg's mp_warmup_end settle first -
+        //                          TerminateRound is a no-op while WarmupPeriod is set)
+        //   T+2.0s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+3.0s
+        // Both callbacks bail if the phase already ended (bot captains auto-pick, so the
+        // whole ladder can complete and hand off to StartKnifeRound within a tick).
+        // If the restart does not dispatch, the pause is re-applied immediately - otherwise
+        // the unpause above is never compensated and the pick phase runs live.
+        var pickUnpauseToken = Core.Scheduler.DelayBySeconds(1.5f, () =>
+        {
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam)
+                return;
+            UnpauseMatch();
+        });
+        Core.Scheduler.StopOnMapChange(pickUnpauseToken);
+
+        var pickRestartToken = Core.Scheduler.DelayBySeconds(2f, () =>
+        {
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam)
+            {
+                logger.LogWarning("StartTeamPickingPhase: state changed before TerminateRound (now {State}); skipping manual restart.", mixScrimsService.GetCurrentMatchState());
+                return;
+            }
+            if (!RestartRoundManually("StartTeamPickingPhase", RoundEndReason.GameCommencing, 1.0f))
+            {
+                logger.LogWarning("StartTeamPickingPhase: restart did not dispatch; re-pausing so the pick phase stays frozen.");
+                PauseMatch();
+            }
+        });
+        Core.Scheduler.StopOnMapChange(pickRestartToken);
+
         SetTeamName(Team.CT, captainCt == null ? null : captainCt.Controller.PlayerName);
         SetTeamName(Team.T, captainT == null ? null :  captainT.Controller.PlayerName);
 
+        // Reset per-phase snapshot fields. currentPickIndex counts captains' implicit
+        // self-picks as 1 and 2 — increment now. Raised for bot captains too so the
+        // pick-index sequence a consumer observes has no gaps.
+        currentPickIndex = 0;
+        if (captainCt != null && IsPlayerValid(captainCt))
+        {
+            currentPickIndex++;
+            mixScrimsService.RaisePlayerPickedForTeam(Team.CT, SafeSteamId(captainCt), currentPickIndex);
+        }
+        if (captainT != null && IsPlayerValid(captainT))
+        {
+            currentPickIndex++;
+            mixScrimsService.RaisePlayerPickedForTeam(Team.T, SafeSteamId(captainT), currentPickIndex);
+        }
+
         int teamStarting = Random.Shared.Next(2, 4);
+        var startingTeam = teamStarting == 3 ? Team.CT : Team.T;
+        activePickingTeam = startingTeam;
+        mixScrimsService.RaiseTeamPickingStarted(startingTeam);
         if (teamStarting == 3)
         {
             PromptCaptainToPickPlayer(captainCt, Team.CT);
@@ -228,16 +291,26 @@ public partial class MixScrims
             return;
         }
 
+        // Track whose turn to pick is active so IMixScrims.GetActivePickingTeam reflects it.
+        activePickingTeam = team;
+
         var players = GetPlayers();
-        // Cache the captain SteamID once and use SafeSteamId on picked roster entries; the
-        // picked lists can hold disposed IPlayer refs that would throw on a raw .SteamID read.
-        var captainId = captain.SteamID;
+        // Slot-keyed, NOT SteamID-keyed: every bot reports SteamID 0, so a SteamID compare
+        // wipes the whole bot pool the moment a captain is a bot or a bot lands in either
+        // picked list — which empties the pool in a TestMode lobby and skips the phase
+        // entirely. Same filter as MixScrimsService.GetUnpickedPlayerSlots, so the built-in
+        // menu and consumer-built menus agree on who is pickable.
+        var captainSlot = SafePlayerId(captain);
+        var pickedSlots = new HashSet<int>();
+        foreach (var picked in pickedCtPlayers.Concat(pickedTPlayers))
+        {
+            var slot = SafePlayerId(picked);
+            if (slot >= 0) pickedSlots.Add(slot);
+        }
         players.RemoveAll(p =>
         {
-            var pid = p.SteamID;
-            return pickedCtPlayers.Any(pp => SafeSteamId(pp) == pid)
-                || pickedTPlayers.Any(pp => SafeSteamId(pp) == pid)
-                || pid == captainId;
+            var slot = SafePlayerId(p);
+            return slot < 0 || slot == captainSlot || pickedSlots.Contains(slot);
         });
 
         if (players.Count == 0)
@@ -263,6 +336,8 @@ public partial class MixScrims
             var randomIndex = Random.Shared.Next(players.Count);
             var selectedPlayer = players[randomIndex];
             var selectedPlayerName = selectedPlayer.Name;
+            logger.LogInformation("PromptCaptainToPickPlayer: {Team} captain {CaptainName} is a bot; auto-picking {PlayerName}.",
+                team == Team.CT ? "CT" : "T", captain.Name, selectedPlayerName);
             if (team == Team.CT)
             {
                 AssignPickedPlayerToTeamCt(captain, selectedPlayerName);
@@ -308,7 +383,7 @@ public partial class MixScrims
         }
 
         var menu = builder.Build();
-        if (IsPlayerValid(captain))
+        if (IsPlayerValid(captain) && !suppressBuiltInMenus)
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("PromptCaptainToPickPlayer: Displaying picking menu to {CaptainName} for team {Team}", captain.Name, team == Team.CT ? "CT" : "T");
@@ -349,6 +424,9 @@ public partial class MixScrims
     internal void PickCtCaptain(IPlayer? player)
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
+        // Slot, not SteamID: bots all share SteamID 0. -1 means "no prior captain",
+        // which always announces.
+        var previousCtSlot = captainCt != null ? SafePlayerId(captainCt) : -1;
         if (captainCt != null)
         {
             // Cache the outgoing captain's SteamID once and use SafeSteamId on roster entries;
@@ -377,12 +455,12 @@ public partial class MixScrims
             RemoveCaptainClanTagFromPlayer(captainCt);
         }
 
-        captainCt = player;
+        AssignCaptain(Team.CT, player);
 
         if (captainCt == null || !IsPlayerValid(captainCt))
         {
             logger.LogError("PickCtCaptain: player is invalid, picking random captain for CT team.");
-            captainCt = PickRandomCaptain(Team.CT);
+            AssignCaptain(Team.CT, PickRandomCaptain(Team.CT));
         }
 
         if (captainCt != null)
@@ -402,7 +480,10 @@ public partial class MixScrims
 
             if (cfg.DetailedLogging)
                 logger.LogInformation("PickCtCaptain: picked {PlayerName}", captainCt.Name);
-            PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.captain.ct", captainCt.Name]);
+            // Idempotent re-pick (repeated confirm click, EnsureCaptainsAlive re-run):
+            // the roster churn above is harmless but the announcement would be a duplicate.
+            if (SafePlayerId(captainCt) != previousCtSlot)
+                PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.captain.ct", captainCt.Name]);
         }
         else
         {
@@ -416,6 +497,9 @@ public partial class MixScrims
     internal void PickTCaptain(IPlayer? player)
     {
         var matchState = mixScrimsService.GetCurrentMatchState();
+        // Slot, not SteamID: bots all share SteamID 0. -1 means "no prior captain",
+        // which always announces.
+        var previousTSlot = captainT != null ? SafePlayerId(captainT) : -1;
         if (captainT != null)
         {
             // Cache outgoing captain's SteamID once and use SafeSteamId on roster entries; same
@@ -441,12 +525,12 @@ public partial class MixScrims
             RemoveCaptainClanTagFromPlayer(captainT);
         }
 
-        captainT = player;
+        AssignCaptain(Team.T, player);
 
         if (captainT == null || !IsPlayerValid(captainT))
         {
             logger.LogError("PickTCaptain: player is invalid, picking random captain for T team.");
-            captainT = PickRandomCaptain(Team.T);
+            AssignCaptain(Team.T, PickRandomCaptain(Team.T));
         }
 
         if (captainT != null)
@@ -466,7 +550,10 @@ public partial class MixScrims
 
             if (cfg.DetailedLogging)
                 logger.LogInformation("PickTCaptain: picked {PlayerName}", captainT.Name);
-            PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.captain.t", captainT.Name]);
+            // Idempotent re-pick (repeated confirm click, EnsureCaptainsAlive re-run):
+            // the roster churn above is harmless but the announcement would be a duplicate.
+            if (SafePlayerId(captainT) != previousTSlot)
+                PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.picked.captain.t", captainT.Name]);
         }
         else
         {
@@ -480,12 +567,25 @@ public partial class MixScrims
     /// </summary>
     internal IPlayer? PickRandomCaptain(Team? team = null)
     {
-        List<IPlayer> players = new();
+        // Exclude the current captains from every draw. Cache each captain's SteamID once
+        // and use SafeSteamId on candidate predicates to stay safe against disposed refs
+        // (captainCt/captainT can be stale from a prior round/map).
+        var excludeCtId = captainCt != null ? SafeSteamId(captainCt) : 0;
+        var excludeTId = captainT != null ? SafeSteamId(captainT) : 0;
 
-        if (team != null)
+        bool IsDrawable(IPlayer p)
         {
-            players = GetPlayersInTeam(team.Value);
+            if (!IsPlayerValid(p)) return false;
+            var sid = SafeSteamId(p);
+            return (excludeCtId == 0 || sid != excludeCtId)
+                && (excludeTId == 0 || sid != excludeTId);
         }
+
+        var everyone = GetPlayers().Where(IsDrawable).ToList();
+
+        var players = team != null
+            ? GetPlayersInTeam(team.Value).Where(IsDrawable).ToList()
+            : new List<IPlayer>();
 
         // Map-vote flow lands every player in Spectator after the new map loads, so
         // GetPlayersInTeam(CT/T) is empty during the MapChosen ready burst. Fall back to
@@ -493,35 +593,24 @@ public partial class MixScrims
         // (which would abort StartTeamPickingPhase and reset back to Warmup).
         if (players.Count == 0)
         {
-            players = GetPlayers().Where(IsPlayerValid).ToList();
+            players = everyone;
         }
 
-        // Exclude the current captains from the draw. Cache each captain's SteamID once
-        // and use SafeSteamId on `players` predicates to stay safe against disposed refs
-        // (captainCt/captainT can be stale from a prior round/map).
-        if (captainCt != null)
-        {
-            var excludeCtId = SafeSteamId(captainCt);
-            if (excludeCtId != 0)
-                players.RemoveAll(p => SafeSteamId(p) == excludeCtId);
-        }
-        if (captainT != null)
-        {
-            var excludeTId = SafeSteamId(captainT);
-            if (excludeTId != 0)
-                players.RemoveAll(p => SafeSteamId(p) == excludeTId);
-        }
+        // Prefer humans, and widen past the team pool to find one. warmup.cfg sets
+        // sv_human_autojoin_team 1 (Spectators), so in a TestMode staging lobby the humans
+        // sit in spec while bots occupy CT/T - a team-scoped draw is then bot-only even
+        // though a human is connected, and handing BOTH captaincies to bots makes the pick
+        // ladder auto-resolve through the IsBot branch without ever prompting anyone.
+        var humans = players.Where(p => !IsBot(p)).ToList();
+        if (humans.Count == 0)
+            humans = everyone.Where(p => !IsBot(p)).ToList();
 
-        if (players.Count == 0)
+        var pool = humans.Count > 0 ? humans : players;
+        if (pool.Count == 0)
         {
             logger.LogWarning("PickRandomCaptain: No players available to pick a captain.");
             return null;
         }
-
-        // Prefer humans; only draw a bot when the pool is bot-only (TestMode staging lobby
-        // where the lone human has already been drawn as the opposite-team captain).
-        var humans = players.Where(p => !IsBot(p)).ToList();
-        var pool = humans.Count > 0 ? humans : players;
 
         var captainIndex = Random.Shared.Next(pool.Count);
         return pool[captainIndex];
@@ -544,6 +633,12 @@ public partial class MixScrims
         }
 
         pickedCtPlayers.Add(player);
+        currentPickIndex++;
+        // Raised for bots too (SteamID 0). The roster is already updated above, so a
+        // consumer re-reading GetUnpickedPlayerSlots() from this event sees the pool
+        // without the pick. Suppressing it for bots left consumer-built pick menus
+        // showing already-picked players for the whole phase.
+        mixScrimsService.RaisePlayerPickedForTeam(Team.CT, SafeSteamId(player), currentPickIndex);
 
         if (IsBot(player))
             player.SwitchTeamAsync(Team.CT);
@@ -556,6 +651,7 @@ public partial class MixScrims
 
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
         {
+            activePickingTeam = null;
             Core.Scheduler.NextTick(() => StartKnifeRound());
             return;
         }
@@ -580,6 +676,9 @@ public partial class MixScrims
         }
 
         pickedTPlayers.Add(player);
+        currentPickIndex++;
+        // Raised for bots too — see the CT twin above.
+        mixScrimsService.RaisePlayerPickedForTeam(Team.T, SafeSteamId(player), currentPickIndex);
 
         if (IsBot(player))
             player.SwitchTeamAsync(Team.T);
@@ -598,6 +697,7 @@ public partial class MixScrims
 
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
         {
+            activePickingTeam = null;
             Core.Scheduler.NextTick(() => StartKnifeRound());
             return;
         }
@@ -641,7 +741,9 @@ public partial class MixScrims
         }
 
         var pickedCtPlayerIds = new HashSet<int>(pickedCtPlayers.Select(p => p.PlayerID));
-        foreach (var player in GetPlayingPlayers())
+        // GetPlayers(), not GetPlayingPlayers(): a captain drawn while sitting in Spectator
+        // (the TestMode staging default) is on neither CT nor T yet and would never be moved.
+        foreach (var player in GetPlayers())
         {
             if (!pickedCtPlayerIds.Contains(player.PlayerID))
                 continue;
@@ -655,7 +757,7 @@ public partial class MixScrims
         }
 
         var pickedTPlayerIds = new HashSet<int>(pickedTPlayers.Select(p => p.PlayerID));
-        foreach (var player in GetPlayingPlayers())
+        foreach (var player in GetPlayers())
         {
             if (!pickedTPlayerIds.Contains(player.PlayerID))
                 continue;

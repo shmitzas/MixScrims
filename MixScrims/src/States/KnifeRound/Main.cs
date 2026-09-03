@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Menus;
 using SwiftlyS2.Core.Menus.OptionsBase;
@@ -14,12 +15,30 @@ public partial class MixScrims
     internal Dictionary<int, string> sideVotes { get; set; } = new();
     internal Team sideVoteWinnerTeam { get; set; } = Team.None;
 
+    // Set while StartKnifeRound's own TerminateRound is in flight so
+    // HandleRoundEndOnKnifeRound doesn't read it as "the knife round ended".
+    internal bool pendingKnifeRoundStart = false;
+
+    // Latched the moment a starting-side decision is committed for the current
+    // PickingStartingSide phase. Both SwitchStartingSides and StayStartingSides defer
+    // their work by 0.2s and neither leaves PickingStartingSide until StartMatch runs
+    // inside that callback, so every entry point (!stay / !switch, the built-in menu,
+    // ChooseStartingSide, the disconnect fallback, the DisableCaptains vote timer)
+    // still passes its own guard during that window. Without this a second choice
+    // re-runs the whole pipeline — and on Switch that swaps the teams straight back.
+    internal bool startingSideCommitted = false;
+
     /// <summary>
     /// Initiates the knife round phase of the match.
     /// </summary>
     internal void StartKnifeRound()
     {
         mixScrimsService.SetMatchState(MatchState.KnifeRound);
+        mixScrimsService.RaiseKnifeRoundStarted();
+        // Team picking is over — clear the per-phase snapshot fields so IMixScrims
+        // consumers reading GetActivePickingTeam / GetCurrentPickIndex don't see stale
+        // values during the knife round.
+        activePickingTeam = null;
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.knife_round"]);
 
         // Drop any stale (disposed) captain references that survived a reconnect/map change
@@ -76,16 +95,16 @@ public partial class MixScrims
 
         if (captainCt == null && playingCtPlayers.Count > 0)
         {
-            captainCt = playingCtPlayers[0];
+            AssignCaptain(Team.CT, playingCtPlayers[0]);
             if (cfg.DetailedLogging)
-                logger.LogInformation("StartKnifeRound: CT Captain not set, assigning {PlayerName} as CT Captain.", captainCt.Controller.PlayerName);
+                logger.LogInformation("StartKnifeRound: CT Captain not set, assigning {PlayerName} as CT Captain.", captainCt!.Controller.PlayerName);
         }
 
         if (captainT == null && playingTPlayers.Count > 0)
         {
-            captainT = playingTPlayers[0];
+            AssignCaptain(Team.T, playingTPlayers[0]);
             if (cfg.DetailedLogging)
-                logger.LogInformation("StartKnifeRound: T Captain not set, assigning {PlayerName} as T Captain.", captainT.Controller.PlayerName);
+                logger.LogInformation("StartKnifeRound: T Captain not set, assigning {PlayerName} as T Captain.", captainT!.Controller.PlayerName);
         }
 
         readyPlayers.Clear();
@@ -120,20 +139,74 @@ public partial class MixScrims
 
         UnpauseMatch();
 
-        // Defer the config exec (and the RelaxEngineTeamLimits that must land right after
-        // the cvars settle) to next tick, matching the StartMatch pattern. Running the exec
-        // synchronously on the same tick as SetMatchState + list rebuilds +
-        // RemoveReadyClanTagsFromAllPlayers + menu closes bundles all the plugin's
-        // heavy work with knife_round.cfg's mp_warmup_end + mp_restartgame 1 into a single
-        // game frame - the source of the ~1s visible freeze at knife round entry.
-        Core.Scheduler.NextTick(() =>
+        // Symmetric to StartMatch: prime CCSGameRules limits before the restart below.
+        // Defense in depth — the knife-round transition currently has zero pending team
+        // changes, and Stay/Switch crash evidence (see StartMatch comment + repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`) proved team-limit reconciliation
+        // is NOT the actual crash class. Kept for consistency with StartMatch and to
+        // survive any future refactor that adds team moves here.
+        RelaxEngineTeamLimits("StartKnifeRound");
+
+        // knife_round.cfg is cvars only now - the plugin drives the round transition, same
+        // as StartMatch and StartTeamPickingPhase (repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`). The 0.5s delay lets the preceding
+        // UnpauseMatch's mp_pause 0 command drain before the exec.
+        //   T+0.5s  exec knife_round.cfg (ends with mp_warmup_end)
+        //   T+1.0s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+2.0s
+        var kCfgToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
         {
-            if (Core.Engine is { } knifeEngine)
-                knifeEngine.ExecuteCommand("exec mixscrims/knife_round.cfg");
-            else
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.KnifeRound)
+            {
+                logger.LogWarning("StartKnifeRound: state changed before cfg exec (now {State}); skipping knife_round.cfg.", mixScrimsService.GetCurrentMatchState());
+                return;
+            }
+
+            if (Core.Engine is not { } knifeEngine)
+            {
                 logger.LogWarning("StartKnifeRound: Core.Engine unavailable; skipping knife_round.cfg.");
-            RelaxEngineTeamLimits("StartKnifeRound");
+                return;
+            }
+
+            try
+            {
+                var gameRules = Core.EntitySystem.GetGameRules();
+                if (gameRules is null || !gameRules.IsValid)
+                {
+                    logger.LogWarning("StartKnifeRound: game rules invalid before cfg exec; skipping knife_round.cfg.");
+                    return;
+                }
+
+                knifeEngine.ExecuteCommand("exec mixscrims/knife_round.cfg");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "StartKnifeRound: exception dispatching knife_round.cfg exec");
+                return;
+            }
+
+            // Deferred so the cfg's mp_warmup_end has landed - TerminateRound is a no-op
+            // while WarmupPeriod is set.
+            var kRestartToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
+            {
+                if (mixScrimsService.GetCurrentMatchState() != MatchState.KnifeRound)
+                {
+                    logger.LogWarning("StartKnifeRound: state changed before TerminateRound (now {State}); skipping manual restart.", mixScrimsService.GetCurrentMatchState());
+                    return;
+                }
+
+                // Armed before dispatch: TerminateRound fires round_end synchronously in
+                // some paths, and HandleRoundEndOnKnifeRound would read it as the knife
+                // round having been won.
+                pendingKnifeRoundStart = true;
+                if (!RestartRoundManually("StartKnifeRound", RoundEndReason.GameCommencing, 1.0f))
+                {
+                    pendingKnifeRoundStart = false;
+                    logger.LogWarning("StartKnifeRound: restart did not dispatch; knife round starts on the current round.");
+                }
+            });
+            Core.Scheduler.StopOnMapChange(kRestartToken);
         });
+        Core.Scheduler.StopOnMapChange(kCfgToken);
 
         if (cfg.KickPlayersNotInMatch)
         {
@@ -147,6 +220,8 @@ public partial class MixScrims
     internal void PromptWinnerTCaptainoChoseStartingSide(Team winnerTeam)
     {
         mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
+        startingSideCommitted = false;
+        mixScrimsService.RaiseKnifeRoundWon(winnerTeam);
 
         // Captains may hold stale/disposed IPlayer references after reconnects or map changes.
         // Re-validate (and re-pick if needed) before accessing controller properties below.
@@ -170,7 +245,8 @@ public partial class MixScrims
                 if (player != null && IsPlayerValid(player) && !IsBot(player))
                 {
                     var menu = BuildSidePickingMenu();
-                    Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                    if (!suppressBuiltInMenus)
+                        Core.MenusAPI.OpenMenuForPlayer(player, menu);
                 }
             }
 
@@ -196,6 +272,11 @@ public partial class MixScrims
             }
 
             winnerCaptain = captainCt;
+            {
+                ulong sid; try { sid = captainCt.SteamID; } catch { sid = 0; }
+                if (sid != 0)
+                    mixScrimsService.RaisePickingStartingSideStarted(sid);
+            }
 
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.winner.ct"]);
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.waiting_for_side_pick.ct", captainCt.Controller.PlayerName]);
@@ -208,7 +289,7 @@ public partial class MixScrims
             }
 
             var menu = BuildSidePickingMenu();
-            if (IsPlayerValid(captainCt))
+            if (IsPlayerValid(captainCt) && !suppressBuiltInMenus)
             {
                 Core.MenusAPI.OpenMenuForPlayer(captainCt, menu);
             }
@@ -225,6 +306,11 @@ public partial class MixScrims
             }
 
             winnerCaptain = captainT;
+            {
+                ulong sid; try { sid = captainT.SteamID; } catch { sid = 0; }
+                if (sid != 0)
+                    mixScrimsService.RaisePickingStartingSideStarted(sid);
+            }
 
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.winner.t"]);
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.waiting_for_side_pick.t", captainT.Controller.PlayerName]);
@@ -237,7 +323,7 @@ public partial class MixScrims
             }
 
             var menu = BuildSidePickingMenu();
-            if (IsPlayerValid(captainT))
+            if (IsPlayerValid(captainT) && !suppressBuiltInMenus)
             {
                 Core.MenusAPI.OpenMenuForPlayer(captainT, menu);
             }
@@ -361,94 +447,64 @@ public partial class MixScrims
     /// </summary>
     internal void SwitchStartingSides(IPlayer? captain)
     {
-        if (captain != null && captain.PlayerPawn == null)
-        {
-            logger.LogError("SwitchStartingSides: Captain PlayerPawn is null.");
-            return;
-        }
+        if (!TryCommitStartingSide(nameof(SwitchStartingSides))) return;
 
-        if (captain?.PlayerPawn?.TeamNum == 3)
-        {
-            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.ct", captain.Controller.PlayerName]);
-        }
-
-        if (captain?.PlayerPawn?.TeamNum == 2)
-        {
-            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.t", captain.Controller.PlayerName]);
-        }
-
-        if (cfg.DetailedLogging)
-            logger.LogInformation("SwitchStartingSides: Switching sides...");
-
-        var oldCtCaptain = captainCt;
-        var oldTCaptain = captainT;
-        var oldPlayingCtPlayers = playingCtPlayers.ToList();
-        var oldPlayingTPlayers = playingTPlayers.ToList();
-
-        playingCtPlayers = oldPlayingTPlayers;
-        playingTPlayers = oldPlayingCtPlayers;
-        captainCt = oldTCaptain;
-        captainT = oldCtCaptain;
-
+        // Whole body runs on the main game thread — native schema reads (captain.PlayerPawn, TeamNum, Controller) and StartMatch downstream are not safe on the menu Click dispatch thread.
         var switchSidesToken = Core.Scheduler.DelayBySeconds(0.2f, () =>
         {
-            Core.Scheduler.NextWorldUpdate(() => 
+            if (captain != null && captain.PlayerPawn == null)
             {
-                SetTeamName(Team.CT, IsPlayerValid(captainCt) ? captainCt!.Controller.PlayerName : null);
-                SetTeamName(Team.T, IsPlayerValid(captainT) ? captainT!.Controller.PlayerName : null);
+                logger.LogError("SwitchStartingSides: Captain PlayerPawn is null.");
+                return;
+            }
 
-                isMovingPlayersToTeams = true;
+            if (captain?.PlayerPawn?.TeamNum == 3)
+            {
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.ct", captain.Controller.PlayerName]);
+            }
 
-                foreach (var player in playingTPlayers)
-                {
-                    if (player != null && player.IsValid)
-                    {
-                        if (cfg.DetailedLogging)
-                                logger.LogInformation("SwitchStartingSides: Moving {PlayerName} to T", player.Controller.PlayerName);
-                        if (IsBot(player))
-                            player.SwitchTeamAsync(Team.T);
-                        else
-                        {
-                            try { player.ChangeTeamAsync(Team.T); }
-                            catch (Exception ex)
-                            {
-                                logger.LogWarning(ex, "SwitchStartingSides: Error changing team to T for {PlayerName}.", player.Controller.PlayerName);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if (cfg.DetailedLogging)
-                            logger.LogWarning("SwitchStartingSides: Encountered invalid player in playingTPlayers list.");
-                    }
-                }
+            if (captain?.PlayerPawn?.TeamNum == 2)
+            {
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.t", captain.Controller.PlayerName]);
+            }
 
-                foreach (var player in playingCtPlayers)
-                {
-                    if (player != null && player.IsValid)
-                    {
-                        if (cfg.DetailedLogging)
-                                logger.LogInformation("SwitchStartingSides: Moving {PlayerName} to CT", player.Controller.PlayerName);
-                        if (IsBot(player))
-                            player.SwitchTeamAsync(Team.CT);
-                        else
-                        {
-                            try { player.ChangeTeamAsync(Team.CT); }
-                            catch (Exception ex)
-                            {
-                                logger.LogWarning(ex, "SwitchStartingSides: Error changing team to CT for {PlayerName}.", player.Controller.PlayerName);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if (cfg.DetailedLogging)
-                            logger.LogWarning("SwitchStartingSides: Encountered invalid player in playingCtPlayers list.");
-                    }
-                }
-            });
+            if (cfg.DetailedLogging)
+                logger.LogInformation("SwitchStartingSides: Switching sides...");
 
-            Core.Scheduler.NextTick(() => isMovingPlayersToTeams = false);
+            var oldCtCaptain = captainCt;
+            var oldTCaptain = captainT;
+            var oldPlayingCtPlayers = playingCtPlayers.ToList();
+            var oldPlayingTPlayers = playingTPlayers.ToList();
+
+            playingCtPlayers = oldPlayingTPlayers;
+            playingTPlayers = oldPlayingCtPlayers;
+            // Fire captain events via AssignCaptain — the CT slot now holds the old T
+            // captain and vice versa. AssignCaptain emits CaptainRemoved then
+            // CaptainAssigned per slot.
+            AssignCaptain(Team.CT, oldTCaptain);
+            AssignCaptain(Team.T, oldCtCaptain);
+
+            // Team-name cvars only; the player moves themselves happen inside
+            // StartMatch → MovePlayersToDesignatedTeamsPreMatch below. The older code
+            // wrapped a second `ChangeTeamAsync` loop here inside NextWorldUpdate,
+            // which the engine no-op'd (log shows no paired `ChangeTeam() CTMDBG`),
+            // but the managed calls raced batch 1's still-in-flight pawn transitions
+            // and are the strongest remaining suspect for the 50/50 Switch-only
+            // crash (Stay path never fires this code, Stay never crashes). SetTeamName
+            // itself internally schedules NextTick for its cvar exec, so no wrapper is
+            // needed here.
+            // Fire StartingSideChosen with the WINNING team's post-swap side. For Switch,
+            // that's the opposite of the deciding captain's pre-swap side (captured before
+            // this delayed callback ran). captain?.PlayerPawn.TeamNum was 3 (CT) or 2 (T)
+            // pre-swap; the winning team ends up on the opposite side.
+            var preSwapTeam = captain?.PlayerPawn?.TeamNum;
+            if (preSwapTeam == 3)
+                mixScrimsService.RaiseStartingSideChosen(Team.T);
+            else if (preSwapTeam == 2)
+                mixScrimsService.RaiseStartingSideChosen(Team.CT);
+
+            SetTeamName(Team.CT, IsPlayerValid(captainCt) ? captainCt!.Controller.PlayerName : null);
+            SetTeamName(Team.T, IsPlayerValid(captainT) ? captainT!.Controller.PlayerName : null);
 
             StartMatch();
         });
@@ -460,16 +516,40 @@ public partial class MixScrims
     /// </summary>
     internal void StayStartingSides(IPlayer? captain)
     {
-        if (captain?.PlayerPawn?.TeamNum == 3)
+        if (!TryCommitStartingSide(nameof(StayStartingSides))) return;
+
+        if (IsPlayerValid(captain))
         {
-            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.ct", captain.Controller.PlayerName]);
-        }
-        else if (captain?.PlayerPawn?.TeamNum == 2)
-        {
-            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.t", captain.Controller.PlayerName]);
+            if (captain!.PlayerPawn?.TeamNum == 3)
+            {
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.ct", captain.Controller.PlayerName]);
+                mixScrimsService.RaiseStartingSideChosen(Team.CT);
+            }
+            else if (captain.PlayerPawn?.TeamNum == 2)
+            {
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.t", captain.Controller.PlayerName]);
+                mixScrimsService.RaiseStartingSideChosen(Team.T);
+            }
         }
 
-        StartMatch();
+        // Defer StartMatch so native schema reads inside it run on the main game thread (mirrors SwitchStartingSides).
+        var stayToken = Core.Scheduler.DelayBySeconds(0.2f, () => StartMatch());
+        Core.Scheduler.StopOnMapChange(stayToken);
+    }
+
+    /// <summary>
+    /// Single funnel for "the starting side is now decided". Returns false when a
+    /// decision was already committed for this phase.
+    /// </summary>
+    private bool TryCommitStartingSide(string callSite)
+    {
+        if (startingSideCommitted)
+        {
+            logger.LogWarning("{Site}: starting side already decided this phase; ignoring duplicate.", callSite);
+            return false;
+        }
+        startingSideCommitted = true;
+        return true;
     }
 
     /// <summary>

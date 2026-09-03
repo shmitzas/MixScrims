@@ -33,21 +33,28 @@ public partial class MixScrims
         // Strip captain tags before dropping the captain refs so any player carrying one
         // (from an aborted PickingTeam / KnifeRound flow) gets it cleared here as well.
         RemoveCaptainClanTagsFromAllPlayers();
-        captainCt = null;
-        captainT = null;
+        AssignCaptain(Team.CT, null);
+        AssignCaptain(Team.T, null);
         winnerCaptain = null;
         SetTeamName(Team.CT);
         SetTeamName(Team.T);
         pickedCtPlayers.Clear();
         pickedTPlayers.Clear();
+        activePickingTeam = null;
+        currentPickIndex = 0;
         votedMaps.Clear();
+        currentBallotDisplayNames.Clear();
+        mapVoteDeadline = null;
         sideVotes.Clear();
         sideVoteWinnerTeam = Team.None;
+        startingSideCommitted = false;
         timeoutCountCt = cfg.Timeouts;
         timeoutCountT = cfg.Timeouts;
         timeoutPending = TimeoutPending.None;
         timeoutQueue.Clear();
         isTimeoutActive = false;
+        activeTimeoutTeam = null;
+        activeTimeoutRemainingSeconds = 0;
         isTimeoutVoteInProgress = false;
         timeoutVoteTeam = Team.None;
         timeoutVoteTimer?.Cancel();

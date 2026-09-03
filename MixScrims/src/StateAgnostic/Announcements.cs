@@ -377,6 +377,8 @@ public partial class MixScrims
 
     internal void DisplayReadyAndNotReadyPlayersInCenterHtml(int displayLenght)
     {
+        if (suppressBuiltInCenterHtml) return;
+
         var playersToStart = GetNumberOfPlayersRequiredToStart();
         var readyMessage = Core.Localizer["info.center.ready_players_counter", GetEffectiveReadyCount(), playersToStart];
         var matchStartRequirements = Core.Localizer["info.center.match_start_requirements"];

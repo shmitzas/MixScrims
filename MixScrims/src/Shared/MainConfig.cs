@@ -17,6 +17,14 @@ public class MainConfig
     public int TimeoutDurationSeconds { get; set; } = 60;
     public int Timeouts { get; set; } = 3;
 
+    // Built-in presentation suppression (v2.0.0+). When true, MixScrims skips
+    // its own in-game UI so a consumer plugin can render the same information
+    // through a richer surface (CustomHUD, external dashboard, etc.). Runtime
+    // overrides are available via IMixScrims.SetBuiltInMenusSuppressed and
+    // SetBuiltInCenterHtmlSuppressed.
+    public bool SuppressBuiltInMenus { get; set; } = false;
+    public bool SuppressBuiltInCenterHtml { get; set; } = false;
+
     // Niche settings
     public bool PreventNotPickedPlayersFromJoiningOngoingMatch { get; set; } = false;
     public bool KickPlayersNotInMatch { get; set; } = false;

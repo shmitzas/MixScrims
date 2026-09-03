@@ -69,6 +69,24 @@ public partial class MixScrims
         else
             voteKickEligibleVotesT = eligibleCount;
 
+        // Fire VoteKickStarted + the caller's implicit YES cast NOW that all snapshot
+        // fields (target, tallies, eligible count) are in place — subscribers reading
+        // GetVoteKickTargetCt/T + GetVoteKickTallyCt/T inside their handler will see the
+        // fresh values.
+        {
+            ulong targetSid; try { targetSid = target.SteamID; } catch { targetSid = 0; }
+            ulong initiatorSid; try { initiatorSid = caller.SteamID; } catch { initiatorSid = 0; }
+            mixScrimsService.RaiseVoteKickStarted(team, targetSid, initiatorSid);
+            if (initiatorSid != 0)
+                mixScrimsService.RaiseVoteKickCast(new VoteKickCastEventArgs(
+                    Team: team,
+                    VoterSteamId: initiatorSid,
+                    VoteYes: true,
+                    CurrentYesCount: team == Team.CT ? voteKickYesCountCt : voteKickYesCountT,
+                    CurrentTotalCast: team == Team.CT ? voteKickTotalVotesCastCt : voteKickTotalVotesCastT,
+                    EligibleVotes: eligibleCount));
+        }
+
         // Players that need to see the menu (eligible minus caller)
         var menuPlayers = eligible.Where(p => p.SteamID != caller.SteamID).ToList();
 
@@ -143,7 +161,7 @@ public partial class MixScrims
         // Open menu for human eligible voters (excluding caller and bots)
         foreach (var player in menuPlayers.Where(p => !IsBot(p)))
         {
-            if (IsPlayerValid(player))
+            if (IsPlayerValid(player) && !suppressBuiltInMenus)
                 Core.MenusAPI.OpenMenuForPlayer(player, menu);
         }
 
@@ -193,6 +211,18 @@ public partial class MixScrims
             if (voteYes) voteKickYesCountT++;
         }
 
+        {
+            ulong voterSid; try { voterSid = voter.SteamID; } catch { voterSid = 0; }
+            if (voterSid != 0)
+                mixScrimsService.RaiseVoteKickCast(new VoteKickCastEventArgs(
+                    Team: team,
+                    VoterSteamId: voterSid,
+                    VoteYes: voteYes,
+                    CurrentYesCount: team == Team.CT ? voteKickYesCountCt : voteKickYesCountT,
+                    CurrentTotalCast: team == Team.CT ? voteKickTotalVotesCastCt : voteKickTotalVotesCastT,
+                    EligibleVotes: team == Team.CT ? voteKickEligibleVotesCt : voteKickEligibleVotesT));
+        }
+
         SendVoteKickProgressCenterHtml(team);
 
         // Any NO vote fails the kick immediately
@@ -231,6 +261,8 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation("VoteKickResult: team {Team}, passed {Passed}, target {Target}", team, passed, targetName);
 
+        mixScrimsService.RaiseVoteKickResult(team, passed);
+
         CloseVoteKickMenusForTeam(team);
 
         if (passed && target != null)
@@ -253,6 +285,7 @@ public partial class MixScrims
     /// </summary>
     internal void SendVoteKickProgressCenterHtml(Team team)
     {
+        if (suppressBuiltInCenterHtml) return;
         int totalVotesCast = team == Team.CT ? voteKickTotalVotesCastCt : voteKickTotalVotesCastT;
         int eligibleCount = team == Team.CT ? voteKickEligibleVotesCt : voteKickEligibleVotesT;
         var message = Core.Localizer["info.center.votekick.progress", totalVotesCast, eligibleCount];
