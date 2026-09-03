@@ -345,11 +345,11 @@ public partial class MixScrims
         }
 
         // Trigger match canceled event
-        if (!ForceSurrenderMatchEnd(team))
-            PauseMatch();
+        ForceSurrenderMatchEnd(team);
 
-        // Schedule reset
-        var resetToken = Core.Scheduler.DelayBySeconds(matchResetDelay - 5, () =>
+        // Full delay, not matchResetDelay - 5: resetting mid-intermission wipes the
+        // surrender win panel off the screen before anyone can read it.
+        var resetToken = Core.Scheduler.DelayBySeconds(matchResetDelay, () =>
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("Match surrendered by team {Team}, resetting plugin state.", team);
@@ -363,38 +363,50 @@ public partial class MixScrims
     /// "CTs surrender" / "Terrorists surrender" and the round is credited to the
     /// opposing team rather than the match merely being paused and reset.
     /// </summary>
-    /// <returns>
-    /// <c>false</c> when the round could not be terminated — the caller must fall
-    /// back to pausing, or the surrendering team would just keep playing.
-    /// </returns>
-    internal bool ForceSurrenderMatchEnd(Team team)
+    /// <remarks>
+    /// Falls back to pausing when the round cannot be awarded, so a failed surrender
+    /// never leaves the surrendering team playing on.
+    /// </remarks>
+    internal void ForceSurrenderMatchEnd(Team team)
     {
         const float roundEndDelay = 1.0f;
+        const float warmupSettleDelay = 0.5f;
 
         if (team != Team.CT && team != Team.T)
         {
-            logger.LogWarning("ForceSurrenderMatchEnd: unsupported team {Team} - skipping native match end.", team);
-            return false;
+            logger.LogWarning("ForceSurrenderMatchEnd: unsupported team {Team} - pausing instead.", team);
+            PauseMatch();
+            return;
         }
 
         var reason = team == Team.CT ? RoundEndReason.CTsSurrender : RoundEndReason.TerroristsSurrender;
-        if (!RestartRoundManually("Surrender", reason, roundEndDelay))
-            return false;
 
-        // TerminateRound only settles the round; intermission is what ends the match.
-        var intermissionToken = Core.Scheduler.DelayBySeconds(roundEndDelay + 1.0f, () =>
+        // TerminateRound is a no-op while WarmupPeriod is set, and a surrender can land
+        // while the match is still inside it. Without this the round is never awarded
+        // and the win panel never names the surrender.
+        Core.Engine.ExecuteCommand("mp_warmup_end");
+
+        var endToken = Core.Scheduler.DelayBySeconds(warmupSettleDelay, () =>
         {
-            try
+            // Could not award the round; freeze rather than let the surrendering team play on.
+            if (!RestartRoundManually("Surrender", reason, roundEndDelay))
+                PauseMatch();
+
+            // TerminateRound only settles the round; intermission is what ends the match.
+            var intermissionToken = Core.Scheduler.DelayBySeconds(roundEndDelay + 1.0f, () =>
             {
-                Core.Game.GoToIntermission();
-                logger.LogInformation("ForceSurrenderMatchEnd: {Team} surrendered - match sent to intermission.", team);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "ForceSurrenderMatchEnd: GoToIntermission failed after {Team} surrendered.", team);
-            }
+                try
+                {
+                    Core.Game.GoToIntermission();
+                    logger.LogInformation("ForceSurrenderMatchEnd: {Team} surrendered - match sent to intermission.", team);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "ForceSurrenderMatchEnd: GoToIntermission failed after {Team} surrendered.", team);
+                }
+            });
+            Core.Scheduler.StopOnMapChange(intermissionToken);
         });
-        Core.Scheduler.StopOnMapChange(intermissionToken);
-        return true;
+        Core.Scheduler.StopOnMapChange(endToken);
     }
 }
