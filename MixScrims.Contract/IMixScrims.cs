@@ -63,6 +63,13 @@ public interface IMixScrims : IDisposable
     /// picking (payload: team, pickedSteamId, pickIndex). <c>pickIndex</c> is
     /// the 1-based sequence within the whole picking phase; captains' implicit
     /// self-picks occupy indices 1 and 2.
+    /// <para>
+    /// <c>pickedSteamId</c> is <c>0</c> when the pick was a bot — bots share
+    /// SteamID 0 and cannot be identified through it. Treat this event as a
+    /// "the pool changed, re-read it" trigger and resolve identity through
+    /// <see cref="GetUnpickedPlayerSlots"/>, which is slot-keyed and includes
+    /// bots. The roster is already updated when this fires.
+    /// </para>
     /// </summary>
     event Action<Team, ulong, int>? PlayerPickedForTeam;
 
@@ -609,6 +616,15 @@ public interface IMixScrims : IDisposable
     /// <see cref="MatchState.PickingStartingSide"/> and the caller is eligible
     /// to choose (winning captain, or a member of the winning team when
     /// captains are disabled).
+    /// <para>
+    /// The decision is one-shot per phase: once a side has been committed, later
+    /// calls are ignored (logged as a warning) even though
+    /// <see cref="MatchState"/> briefly still reads
+    /// <see cref="MatchState.PickingStartingSide"/> while the match start is
+    /// dispatched. Consumers therefore do not need to close their own prompt
+    /// before the driver returns to stay correct, but should still guard
+    /// double-clicks to avoid the wasted round trip.
+    /// </para>
     /// </summary>
     /// <param name="steamId">The player making the choice.</param>
     /// <param name="stay"><c>true</c> to keep the current sides, <c>false</c> to swap.</param>

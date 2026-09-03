@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Menus;
 using SwiftlyS2.Core.Menus.OptionsBase;
@@ -13,6 +14,19 @@ public partial class MixScrims
     internal IPlayer? winnerCaptain { get; set; } = null;
     internal Dictionary<int, string> sideVotes { get; set; } = new();
     internal Team sideVoteWinnerTeam { get; set; } = Team.None;
+
+    // Set while StartKnifeRound's own TerminateRound is in flight so
+    // HandleRoundEndOnKnifeRound doesn't read it as "the knife round ended".
+    internal bool pendingKnifeRoundStart = false;
+
+    // Latched the moment a starting-side decision is committed for the current
+    // PickingStartingSide phase. Both SwitchStartingSides and StayStartingSides defer
+    // their work by 0.2s and neither leaves PickingStartingSide until StartMatch runs
+    // inside that callback, so every entry point (!stay / !switch, the built-in menu,
+    // ChooseStartingSide, the disconnect fallback, the DisableCaptains vote timer)
+    // still passes its own guard during that window. Without this a second choice
+    // re-runs the whole pipeline — and on Switch that swaps the teams straight back.
+    internal bool startingSideCommitted = false;
 
     /// <summary>
     /// Initiates the knife round phase of the match.
@@ -125,16 +139,20 @@ public partial class MixScrims
 
         UnpauseMatch();
 
-        // Symmetric to StartMatch: prime CCSGameRules limits before cfg exec queues
-        // `mp_restartgame 1`. Defense in depth — the knife-round transition currently
-        // has zero pending team changes, and Stay/Switch crash evidence (see StartMatch
-        // comment + repo memory `mixscrims-mp-restartgame-team-limits-segv.md`) proved
-        // team-limit reconciliation is NOT the actual crash class. Kept for consistency
-        // with StartMatch and to survive any future refactor that adds team moves here.
+        // Symmetric to StartMatch: prime CCSGameRules limits before the restart below.
+        // Defense in depth — the knife-round transition currently has zero pending team
+        // changes, and Stay/Switch crash evidence (see StartMatch comment + repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`) proved team-limit reconciliation
+        // is NOT the actual crash class. Kept for consistency with StartMatch and to
+        // survive any future refactor that adds team moves here.
         RelaxEngineTeamLimits("StartKnifeRound");
 
-        // knife_round.cfg ends with `mp_restartgame 1`. The 0.5s delay lets the
-        // preceding UnpauseMatch's mp_pause 0 command drain before we queue the restart.
+        // knife_round.cfg is cvars only now - the plugin drives the round transition, same
+        // as StartMatch and StartTeamPickingPhase (repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`). The 0.5s delay lets the preceding
+        // UnpauseMatch's mp_pause 0 command drain before the exec.
+        //   T+0.5s  exec knife_round.cfg (ends with mp_warmup_end)
+        //   T+1.0s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+2.0s
         var kCfgToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
         {
             if (mixScrimsService.GetCurrentMatchState() != MatchState.KnifeRound)
@@ -163,7 +181,30 @@ public partial class MixScrims
             catch (Exception ex)
             {
                 logger.LogError(ex, "StartKnifeRound: exception dispatching knife_round.cfg exec");
+                return;
             }
+
+            // Deferred so the cfg's mp_warmup_end has landed - TerminateRound is a no-op
+            // while WarmupPeriod is set.
+            var kRestartToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
+            {
+                if (mixScrimsService.GetCurrentMatchState() != MatchState.KnifeRound)
+                {
+                    logger.LogWarning("StartKnifeRound: state changed before TerminateRound (now {State}); skipping manual restart.", mixScrimsService.GetCurrentMatchState());
+                    return;
+                }
+
+                // Armed before dispatch: TerminateRound fires round_end synchronously in
+                // some paths, and HandleRoundEndOnKnifeRound would read it as the knife
+                // round having been won.
+                pendingKnifeRoundStart = true;
+                if (!RestartRoundManually("StartKnifeRound", RoundEndReason.GameCommencing, 1.0f))
+                {
+                    pendingKnifeRoundStart = false;
+                    logger.LogWarning("StartKnifeRound: restart did not dispatch; knife round starts on the current round.");
+                }
+            });
+            Core.Scheduler.StopOnMapChange(kRestartToken);
         });
         Core.Scheduler.StopOnMapChange(kCfgToken);
 
@@ -179,6 +220,7 @@ public partial class MixScrims
     internal void PromptWinnerTCaptainoChoseStartingSide(Team winnerTeam)
     {
         mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
+        startingSideCommitted = false;
         mixScrimsService.RaiseKnifeRoundWon(winnerTeam);
 
         // Captains may hold stale/disposed IPlayer references after reconnects or map changes.
@@ -405,6 +447,8 @@ public partial class MixScrims
     /// </summary>
     internal void SwitchStartingSides(IPlayer? captain)
     {
+        if (!TryCommitStartingSide(nameof(SwitchStartingSides))) return;
+
         // Whole body runs on the main game thread — native schema reads (captain.PlayerPawn, TeamNum, Controller) and StartMatch downstream are not safe on the menu Click dispatch thread.
         var switchSidesToken = Core.Scheduler.DelayBySeconds(0.2f, () =>
         {
@@ -472,6 +516,8 @@ public partial class MixScrims
     /// </summary>
     internal void StayStartingSides(IPlayer? captain)
     {
+        if (!TryCommitStartingSide(nameof(StayStartingSides))) return;
+
         if (IsPlayerValid(captain))
         {
             if (captain!.PlayerPawn?.TeamNum == 3)
@@ -489,6 +535,21 @@ public partial class MixScrims
         // Defer StartMatch so native schema reads inside it run on the main game thread (mirrors SwitchStartingSides).
         var stayToken = Core.Scheduler.DelayBySeconds(0.2f, () => StartMatch());
         Core.Scheduler.StopOnMapChange(stayToken);
+    }
+
+    /// <summary>
+    /// Single funnel for "the starting side is now decided". Returns false when a
+    /// decision was already committed for this phase.
+    /// </summary>
+    private bool TryCommitStartingSide(string callSite)
+    {
+        if (startingSideCommitted)
+        {
+            logger.LogWarning("{Site}: starting side already decided this phase; ignoring duplicate.", callSite);
+            return false;
+        }
+        startingSideCommitted = true;
+        return true;
     }
 
     /// <summary>

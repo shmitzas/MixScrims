@@ -130,6 +130,23 @@ Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");  // mp_give_player
 ```
 CFG files **must exist on CS2 server** at `csgo/cfg/mixscrims/`. Environment-specific overrides use `staging_overrides.cfg` or `production_overrides.cfg` (controlled by `cfg.TestMode`).
 
+> **Invariant: phase cfgs are cvars-only. Never add `mp_restartgame` to one.**
+> Every round transition is driven from C# via `RestartRoundManually(callSite, RoundEndReason.GameCommencing, delay)`
+> (`States/Match/Events.cs`), which routes through `CCSGameRules::TerminateRound` instead of
+> `mp_restartgame`'s complete-reset branch — the confirmed SIGSEGV site. Three consequences a
+> cfg-side restart used to hide, which the caller now owns:
+> 1. **Score / round counter / money** are not reset by `TerminateRound`. Pair the call with
+>    `ResetMatchStartState()` (match start) or an explicit money write (knife round).
+> 2. **A pause issued next to the exec is cleared by the restart.** Lift the pause *before*
+>    dispatching, and let `HandleRoundPrestartPreKnifeRound` re-apply it on the round that lands.
+>    If `RestartRoundManually` returns `false`, re-apply the pause immediately.
+> 3. **`TerminateRound` is a no-op while `WarmupPeriod` is set.** Clear `mp_warmup_pausetimer`
+>    before `mp_warmup_end` in the cfg, or the restart silently never dispatches. Warmup itself
+>    therefore cannot use it at all — it uses `mp_warmup_start` + `ResetWarmupState()`.
+>
+> `mp_restartgame` also runs `CleanUpMap()`, which deletes plugin-spawned entities (CustomHUD
+> layouts). See repo memory `mixscrims-mp-restartgame-team-limits-segv.md`.
+
 ## Development Workflows
 
 ### Common Development Tasks
@@ -215,6 +232,22 @@ Available methods: `DelayBySeconds()`, `RepeatBySeconds()`, `NextTick()`, `NextW
 - `captainsAnnouncementsTimer` - Announces captain names (interval: `cfg.ChatAnnouncementTimers.CaptainsAnnouncements`, default 30s)
 
 All timers are created in `StartAnnouncementTimers()` and automatically stopped on map change.
+
+> **Invariant: a `MatchState` check is not a guard while a transition is in flight.**
+> Several drivers defer their whole body (`DelayBySeconds` / `NextTick`) and only
+> leave the current state *inside* that callback — e.g. `SwitchStartingSides` /
+> `StayStartingSides` sit behind a 0.2s delay and `MatchState` stays
+> `PickingStartingSide` until `StartMatch()` runs. During that window every entry
+> point (chat command, built-in menu, `IMixScrims` driver, consumer menu) still
+> passes its own state check, so the action can run twice. On `Switch` that swaps
+> the teams straight back.
+>
+> When adding or editing a deferred driver, put a one-shot latch at the funnel
+> every path converges on — see `startingSideCommitted` + `TryCommitStartingSide`
+> in `States/KnifeRound/Main.cs`. Reset it where the state is *entered* and in
+> `ResetVariables()`. Vote handlers get this for free via their per-voter
+> `HashSet.Add` dedupe; map voting is intentionally re-entrant (re-voting removes
+> the previous vote first) — do not latch it.
 
 ### Logging Strategy
 - `cfg.DetailedLogging` flag enables verbose logs

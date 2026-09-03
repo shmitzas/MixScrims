@@ -171,15 +171,15 @@ public sealed partial class MixScrims
 
         if (captainCt == null)
         {
-            IPlayer? replacement = null;
-            if (playingCtPlayers.Count > 0)
-                replacement = playingCtPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
-                              ?? playingCtPlayers.FirstOrDefault(p => IsPlayerValid(p));
-            if (replacement == null && pickedCtPlayers.Count > 0)
-                replacement = pickedCtPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
-                              ?? pickedCtPlayers.FirstOrDefault(p => IsPlayerValid(p));
-            if (replacement == null)
-                replacement = PickRandomCaptain(Team.CT);
+            // PickRandomCaptain is consulted before the bot fallbacks: a human sitting in
+            // Spectator is in neither roster list, and seating a bot here would let the
+            // pick ladder auto-resolve without prompting them.
+            IPlayer? replacement =
+                playingCtPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
+                ?? pickedCtPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
+                ?? PickRandomCaptain(Team.CT)
+                ?? playingCtPlayers.FirstOrDefault(IsPlayerValid)
+                ?? pickedCtPlayers.FirstOrDefault(IsPlayerValid);
             if (replacement != null)
             {
                 AssignCaptain(Team.CT, replacement);
@@ -191,15 +191,12 @@ public sealed partial class MixScrims
 
         if (captainT == null)
         {
-            IPlayer? replacement = null;
-            if (playingTPlayers.Count > 0)
-                replacement = playingTPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
-                              ?? playingTPlayers.FirstOrDefault(p => IsPlayerValid(p));
-            if (replacement == null && pickedTPlayers.Count > 0)
-                replacement = pickedTPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
-                              ?? pickedTPlayers.FirstOrDefault(p => IsPlayerValid(p));
-            if (replacement == null)
-                replacement = PickRandomCaptain(Team.T);
+            IPlayer? replacement =
+                playingTPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
+                ?? pickedTPlayers.FirstOrDefault(p => IsPlayerValid(p) && !IsBot(p))
+                ?? PickRandomCaptain(Team.T)
+                ?? playingTPlayers.FirstOrDefault(IsPlayerValid)
+                ?? pickedTPlayers.FirstOrDefault(IsPlayerValid);
             if (replacement != null)
             {
                 AssignCaptain(Team.T, replacement);
@@ -228,14 +225,19 @@ public sealed partial class MixScrims
 
     /// <summary>
     /// Returns a list of players currently playing (CT or T).
+    /// Team membership is read from the CONTROLLER, not the pawn: a player who self-specs while
+    /// alive (<c>jointeam 1</c>) gets their controller moved to Spectator immediately, but their
+    /// pawn keeps the old TeamNum until it is destroyed - observed to outlive several rounds.
+    /// Reading the pawn makes the vacated slot look occupied, which blocks a replacement from
+    /// joining until the departing player disconnects.
     /// </summary>
     internal List<IPlayer> GetPlayingPlayers()
     {
         return GetPlayers()
             .Where(p => IsPlayerValid(p)
                 && p.PlayerPawn != null
-                && (p.PlayerPawn.TeamNum == 2
-                || p.PlayerPawn.TeamNum == 3))
+                && (p.Controller?.TeamNum == 2
+                || p.Controller?.TeamNum == 3))
                 .ToList()!;
     }
 
@@ -249,7 +251,7 @@ public sealed partial class MixScrims
         var result = new List<IPlayer>();
         foreach (var player in players)
         {
-            if (player.PlayerPawn != null && player.PlayerPawn.TeamNum == teamNum)
+            if (player.Controller?.TeamNum == teamNum)
                 result.Add(player);
         }
         return result;

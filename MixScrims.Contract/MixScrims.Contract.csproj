@@ -23,11 +23,13 @@
 		     v2.4.0 adds MapVoteMenuRequested.
 		     v2.5.0 adds the bot-aware ready counter reads.
 		     v2.6.0 adds the starting-side picker snapshot.
+		     v2.7.0 fires PlayerPickedForTeam for bot picks too (steamId 0); it was
+		            previously suppressed, so consumer pick menus never refreshed.
 		     All existing v1.x methods are preserved for backward compatibility. -->
 		<GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-		<Version>2.6.0</Version>
-		<AssemblyVersion>2.6.0.0</AssemblyVersion>
-		<FileVersion>2.6.0.0</FileVersion>
+		<Version>2.7.0</Version>
+		<AssemblyVersion>2.7.0.0</AssemblyVersion>
+		<FileVersion>2.7.0.0</FileVersion>
 		<GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
 	</PropertyGroup>
 

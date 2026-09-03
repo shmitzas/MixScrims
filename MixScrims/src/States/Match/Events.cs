@@ -136,7 +136,13 @@ public partial class MixScrims
         RelaxEngineTeamLimits("RoundStart");
 
         if (matchState != MatchState.Match)
+        {
+            // knife_round.cfg pins mp_maxmoney 0 but no longer runs mp_restartgame, so
+            // nothing zeroes the accounts players carried out of the pick phase.
+            if (matchState == MatchState.KnifeRound)
+                SetMoneyForPlayers(playingCtPlayers.Concat(playingTPlayers), 0);
             return HookResult.Continue;
+        }
 
         if (pendingMatchStartReset)
         {
@@ -245,10 +251,12 @@ public partial class MixScrims
     /// counter, or player money the way <c>mp_restartgame</c> did.
     /// </summary>
     /// <remarks>
-    /// Safe from <c>MatchState.Match</c> and <c>MatchState.PickingTeam</c>. NOT safe during
-    /// <c>MatchState.KnifeRound</c> — the <c>round_end</c> it fires would land in
-    /// <c>HandleRoundEndOnKnifeRound</c> and abort the knife round, so that path deliberately
-    /// still uses <c>mp_restartgame 1</c>, which has never been observed crashing.
+    /// Safe from <c>Match</c>, <c>PickingTeam</c> and <c>KnifeRound</c>. The knife round has to
+    /// arm <see cref="pendingKnifeRoundStart"/> first — the <c>round_end</c> this fires would
+    /// otherwise land in <c>HandleRoundEndOnKnifeRound</c> and be read as the knife round
+    /// having been won. Cannot be used from <c>Warmup</c>: <c>TerminateRound</c> is a no-op
+    /// while <c>WarmupPeriod</c> is set, so warmup resets through
+    /// <c>mp_warmup_start</c> + <see cref="ResetWarmupState"/> instead.
     /// </remarks>
     /// <returns>
     /// <c>true</c> when <c>TerminateRound</c> was dispatched. Callers that lifted a pause in
@@ -292,6 +300,22 @@ public partial class MixScrims
     /// transition lands, so it overwrites anything the round transition itself tallied.
     /// </summary>
     internal void ResetMatchStartState()
+        => ResetScoreboardAndMoney("ResetMatchStartState",
+                                   playingCtPlayers.Concat(playingTPlayers),
+                                   Core.ConVar.Find<int>("mp_startmoney")?.Value ?? 800);
+
+    /// <summary>
+    /// Warmup twin of <see cref="ResetMatchStartState"/>. warmup.cfg no longer ends with
+    /// <c>mp_restartgame 1</c>, and <c>TerminateRound</c> is a no-op during warmup, so the
+    /// reset is done directly. Covers every connected player because warmup has no roster.
+    /// Matters most on the surrender path, which reaches warmup without a changelevel.
+    /// </summary>
+    internal void ResetWarmupState()
+        => ResetScoreboardAndMoney("ResetWarmupState",
+                                   GetPlayers(),
+                                   Core.ConVar.Find<int>("mp_startmoney")?.Value ?? 0);
+
+    private void ResetScoreboardAndMoney(string callSite, IEnumerable<IPlayer> players, int money)
     {
         try
         {
@@ -315,24 +339,30 @@ public partial class MixScrims
                 gameRules.TotalRoundsPlayedUpdated();
             }
 
-            int startMoney = Core.ConVar.Find<int>("mp_startmoney")?.Value ?? 800;
-            int reset = 0;
-            foreach (var player in playingCtPlayers.Concat(playingTPlayers))
-            {
-                if (!IsPlayerValid(player)) continue;
-                var money = player.Controller?.InGameMoneyServices;
-                if (money is null) continue;
-                money.Account = startMoney;
-                money.AccountUpdated();
-                reset++;
-            }
+            int reset = SetMoneyForPlayers(players, money);
 
-            logger.LogInformation("ResetMatchStartState: scores {Ct}:{T} -> 0:0, rounds -> 0, {Count} players set to ${Money}.",
-                ctScore, tScore, reset, startMoney);
+            logger.LogInformation("{Site}: scores {Ct}:{T} -> 0:0, rounds -> 0, {Count} players set to ${Money}.",
+                callSite, ctScore, tScore, reset, money);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "ResetMatchStartState: failed to reset match-start state");
+            logger.LogError(ex, "{Site}: failed to reset match state", callSite);
         }
+    }
+
+    /// <summary>Returns the number of players whose account was written.</summary>
+    internal int SetMoneyForPlayers(IEnumerable<IPlayer> players, int amount)
+    {
+        int reset = 0;
+        foreach (var player in players)
+        {
+            if (!IsPlayerValid(player)) continue;
+            var money = player.Controller?.InGameMoneyServices;
+            if (money is null) continue;
+            money.Account = amount;
+            money.AccountUpdated();
+            reset++;
+        }
+        return reset;
     }
 }

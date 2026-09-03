@@ -47,6 +47,7 @@ public partial class MixScrims
         mapVoteDeadline = null;
         sideVotes.Clear();
         sideVoteWinnerTeam = Team.None;
+        startingSideCommitted = false;
         timeoutCountCt = cfg.Timeouts;
         timeoutCountT = cfg.Timeouts;
         timeoutPending = TimeoutPending.None;

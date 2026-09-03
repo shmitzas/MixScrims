@@ -959,16 +959,13 @@ partial class MixScrims
     /// untracked spec player fill a vacated slot as soon as the scoreboard shows the team
     /// as understaffed (disconnected picked player, roster ghost that outlived cleanup,
     /// picked player who self-spec'd), instead of stranding them behind a stale roster
-    /// count. Two mismatched-source hazards are handled explicitly:
-    ///   1. <c>actualCount</c> from <see cref="GetPlayersInTeam"/> reads
-    ///      <c>PlayerPawn.TeamNum</c>, which CS2 defers for alive players (self-spec via
-    ///      <c>jointeam 1</c> keeps the pawn on the old team until round transition, death,
-    ///      or disconnect). Using <c>min</c> lets a fresher <c>listCount</c> unblock the
-    ///      join in that window.
-    ///   2. Silent-restore reconnects add a physical player without hitting this method, so
-    ///      <c>actualCount</c> can exceed <c>listCount</c>. Using <c>min</c> avoids blocking
-    ///      a legitimate replacement in that window; <see cref="HandleEventPlayerTeamPost"/>
-    ///      still demotes the untracked physical join.
+    /// count. The mismatched-source hazard this handles: silent-restore reconnects add a
+    /// physical player without hitting this method, so <c>actualCount</c> can exceed
+    /// <c>listCount</c>. Using <c>min</c> avoids blocking a legitimate replacement in that
+    /// window; <see cref="HandleEventPlayerTeamPost"/> still demotes the untracked physical
+    /// join. <c>actualCount</c> itself is controller-derived (see <see cref="GetPlayingPlayers"/>),
+    /// so a player who self-spec'd while alive releases their slot immediately rather than
+    /// holding it until their pawn is destroyed.
     /// </summary>
     private HookResult HandleActiveMatchJoin(IPlayer player, Team team, List<IPlayer> playingList, string fullErrorKey)
     {
@@ -1047,8 +1044,8 @@ partial class MixScrims
     /// <summary>
     /// Belt-and-suspenders check fired 0.5s after <see cref="HandleActiveMatchJoin"/> admits a
     /// join. The pre-hook gate uses <c>min(listCount, actualCount)</c>, which can under-count in
-    /// specific race windows (pawn TeamNum not yet updated for a self-spec'd tracked player, or
-    /// a silent-restore reconnect landing between the read and the commit). If the physical team
+    /// specific race windows (a silent-restore reconnect landing between the read and the
+    /// commit). If the physical team
     /// is over cap 0.5s later, revert the player we just admitted - they're the most recent
     /// joiner via this path - by pruning them from the roster and force-moving them to Spectator.
     /// </summary>
