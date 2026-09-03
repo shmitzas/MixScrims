@@ -14,6 +14,10 @@
 
 ---
 
+# :rocket: You can now create Custom Panorama HUD plugins to handle MixScrims match flow
+### For more details on how to create such a plugin using MixScrims API check out **[API Integration](../../wiki/API-Integration)** in WIKI
+Legacy CenterHTML menus and announcements are still supported, so creating a Custom HUD plugin to manage MixScrims match flow is 100% optional!
+
 ## 🚀 Getting Started
 
 | Guide | Description |
