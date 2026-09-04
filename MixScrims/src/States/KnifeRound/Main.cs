@@ -15,6 +15,14 @@ public partial class MixScrims
     internal Dictionary<int, string> sideVotes { get; set; } = new();
     internal Team sideVoteWinnerTeam { get; set; } = Team.None;
 
+    // Keeps CS2's own post-knife-round restart parked for the whole PickingStartingSide phase.
+    internal CancellationTokenSource? startingSideRestartHoldTimer;
+    internal CancellationTokenSource? startingSidePickTimeoutTimer;
+
+    // Matches the DisableCaptains vote window below; a captain who never picks must not leave
+    // the parked restart (and the server) frozen indefinitely.
+    private const int StartingSidePickTimeoutSeconds = 30;
+
     // Set while StartKnifeRound's own TerminateRound is in flight so
     // HandleRoundEndOnKnifeRound doesn't read it as "the knife round ended".
     internal bool pendingKnifeRoundStart = false;
@@ -221,6 +229,7 @@ public partial class MixScrims
     {
         mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
         startingSideCommitted = false;
+        BeginStartingSideRestartHold("PickingStartingSide");
         mixScrimsService.RaiseKnifeRoundWon(winnerTeam);
 
         // Captains may hold stale/disposed IPlayer references after reconnects or map changes.
@@ -260,6 +269,17 @@ public partial class MixScrims
             Core.Scheduler.StopOnMapChange(sideVoteToken);
             return;
         }
+
+        var pickTimeoutToken = Core.Scheduler.DelayBySeconds(StartingSidePickTimeoutSeconds, () =>
+        {
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingStartingSide)
+                return;
+
+            logger.LogWarning("PromptWinnerTCaptainoChoseStartingSide: no pick after {Seconds}s; defaulting to Stay.", StartingSidePickTimeoutSeconds);
+            StayStartingSides(winnerCaptain);
+        });
+        Core.Scheduler.StopOnMapChange(pickTimeoutToken);
+        startingSidePickTimeoutTimer = pickTimeoutToken;
 
         if (winnerTeam == Team.CT)
         {
@@ -550,6 +570,40 @@ public partial class MixScrims
         }
         startingSideCommitted = true;
         return true;
+    }
+
+    /// <summary>
+    /// Takes ownership of CS2's pending round restart for the duration of the pick, so the phase
+    /// never races the engine's <c>mp_round_restart_delay</c> timer. Re-asserted on a tick rather
+    /// than written once: a <c>round_end</c> Pre hook can run before the engine writes
+    /// <c>m_flRestartRoundTime</c>, and any other plugin can re-arm it mid-phase.
+    /// </summary>
+    internal void BeginStartingSideRestartHold(string callSite)
+    {
+        HoldPendingRoundRestart(callSite);
+
+        startingSideRestartHoldTimer?.Cancel();
+        startingSideRestartHoldTimer = Core.Scheduler.DelayAndRepeatBySeconds(0.5f, 0.5f, () =>
+        {
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingStartingSide)
+                return;
+
+            HoldPendingRoundRestart("PickingStartingSideTick");
+        });
+        Core.Scheduler.StopOnMapChange(startingSideRestartHoldTimer);
+    }
+
+    /// <summary>
+    /// Stops re-asserting the hold and drops the phase's auto-Stay timer. Does NOT hand the
+    /// restart back — the caller decides whether this exit is the match start (which releases it
+    /// deliberately) or an abort (which must).
+    /// </summary>
+    internal void EndStartingSideRestartHold()
+    {
+        startingSideRestartHoldTimer?.Cancel();
+        startingSideRestartHoldTimer = null;
+        startingSidePickTimeoutTimer?.Cancel();
+        startingSidePickTimeoutTimer = null;
     }
 
     /// <summary>

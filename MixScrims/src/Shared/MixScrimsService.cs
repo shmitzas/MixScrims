@@ -676,6 +676,16 @@ public class MixScrimsService : IMixScrims
         // correlated with the surrounding state machine activity even on production servers.
         if (previous != state)
         {
+            if (previous == MatchState.PickingStartingSide)
+            {
+                _mixScrims.EndStartingSideRestartHold();
+                // StartMatch releases the parked restart deliberately once its cvars have
+                // landed; every other exit (reset, surrender, map change, captain disconnect)
+                // has to hand it back here or the round stays frozen for an hour.
+                if (state != MatchState.Match)
+                    _mixScrims.ReleasePendingRoundRestart("LeavePickingStartingSide", 1.0f);
+            }
+
             _mixScrims.logger.LogInformation("SetMatchState: {Previous} -> {New} (playing CT:{Ct}/T:{T}, picked CT:{PCt}/T:{PT}, ready:{Ready})",
                 previous, state,
                 _mixScrims.playingCtPlayers.Count, _mixScrims.playingTPlayers.Count,

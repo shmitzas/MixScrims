@@ -33,15 +33,15 @@ public partial class MixScrims
 
         pendingMatchStartReset = true;
 
-        // Replaces `mp_restartgame 2`, which was the confirmed crash site (see repo memory
-        // `mixscrims-mp-restartgame-team-limits-segv.md`): it routes through
-        // CCSGameRules::RestartRound()'s complete-reset branch and segfaults on the 3rd match
-        // of a server process. TerminateRound reaches RestartRound via the normal round-end
-        // path instead, which every mid-match round-end already exercises safely on the same
-        // process. The score / round-counter / money reset that mp_restartgame used to do is
-        // now ResetMatchStartState(), run from HandleRoundStart once the transition lands.
+        // Replaces `mp_restartgame 2` (see repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`). The transition is the restart the
+        // knife round's own round_end already armed and PickingStartingSide parked, simply
+        // released here — so there is exactly ONE RestartRound between knife round and match,
+        // whatever the captain's pick latency was. The score / round-counter / money reset that
+        // mp_restartgame used to do is now ResetMatchStartState(), run from HandleRoundStart
+        // once the transition lands.
         //   T+0.5s  exec cfg  (cvars only)
-        //   T+2.5s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+3.5s
+        //   T+2.5s  release the parked restart -> RestartRound at T+3.5s
         var cfgToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
         {
             if (mixScrimsService.GetCurrentMatchState() != MatchState.Match)
@@ -78,9 +78,19 @@ public partial class MixScrims
         {
             if (mixScrimsService.GetCurrentMatchState() != MatchState.Match)
             {
-                logger.LogWarning("StartMatch: state changed before TerminateRound (now {State}); skipping manual restart.", mixScrimsService.GetCurrentMatchState());
+                logger.LogWarning("StartMatch: state changed before the round transition (now {State}); skipping restart.", mixScrimsService.GetCurrentMatchState());
                 return;
             }
+
+            if (ReleasePendingRoundRestart("StartMatch", 1.0f))
+            {
+                logger.LogInformation("StartMatch: released the parked round restart (lands in 1.00s).");
+                return;
+            }
+
+            // Nothing was armed - the phase was entered without a knife round (admin start,
+            // or the engine consumed the timer anyway), so create the transition ourselves.
+            logger.LogWarning("StartMatch: no parked round restart to release; falling back to TerminateRound.");
             RestartRoundManually("StartMatch", RoundEndReason.GameCommencing, 1.0f);
         });
         Core.Scheduler.StopOnMapChange(restartToken);

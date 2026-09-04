@@ -293,6 +293,76 @@ public partial class MixScrims
         }
     }
 
+    // Far enough out that CCSGameRules::Think can never reach it during a pick phase.
+    private const float RoundRestartHoldSeconds = 3600f;
+
+    /// <summary>
+    /// Parks CS2's pending round restart so <c>CCSGameRules::Think</c> cannot fire it while a
+    /// pick phase is open. <c>TerminateRound</c> arms <c>m_flRestartRoundTime</c> with
+    /// <c>curtime + mp_round_restart_delay</c> (3s out of knife_round.cfg), which turns the
+    /// starting-side pick into a race against how long the captain takes to click: win it and the
+    /// phase sees a single round transition, lose it and the engine restarts the round underneath
+    /// the phase while <see cref="StartMatch"/> stacks a second one on top. See repo memory
+    /// <c>mixscrims-mp-restartgame-team-limits-segv.md</c> (seventh pass).
+    /// </summary>
+    internal bool HoldPendingRoundRestart(string callSite)
+        => SetPendingRoundRestart(callSite, RoundRestartHoldSeconds);
+
+    /// <summary>
+    /// Hands the parked restart back to the engine so it lands <paramref name="delay"/> seconds
+    /// from now. Reuses the restart the knife round's own <c>round_end</c> already armed, so the
+    /// match starts with exactly one <c>RestartRound</c> and — unlike
+    /// <see cref="RestartRoundManually"/> — no synthetic <c>GameCommencing</c> <c>round_end</c>
+    /// for K4-LevelRanks / MapChooser / stats trackers to misread.
+    /// </summary>
+    /// <returns>
+    /// <c>false</c> when the engine had nothing armed to release; the caller must then create the
+    /// transition itself via <see cref="RestartRoundManually"/>.
+    /// </returns>
+    internal bool ReleasePendingRoundRestart(string callSite, float delay)
+        => SetPendingRoundRestart(callSite, delay);
+
+    /// <remarks>
+    /// Same native-safety contract as <see cref="RelaxEngineTeamLimits"/> — main game thread only.
+    /// A zero or already-elapsed timer means the engine has no restart left to fire, so there is
+    /// nothing to hold back and nothing to hand over; both directions report that as false rather
+    /// than fabricating a restart that was never scheduled.
+    /// </remarks>
+    private bool SetPendingRoundRestart(string callSite, float seconds)
+    {
+        try
+        {
+            CCSGameRules? gameRules = Core.EntitySystem.GetGameRules();
+            if (gameRules is null || !gameRules.IsValid)
+            {
+                logger.LogWarning("SetPendingRoundRestart[{Site}]: game rules invalid - skipping.", callSite);
+                return false;
+            }
+
+            float now = Core.Engine.GlobalVars.CurrentTime;
+            float armed = gameRules.RestartRoundTime.Value;
+            if (armed <= 0f || armed <= now)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("SetPendingRoundRestart[{Site}]: no restart armed (value={Armed:F2}, now={Now:F2}).", callSite, armed, now);
+                return false;
+            }
+
+            gameRules.RestartRoundTime.Value = now + seconds;
+            gameRules.RestartRoundTimeUpdated();
+
+            if (cfg.DetailedLogging)
+                logger.LogInformation("SetPendingRoundRestart[{Site}]: m_flRestartRoundTime {Armed:F2} -> {New:F2} (now={Now:F2}).",
+                    callSite, armed, now + seconds, now);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "SetPendingRoundRestart[{Site}]: failed to write m_flRestartRoundTime", callSite);
+            return false;
+        }
+    }
+
     /// <summary>
     /// Restores the state that <c>mp_restartgame</c>'s complete-reset branch used to hand us:
     /// 0-0 scores, round counter at zero, and every playing player back to
