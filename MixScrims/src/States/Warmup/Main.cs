@@ -35,25 +35,38 @@ public partial class MixScrims
     /// </remarks>
     internal void LoadMatchBaseConfig()
     {
-        if (Core.Engine is not { } engine)
-        {
-            logger.LogWarning("LoadMatchBaseConfig: Core.Engine unavailable; skipping match_base.cfg.");
-            return;
-        }
-
-        var map = engine.GlobalVars.MapName.ToString();
-        if (string.IsNullOrEmpty(map) || map == matchBaseCfgMap)
-            return;
-
-        matchBaseCfgMap = map;
-
-        if (cfg.DetailedLogging)
-            logger.LogInformation("LoadMatchBaseConfig: applying match_base.cfg on {Map}", map);
-
+        // Deferred like every other exec here: StartWarmup runs during plugin load, where
+        // Core.Engine exists but GlobalVars does not yet and throws on access.
         Core.Scheduler.NextTick(() =>
         {
-            if (Core.Engine is { } baseEngine)
-                baseEngine.ExecuteCommand("exec mixscrims/match_base.cfg");
+            if (Core.Engine is not { } engine)
+            {
+                logger.LogWarning("LoadMatchBaseConfig: Core.Engine unavailable; skipping match_base.cfg.");
+                return;
+            }
+
+            string map;
+            try
+            {
+                map = engine.GlobalVars.MapName.ToString();
+            }
+            catch (Exception ex)
+            {
+                // Engine not up yet (plugin load). The next LoadWarmupConfig — OnMapLoad at the
+                // latest — retries, so no map ever ends up without the base cvars.
+                logger.LogDebug(ex, "LoadMatchBaseConfig: GlobalVars unavailable; deferring match_base.cfg.");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(map) || map == matchBaseCfgMap)
+                return;
+
+            matchBaseCfgMap = map;
+
+            if (cfg.DetailedLogging)
+                logger.LogInformation("LoadMatchBaseConfig: applying match_base.cfg on {Map}", map);
+
+            engine.ExecuteCommand("exec mixscrims/match_base.cfg");
         });
     }
 
