@@ -15,6 +15,7 @@ public partial class MixScrims
         var maps = mapsConfig.Maps.ToList();
         if (admin == null)
         {
+            // Console has no chat channel — these logs ARE the command's output, so they stay ungated.
             logger.LogInformation("All maps list:");
             foreach (var map in maps)
             {

@@ -167,7 +167,8 @@ public class MixScrimsService : IMixScrims
         }
         catch (Exception ex)
         {
-            _mixScrims.logger?.LogDebug(ex, "GetMatchScore: MatchData unavailable, returning (0, 0).");
+            if (_mixScrims.cfg.DetailedLogging)
+                _mixScrims.logger?.LogDebug(ex, "GetMatchScore: MatchData unavailable, returning (0, 0).");
             return (0, 0);
         }
     }
@@ -326,12 +327,14 @@ public class MixScrimsService : IMixScrims
     public void SetBuiltInMenusSuppressed(bool suppressed)
     {
         _mixScrims.suppressBuiltInMenus = suppressed;
-        _mixScrims.logger?.LogInformation("SetBuiltInMenusSuppressed: {Suppressed}", suppressed);
+        if (_mixScrims.cfg.DetailedLogging)
+            _mixScrims.logger?.LogInformation("SetBuiltInMenusSuppressed: {Suppressed}", suppressed);
     }
     public void SetBuiltInCenterHtmlSuppressed(bool suppressed)
     {
         _mixScrims.suppressBuiltInCenterHtml = suppressed;
-        _mixScrims.logger?.LogInformation("SetBuiltInCenterHtmlSuppressed: {Suppressed}", suppressed);
+        if (_mixScrims.cfg.DetailedLogging)
+            _mixScrims.logger?.LogInformation("SetBuiltInCenterHtmlSuppressed: {Suppressed}", suppressed);
     }
     public bool AreBuiltInMenusSuppressed() => _mixScrims.suppressBuiltInMenus;
     public bool IsBuiltInCenterHtmlSuppressed() => _mixScrims.suppressBuiltInCenterHtml;
@@ -671,9 +674,9 @@ public class MixScrimsService : IMixScrims
     {
         var previous = _mixScrims.MatchState;
         _mixScrims.MatchState = state;
-        // State transitions are infrequent and high-signal. Log unconditionally (not gated
-        // by DetailedLogging) so issues like \"OT side switch dumps players to spec\" can be
-        // correlated with the surrounding state machine activity even on production servers.
+        // State transitions are infrequent and high-signal. Enable DetailedLogging to correlate
+        // issues like "OT side switch dumps players to spec" with the surrounding state
+        // machine activity.
         if (previous != state)
         {
             if (previous == MatchState.PickingStartingSide)
@@ -686,11 +689,14 @@ public class MixScrimsService : IMixScrims
                     _mixScrims.ReleasePendingRoundRestart("LeavePickingStartingSide", 1.0f);
             }
 
-            _mixScrims.logger.LogInformation("SetMatchState: {Previous} -> {New} (playing CT:{Ct}/T:{T}, picked CT:{PCt}/T:{PT}, ready:{Ready})",
-                previous, state,
-                _mixScrims.playingCtPlayers.Count, _mixScrims.playingTPlayers.Count,
-                _mixScrims.pickedCtPlayers.Count, _mixScrims.pickedTPlayers.Count,
-                _mixScrims.readyPlayers.Count);
+            if (_mixScrims.cfg.DetailedLogging)
+            {
+                _mixScrims.logger.LogInformation("SetMatchState: {Previous} -> {New} (playing CT:{Ct}/T:{T}, picked CT:{PCt}/T:{PT}, ready:{Ready})",
+                    previous, state,
+                    _mixScrims.playingCtPlayers.Count, _mixScrims.playingTPlayers.Count,
+                    _mixScrims.pickedCtPlayers.Count, _mixScrims.pickedTPlayers.Count,
+                    _mixScrims.readyPlayers.Count);
+            }
             RaiseMatchStateChanged(previous, state);
         }
     }
@@ -701,7 +707,8 @@ public class MixScrimsService : IMixScrims
         _mixScrims.PluginState = state;
         if (previous != state)
         {
-            _mixScrims.logger.LogInformation("SetPluginState: {Previous} -> {New}", previous, state);
+            if (_mixScrims.cfg.DetailedLogging)
+                _mixScrims.logger.LogInformation("SetPluginState: {Previous} -> {New}", previous, state);
             RaisePluginStateChanged(previous, state);
         }
     }

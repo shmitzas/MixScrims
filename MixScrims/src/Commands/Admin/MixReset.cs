@@ -14,12 +14,14 @@ public partial class MixScrims
         var admin = context.Sender;
         if (admin == null)
         {
-            logger.LogInformation("Mix state has been reset by Console");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("Mix state has been reset by Console");
             PrintMessageToAllPlayers(Core.Localizer["command.mix_reset", "Console"]);
         }
         else
         {
-            logger.LogInformation("Mix state has been reset by {AdminName}", admin.Controller.PlayerName);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("Mix state has been reset by {AdminName}", admin.Controller.PlayerName);
             PrintMessageToAllPlayers(Core.Localizer["command.mix_reset", admin.Controller.PlayerName]);
         }
 

@@ -46,12 +46,14 @@ public partial class MixScrims
 
         if (admin == null)
         {
-            logger.LogInformation("Map changed by Console");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("Map changed by Console");
             PrintMessageToAllPlayers(Core.Localizer["command.go_to_map", "Console", map.DisplayName]);
         }
         else
         {
-            logger.LogInformation("Map changed by {AdminName}", admin.Controller.PlayerName);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("Map changed by {AdminName}", admin.Controller.PlayerName);
             PrintMessageToAllPlayers(Core.Localizer["command.go_to_map", admin.Controller.PlayerName, map.DisplayName]);
         }
 

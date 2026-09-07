@@ -33,18 +33,21 @@ public partial class MixScrims
         {
             if (admin == null)
             {
-                logger.LogInformation("Match started by force by Admin (null)");
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("Match started by force by Admin (null)");
                 PrintMessageToAllPlayers(Core.Localizer["command.force.match_start", "Admin"]);
             }
             else
             {
-                logger.LogInformation("Match started by force by {AdminName}", admin.Controller.PlayerName);
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("Match started by force by {AdminName}", admin.Controller.PlayerName);
                 PrintMessageToAllPlayers(Core.Localizer["command.force.match_start", admin.Controller.PlayerName]);
             }
         }
         else
         {
-            logger.LogInformation("Match started by force by Console");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("Match started by force by Console");
             PrintMessageToAllPlayers(Core.Localizer["command.force.match_start", "Console"]);
         }
 

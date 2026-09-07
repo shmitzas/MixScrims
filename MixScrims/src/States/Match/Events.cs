@@ -283,7 +283,8 @@ public partial class MixScrims
             }
 
             gameRules.TerminateRound(reason, delay);
-            logger.LogInformation("RestartRoundManually[{Site}]: TerminateRound({Reason}, delay={Delay:F2}s) queued.", callSite, reason, delay);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("RestartRoundManually[{Site}]: TerminateRound({Reason}, delay={Delay:F2}s) queued.", callSite, reason, delay);
             return true;
         }
         catch (Exception ex)
@@ -407,12 +408,30 @@ public partial class MixScrims
             {
                 gameRules.TotalRoundsPlayed = 0;
                 gameRules.TotalRoundsPlayedUpdated();
+
+                // Halftime and the OT phase boundaries count off THIS field, not
+                // TotalRoundsPlayed. Leaving the knife round in it made halftime land one
+                // round early.
+                gameRules.RoundsPlayedThisPhase = 0;
+                gameRules.RoundsPlayedThisPhaseUpdated();
+
+                // CCSGameRules carries TWO total-round counters: the networked
+                // m_totalRoundsPlayed above (HUD/display) and the server-side
+                // m_iTotalRoundsPlayed, which SwiftlyS2 generates as TotalRoundsPlayed1
+                // because the names collide. The halftime check reads the server-side one,
+                // so missing it kept halftime a round early even with the other two zeroed.
+                // Server-only, hence no Updated() twin.
+                gameRules.TotalRoundsPlayed1 = 0;
             }
 
+            int statsCleared = ResetPlayerMatchStats(players);
             int reset = SetMoneyForPlayers(players, money);
 
-            logger.LogInformation("{Site}: scores {Ct}:{T} -> 0:0, rounds -> 0, {Count} players set to ${Money}.",
-                callSite, ctScore, tScore, reset, money);
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation("{Site}: scores {Ct}:{T} -> 0:0, rounds -> 0, stats cleared for {Stats}, {Count} players set to ${Money}.",
+                    callSite, ctScore, tScore, statsCleared, reset, money);
+            }
         }
         catch (Exception ex)
         {
@@ -434,5 +453,49 @@ public partial class MixScrims
             reset++;
         }
         return reset;
+    }
+
+    /// <summary>
+    /// Clears the scoreboard stats <c>mp_restartgame</c>'s complete-reset branch used to wipe.
+    /// Without this the knife round's kills / deaths / assists / damage carry into the match.
+    /// <c>MatchStats</c> inherits the per-round stat fields, so they are read straight off it.
+    /// </summary>
+    /// <returns>The number of players whose stats were written.</returns>
+    internal int ResetPlayerMatchStats(IEnumerable<IPlayer> players)
+    {
+        int cleared = 0;
+        foreach (var player in players)
+        {
+            if (!IsPlayerValid(player)) continue;
+
+            try
+            {
+                var controller = player.Controller;
+                if (controller is null) continue;
+
+                controller.Score = 0;
+                controller.ScoreUpdated();
+                controller.MVPs = 0;
+                controller.MVPsUpdated();
+
+                var tracking = controller.ActionTrackingServices;
+                if (tracking is null) continue;
+
+                var stats = tracking.MatchStats;
+                stats.Kills = 0; stats.KillsUpdated();
+                stats.Deaths = 0; stats.DeathsUpdated();
+                stats.Assists = 0; stats.AssistsUpdated();
+                stats.Damage = 0; stats.DamageUpdated();
+                stats.HeadShotKills = 0; stats.HeadShotKillsUpdated();
+                tracking.MatchStatsUpdated();
+
+                cleared++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "ResetPlayerMatchStats: failed to clear stats for a player; continuing.");
+            }
+        }
+        return cleared;
     }
 }

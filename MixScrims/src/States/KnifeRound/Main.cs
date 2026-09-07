@@ -667,8 +667,17 @@ public partial class MixScrims
             {
                 player.SwitchTeamAsync(Team.CT);
             }
+            else if (currentTeam == (int)Team.CT || currentTeam == (int)Team.T)
+            {
+                // Side swap: SwitchTeam moves the player in place and keeps the pawn alive, which
+                // is what the engine itself does at halftime. ChangeTeam kills and recreates each
+                // pawn, so a 10-man swap queues ten destroy/create pairs that the match-start
+                // restart can land in the middle of.
+                player.SwitchTeamAsync(Team.CT);
+            }
             else
             {
+                // From Spectator/unassigned there is no pawn to move - only ChangeTeam spawns them.
                 player.ChangeTeamAsync(Team.CT);
             }
         }
@@ -692,6 +701,10 @@ public partial class MixScrims
             if (cfg.DetailedLogging)
                 logger.LogInformation("Moving {PlayerName} to T", player.Controller!.PlayerName);
             if (IsBot(player))
+            {
+                player.SwitchTeamAsync(Team.T);
+            }
+            else if (currentTeam == (int)Team.CT || currentTeam == (int)Team.T)
             {
                 player.SwitchTeamAsync(Team.T);
             }

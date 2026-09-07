@@ -244,7 +244,8 @@ public sealed partial class MixScrims
         }
 
         var name = player.Name ?? $"#{player.PlayerID}";
-        logger.LogInformation("AddPlayerToReadyList: called for {Player}", name);
+        if (cfg.DetailedLogging)
+            logger.LogInformation("AddPlayerToReadyList: called for {Player}", name);
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
@@ -283,7 +284,8 @@ public sealed partial class MixScrims
     internal void RemovePlayerFromReadyList(IPlayer player, bool announce = false)
     {
         var name = player.Name ?? $"#{player.PlayerID}";
-        logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
+        if (cfg.DetailedLogging)
+            logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
@@ -519,8 +521,7 @@ public sealed partial class MixScrims
     {
         if (player == null)
         {
-            if (cfg.DetailedLogging)
-                logger.LogWarning("PunishOnLeave: player is null");
+            logger.LogWarning("PunishOnLeave: player is null");
             return;
         }
 
@@ -614,15 +615,13 @@ public sealed partial class MixScrims
                 var players = GetPlayers();
                 if (players == null)
                 {
-                    if (cfg.DetailedLogging)
-                        logger.LogWarning("PunishPlayer: players list is null, cannot verify rejoin status");
+                    logger.LogWarning("PunishPlayer: players list is null, cannot verify rejoin status");
                     return;
                 }
 
                 if (players.Count == 0)
                 {
-                    if (cfg.DetailedLogging)
-                        logger.LogWarning("PunishPlayer: players list is empty, cannot verify rejoin status");
+                    logger.LogWarning("PunishPlayer: players list is empty, cannot verify rejoin status");
                     return;
                 }
 
@@ -650,8 +649,7 @@ public sealed partial class MixScrims
     {
         if (!playersWaitingForPunishment.Contains(steamId))
         {
-            if (cfg.DetailedLogging)
-                logger.LogWarning("ExecutePunishmentCommand: player with SteamID {SteamId} is no longer queued for punishment", steamId);
+            logger.LogWarning("ExecutePunishmentCommand: player with SteamID {SteamId} is no longer queued for punishment", steamId);
             return;
         }
 
@@ -712,7 +710,8 @@ public sealed partial class MixScrims
             // The server hibernates with 0 players so timers won't fire.
             if (currentPlayerCount == 0)
             {
-                logger.LogInformation("CheckAutoResetOnLeave: No human players remaining, deferring reset to next player join.");
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("CheckAutoResetOnLeave: No human players remaining, deferring reset to next player join.");
                 autoResetOnLeaveTimer?.Cancel();
                 autoResetOnLeaveTimer = null;
                 resetMixOnFirstJoin = true;
@@ -726,7 +725,8 @@ public sealed partial class MixScrims
                 return;
             }
 
-            logger.LogInformation("CheckAutoResetOnLeave: Player count {Current} below threshold {Required}, starting grace period of {Seconds}s", currentPlayerCount, requiredPlayers, cfg.AutoResetOnLeave.GracePeriodSeconds);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CheckAutoResetOnLeave: Player count {Current} below threshold {Required}, starting grace period of {Seconds}s", currentPlayerCount, requiredPlayers, cfg.AutoResetOnLeave.GracePeriodSeconds);
 
             PrintMessageToAllPlayers(Core.Localizer["announcement.auto_reset.warning", currentPlayerCount, requiredPlayers, cfg.AutoResetOnLeave.GracePeriodSeconds]);
 
@@ -742,7 +742,8 @@ public sealed partial class MixScrims
                 var playersNow = GetPlayingPlayers().Count(p => !IsBot(p));
                 if (playersNow < requiredPlayers)
                 {
-                    logger.LogInformation("CheckAutoResetOnLeave: Grace period expired, player count {Current} still below {Required}. Resetting match.", playersNow, requiredPlayers);
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("CheckAutoResetOnLeave: Grace period expired, player count {Current} still below {Required}. Resetting match.", playersNow, requiredPlayers);
                     PrintMessageToAllPlayers(Core.Localizer["announcement.auto_reset.triggered"]);
                     autoResetOnLeaveTimer = null;
                     ResetPluginState();

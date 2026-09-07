@@ -33,15 +33,15 @@ public partial class MixScrims
 
         pendingMatchStartReset = true;
 
-        // Replaces `mp_restartgame 2` (see repo memory
-        // `mixscrims-mp-restartgame-team-limits-segv.md`). The transition is the restart the
-        // knife round's own round_end already armed and PickingStartingSide parked, simply
-        // released here — so there is exactly ONE RestartRound between knife round and match,
-        // whatever the captain's pick latency was. The score / round-counter / money reset that
-        // mp_restartgame used to do is now ResetMatchStartState(), run from HandleRoundStart
-        // once the transition lands.
+        // Replaces the hand-rolled reset (see repo memory
+        // `mixscrims-mp-restartgame-team-limits-segv.md`). Only mp_restartgame's complete-reset
+        // branch clears the knife round out of CS2's OWN bookkeeping - the round-results strip,
+        // per-player match stats, and all three round counters. Reimplementing that kept missing
+        // fields one at a time. The pick phase still parks the engine's auto-restart, so this is
+        // the single round transition between knife round and match; mp_restartgame overwrites
+        // the parked m_flRestartRoundTime on its way through.
         //   T+0.5s  exec cfg  (cvars only)
-        //   T+2.5s  release the parked restart -> RestartRound at T+3.5s
+        //   T+1.0s  mp_restartgame 3 -> RestartRound at T+4s
         var cfgToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
         {
             if (mixScrimsService.GetCurrentMatchState() != MatchState.Match)
@@ -74,7 +74,10 @@ public partial class MixScrims
         });
         Core.Scheduler.StopOnMapChange(cfgToken);
 
-        var restartToken = Core.Scheduler.DelayBySeconds(2.5f, () =>
+        // 1s after MovePlayersToDesignatedTeamsPreMatch above: its ChangeTeamAsync /
+        // SwitchTeamAsync calls only queue the pawn transitions, so firing the restart on the
+        // same beat would run CleanUpMap + the respawn wave over moves still in flight.
+        var restartToken = Core.Scheduler.DelayBySeconds(1.0f, () =>
         {
             if (mixScrimsService.GetCurrentMatchState() != MatchState.Match)
             {
@@ -82,16 +85,15 @@ public partial class MixScrims
                 return;
             }
 
-            if (ReleasePendingRoundRestart("StartMatch", 1.0f))
+            if (Core.Engine is not { } restartEngine)
             {
-                logger.LogInformation("StartMatch: released the parked round restart (lands in 1.00s).");
+                logger.LogWarning("StartMatch: Core.Engine unavailable; falling back to TerminateRound.");
+                RestartRoundManually("StartMatch", RoundEndReason.GameCommencing, 1.0f);
                 return;
             }
 
-            // Nothing was armed - the phase was entered without a knife round (admin start,
-            // or the engine consumed the timer anyway), so create the transition ourselves.
-            logger.LogWarning("StartMatch: no parked round restart to release; falling back to TerminateRound.");
-            RestartRoundManually("StartMatch", RoundEndReason.GameCommencing, 1.0f);
+            restartEngine.ExecuteCommand("mp_restartgame 3");
+            logger.LogInformation("StartMatch: mp_restartgame 3 issued (native full reset).");
         });
         Core.Scheduler.StopOnMapChange(restartToken);
 
@@ -292,8 +294,11 @@ public partial class MixScrims
             if (newCt.Any(existing => SafeSteamId(existing) == sid)) continue;
             if (newCt.Count >= maxTeamSize)
             {
-                logger.LogInformation("ResyncPlayingListsFromEngine: rejecting untracked CT adoption for {PlayerName} (SteamID {SteamId}) - team at cap ({Count}/{Max}), forcing to Spectator.",
-                    SafePlayerName(p), sid, newCt.Count, maxTeamSize);
+                if (cfg.DetailedLogging)
+                {
+                    logger.LogInformation("ResyncPlayingListsFromEngine: rejecting untracked CT adoption for {PlayerName} (SteamID {SteamId}) - team at cap ({Count}/{Max}), forcing to Spectator.",
+                        SafePlayerName(p), sid, newCt.Count, maxTeamSize);
+                }
                 ScheduleForceToSpectator(p, "error.team.slot_unavailable");
                 evictedCt++;
                 continue;
@@ -309,8 +314,11 @@ public partial class MixScrims
             if (newT.Any(existing => SafeSteamId(existing) == sid)) continue;
             if (newT.Count >= maxTeamSize)
             {
-                logger.LogInformation("ResyncPlayingListsFromEngine: rejecting untracked T adoption for {PlayerName} (SteamID {SteamId}) - team at cap ({Count}/{Max}), forcing to Spectator.",
-                    SafePlayerName(p), sid, newT.Count, maxTeamSize);
+                if (cfg.DetailedLogging)
+                {
+                    logger.LogInformation("ResyncPlayingListsFromEngine: rejecting untracked T adoption for {PlayerName} (SteamID {SteamId}) - team at cap ({Count}/{Max}), forcing to Spectator.",
+                        SafePlayerName(p), sid, newT.Count, maxTeamSize);
+                }
                 ScheduleForceToSpectator(p, "error.team.slot_unavailable");
                 evictedT++;
                 continue;

@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.11.1",
+    Version = "1.11.2",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -119,7 +119,8 @@ public partial class MixScrims : BasePlugin
         }
 
         UnregisterCommands();
-        logger?.LogInformation("MixScrims unloading.");
+        if (cfg.DetailedLogging)
+            logger?.LogInformation("MixScrims unloading.");
     }
 
     /// <summary>
@@ -231,7 +232,7 @@ public partial class MixScrims : BasePlugin
             suppressBuiltInMenus = cfg.SuppressBuiltInMenus;
             suppressBuiltInCenterHtml = cfg.SuppressBuiltInCenterHtml;
 
-            cfgMonitor.OnChange(_ =>
+            cfgMonitor.OnChange(newCfg =>
             {
                 // Only PluginState is re-derived. The three seeded bools above are
                 // deliberately left alone: each has a runtime setter on the shared
@@ -239,7 +240,7 @@ public partial class MixScrims : BasePlugin
                 // PreventNewPlayersJoining), so re-seeding would silently revert a
                 // consumer's override on an unrelated config edit.
                 mixScrimsService.SetPluginState(cfg.TestMode ? PluginState.Staging : PluginState.Production);
-                logger.LogInformation("MixScrims: config.jsonc reloaded (command names stay bound until plugin reload).");
+                logger.LogWarning("MixScrims: config.jsonc reloaded (command names stay bound until plugin reload).");
             });
         }
         catch (Exception ex)
@@ -275,7 +276,10 @@ public partial class MixScrims : BasePlugin
             var provider = services.BuildServiceProvider();
 
             mapsConfigMonitor = provider.GetRequiredService<IOptionsMonitor<MapsConfig>>();
-            mapsConfigMonitor.OnChange(_ => logger.LogInformation("MixScrims: maps.jsonc reloaded."));
+            mapsConfigMonitor.OnChange(_ =>
+            {
+                logger.LogWarning("MixScrims: maps.jsonc reloaded.");
+            });
         }
         catch (Exception ex)
         {
@@ -310,7 +314,10 @@ public partial class MixScrims : BasePlugin
             var provider = services.BuildServiceProvider();
 
             discordConfigMonitor = provider.GetRequiredService<IOptionsMonitor<DiscordConfig>>();
-            discordConfigMonitor.OnChange(_ => logger.LogInformation("MixScrims: discord_config.jsonc reloaded."));
+            discordConfigMonitor.OnChange(_ =>
+            {
+                logger.LogWarning("MixScrims: discord_config.jsonc reloaded.");
+            });
         }
         catch (Exception ex)
         {

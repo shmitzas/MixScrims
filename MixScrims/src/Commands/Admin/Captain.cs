@@ -53,7 +53,13 @@ public partial class MixScrims
                 return;
             }
 
-            var players = GetPlayingPlayers();
+            // Every connected player is eligible; already holding a captain slot is the
+            // only disqualifier. GetPlayingPlayers() was too narrow — it drops anyone in
+            // Spectator/unassigned, who is a legal captain target (PickCtCaptain has no
+            // team requirement, and PickRandomCaptain deliberately considers spectators).
+            // It also gated the count check below, so a lobby that had not picked teams
+            // yet aborted the command outright, including the consumer-menu path.
+            var players = GetPlayers();
             // Compare by PlayerID (unique per slot), NOT SteamID — bots all share
             // SteamID = 0, so a SteamID compare would wipe every bot from the
             // eligible list the moment either captain is a bot.
