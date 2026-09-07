@@ -33,10 +33,7 @@ public partial class MixScrims
         // Prevent duplicate vote processing
         if (isSurrenderVoteInProgress)
         {
-            if (cfg.DetailedLogging)
-            {
-                logger.LogWarning("StartSurrenderVote: Vote already in progress, ignoring duplicate call");
-            }
+            logger.LogWarning("StartSurrenderVote: Vote already in progress, ignoring duplicate call");
             return;
         }
 
@@ -161,10 +158,10 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Majority of the whole team. The caller's implicit yes is seeded into the yes
-    /// count but excluded from the eligible count, so the team is eligible + 1.
+    /// Unanimous - every player in the team. The caller's implicit yes is seeded into
+    /// the yes count but excluded from the eligible count, so the team is eligible + 1.
     /// </summary>
-    internal int SurrenderRequiredVotes() => (surrenderTotalEligibleVotes + 1) / 2 + 1;
+    internal int SurrenderRequiredVotes() => surrenderTotalEligibleVotes + 1;
 
     /// <summary>
     /// Resolves the vote the moment the outcome is settled, so players who never
@@ -270,10 +267,7 @@ public partial class MixScrims
         // Prevent duplicate processing
         if (!isSurrenderVoteInProgress)
         {
-            if (cfg.DetailedLogging)
-            {
-                logger.LogWarning("SurrenderVoteResult: No vote in progress, ignoring duplicate call");
-            }
+            logger.LogWarning("SurrenderVoteResult: No vote in progress, ignoring duplicate call");
             return;
         }
 
@@ -335,13 +329,15 @@ public partial class MixScrims
         {
             if (!suppressBuiltInCenterHtml)
                 Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.ct", matchResetDelay], matchResetDelay * 1000);
-            logger.LogInformation("SurrenderVoteResult: CT voted for surrender, terminating round");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("SurrenderVoteResult: CT voted for surrender, terminating round");
         }
         else if (team == Team.T)
         {
             if (!suppressBuiltInCenterHtml)
                 Core.PlayerManager.SendCenterHTMLAsync(Core.Localizer["announcement.surrender.success.t", matchResetDelay], matchResetDelay * 1000);
-            logger.LogInformation("SurrenderVoteResult: T voted for surrender, terminating round");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("SurrenderVoteResult: T voted for surrender, terminating round");
         }
 
         // Trigger match canceled event
@@ -398,7 +394,8 @@ public partial class MixScrims
                 try
                 {
                     Core.Game.GoToIntermission();
-                    logger.LogInformation("ForceSurrenderMatchEnd: {Team} surrendered - match sent to intermission.", team);
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("ForceSurrenderMatchEnd: {Team} surrendered - match sent to intermission.", team);
                 }
                 catch (Exception ex)
                 {

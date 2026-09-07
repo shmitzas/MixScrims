@@ -57,6 +57,7 @@ public partial class MixScrims
 
         var token = Core.Scheduler.DelayBySeconds(1, () => StayStartingSides(player));
         Core.Scheduler.StopOnMapChange(token);
-        logger.LogInformation("OnStay: Captain {PlayerName} chose to !stay", player.Controller.PlayerName);
+        if (cfg.DetailedLogging)
+            logger.LogInformation("OnStay: Captain {PlayerName} chose to !stay", player.Controller.PlayerName);
     }
 }

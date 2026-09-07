@@ -81,7 +81,8 @@ public sealed partial class MixScrims
         {
             if (player == null || !player.IsValid)
             {
-                logger.LogDebug("PrintMessageToPlayer: target is not a player entity anymore");
+                if (cfg.DetailedLogging)
+                    logger.LogDebug("PrintMessageToPlayer: target is not a player entity anymore");
                 return;
             }
             player.SendChat(GetServerPrefix() + " " + message);
@@ -157,15 +158,13 @@ public sealed partial class MixScrims
     {
         if (captainCt != null && !IsPlayerValid(captainCt))
         {
-            if (cfg.DetailedLogging)
-                logger.LogWarning("EnsureCaptainsAlive: CT captain reference is invalid/disposed, clearing.");
+            logger.LogWarning("EnsureCaptainsAlive: CT captain reference is invalid/disposed, clearing.");
             AssignCaptain(Team.CT, null);
         }
 
         if (captainT != null && !IsPlayerValid(captainT))
         {
-            if (cfg.DetailedLogging)
-                logger.LogWarning("EnsureCaptainsAlive: T captain reference is invalid/disposed, clearing.");
+            logger.LogWarning("EnsureCaptainsAlive: T captain reference is invalid/disposed, clearing.");
             AssignCaptain(Team.T, null);
         }
 
@@ -346,7 +345,8 @@ public sealed partial class MixScrims
     /// </summary>
     internal void PauseMatch()
     {
-        logger.LogInformation("Pausing match");
+        if (cfg.DetailedLogging)
+            logger.LogInformation("Pausing match");
         Core.Scheduler.NextTick(() =>
         {
             if (Core.Engine is { } engine)
@@ -361,7 +361,8 @@ public sealed partial class MixScrims
     /// </summary>
     internal void UnpauseMatch()
     {
-        logger.LogInformation("Unpausing match");
+        if (cfg.DetailedLogging)
+            logger.LogInformation("Unpausing match");
         Core.Scheduler.NextTick(() =>
         {
             if (Core.Engine is { } engine)

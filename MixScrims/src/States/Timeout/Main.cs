@@ -180,10 +180,7 @@ public partial class MixScrims
         // Prevent duplicate vote processing
         if (isTimeoutVoteInProgress)
         {
-            if (cfg.DetailedLogging)
-            {
-                logger.LogWarning("StartTimeoutVote: Vote already in progress, ignoring duplicate call");
-            }
+            logger.LogWarning("StartTimeoutVote: Vote already in progress, ignoring duplicate call");
             return;
         }
 
@@ -322,10 +319,11 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Majority of the whole team. The caller's implicit yes is seeded into the yes
-    /// count but excluded from the eligible count, so the team is eligible + 1.
+    /// Everyone in the team but one. The caller's implicit yes is seeded into the yes
+    /// count but excluded from the eligible count, so the team is eligible + 1 and the
+    /// threshold is one below that. Floored at 1 so a vote can never pass on zero yeses.
     /// </summary>
-    internal int TimeoutRequiredVotes() => (timeoutTotalEligibleVotes + 1) / 2 + 1;
+    internal int TimeoutRequiredVotes() => Math.Max(1, timeoutTotalEligibleVotes);
 
     /// <summary>
     /// Resolves the vote the moment the outcome is settled, so players who never
@@ -431,10 +429,7 @@ public partial class MixScrims
         // Prevent duplicate processing
         if (!isTimeoutVoteInProgress)
         {
-            if (cfg.DetailedLogging)
-            {
-                logger.LogWarning("TimeoutVoteResult: No vote in progress, ignoring duplicate call");
-            }
+            logger.LogWarning("TimeoutVoteResult: No vote in progress, ignoring duplicate call");
             return;
         }
 

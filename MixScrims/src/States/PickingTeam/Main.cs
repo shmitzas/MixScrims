@@ -336,8 +336,11 @@ public partial class MixScrims
             var randomIndex = Random.Shared.Next(players.Count);
             var selectedPlayer = players[randomIndex];
             var selectedPlayerName = selectedPlayer.Name;
-            logger.LogInformation("PromptCaptainToPickPlayer: {Team} captain {CaptainName} is a bot; auto-picking {PlayerName}.",
-                team == Team.CT ? "CT" : "T", captain.Name, selectedPlayerName);
+            if (cfg.DetailedLogging)
+            {
+                logger.LogInformation("PromptCaptainToPickPlayer: {Team} captain {CaptainName} is a bot; auto-picking {PlayerName}.",
+                    team == Team.CT ? "CT" : "T", captain.Name, selectedPlayerName);
+            }
             if (team == Team.CT)
             {
                 AssignPickedPlayerToTeamCt(captain, selectedPlayerName);

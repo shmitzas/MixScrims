@@ -47,12 +47,14 @@ public partial class MixScrims
         // (invalid state, exception) never fires a misleading "players were forced" message.
         if (admin == null)
         {
-            logger.LogInformation("Players were forced into ready state by force by Console");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("Players were forced into ready state by force by Console");
             PrintMessageToAllPlayers(Core.Localizer["command.force.ready", "Console"]);
         }
         else
         {
-            logger.LogInformation("Players were forced into ready state by {AdminName}", admin.Controller.PlayerName);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("Players were forced into ready state by {AdminName}", admin.Controller.PlayerName);
             PrintMessageToAllPlayers(Core.Localizer["command.force.ready", admin.Controller.PlayerName]);
         }
     }

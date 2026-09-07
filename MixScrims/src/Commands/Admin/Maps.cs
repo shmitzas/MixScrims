@@ -15,6 +15,7 @@ public partial class MixScrims
         var maps = GetMapsToVote();
         if (admin == null)
         {
+            // Console has no chat channel — these logs ARE the command's output, so they stay ungated.
             logger.LogInformation("Voteable maps list:");
             foreach (var map in maps)
             {

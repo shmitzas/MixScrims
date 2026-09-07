@@ -18,6 +18,45 @@ public partial class MixScrims
         LoadWarmupConfig();
     }
 
+    // Map that match_base.cfg was last applied on.
+    private string? matchBaseCfgMap;
+
+    /// <summary>
+    /// Applies the ~90 match cvars that no phase cfg ever overrides, once per map.
+    /// </summary>
+    /// <remarks>
+    /// These used to live in match_start.cfg. Exec'ing all ~112 cvars there froze the server
+    /// for 2-4s at every single match start — the engine skipped 130-240 ticks and every
+    /// client reported <c>high frame misdelivery</c>. The three smaller phase cfgs (36-41
+    /// cvars) never did. Doing it during warmup keeps the cost where nobody is playing.
+    /// Safe to run only once per map because warmup.cfg / teampick.cfg / knife_round.cfg
+    /// never set any of these to a different value — anything they do change is restored by
+    /// match_start.cfg instead.
+    /// </remarks>
+    internal void LoadMatchBaseConfig()
+    {
+        if (Core.Engine is not { } engine)
+        {
+            logger.LogWarning("LoadMatchBaseConfig: Core.Engine unavailable; skipping match_base.cfg.");
+            return;
+        }
+
+        var map = engine.GlobalVars.MapName.ToString();
+        if (string.IsNullOrEmpty(map) || map == matchBaseCfgMap)
+            return;
+
+        matchBaseCfgMap = map;
+
+        if (cfg.DetailedLogging)
+            logger.LogInformation("LoadMatchBaseConfig: applying match_base.cfg on {Map}", map);
+
+        Core.Scheduler.NextTick(() =>
+        {
+            if (Core.Engine is { } baseEngine)
+                baseEngine.ExecuteCommand("exec mixscrims/match_base.cfg");
+        });
+    }
+
     /// <summary>
     /// Loads the warmup configuration for the server and executes overrides based on the current plugin state
     /// state.
@@ -25,6 +64,8 @@ public partial class MixScrims
     {
         if (cfg.DetailedLogging)
             logger.LogInformation("Loading warmup configuration");
+
+        LoadMatchBaseConfig();
 
         Core.Scheduler.NextTick(() =>
         {

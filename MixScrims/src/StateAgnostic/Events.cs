@@ -67,7 +67,8 @@ partial class MixScrims
             }
             else
             {
-                logger.LogInformation("HandleStateAgnosticMapLoad: External map change with resetMixOnFirstJoin set (state={State}) — running ResetPluginState now.", currentState);
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("HandleStateAgnosticMapLoad: External map change with resetMixOnFirstJoin set (state={State}) — running ResetPluginState now.", currentState);
                 resetMixOnFirstJoin = false;
                 ResetPluginState();
             }
@@ -90,7 +91,8 @@ partial class MixScrims
 
         if (resetMixOnFirstJoin)
         {
-            logger.LogInformation("HandleClientPutInServer: resetMixOnFirstJoin flag is set, resetting match.");
+            if (cfg.DetailedLogging)
+                logger.LogInformation("HandleClientPutInServer: resetMixOnFirstJoin flag is set, resetting match.");
             resetMixOnFirstJoin = false;
             ResetPluginState();
             return;
@@ -777,14 +779,16 @@ partial class MixScrims
                 {
                     playingCtPlayers.RemoveAll(p => SafeSteamId(p) == moveSteamId);
                     playingCtPlayers.Add(player);
-                    logger.LogInformation("HandlePlayerChangeTeam: Adopted untracked {PlayerName} into playingCtPlayers (pre-swap team CT) during programmatic move - likely a silent CS2 team restore on reconnect.", SafePlayerName(player));
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("HandlePlayerChangeTeam: Adopted untracked {PlayerName} into playingCtPlayers (pre-swap team CT) during programmatic move - likely a silent CS2 team restore on reconnect.", SafePlayerName(player));
                     return HookResult.Continue;
                 }
                 if (adoptTeam == (int)Team.T)
                 {
                     playingTPlayers.RemoveAll(p => SafeSteamId(p) == moveSteamId);
                     playingTPlayers.Add(player);
-                    logger.LogInformation("HandlePlayerChangeTeam: Adopted untracked {PlayerName} into playingTPlayers (pre-swap team T) during programmatic move - likely a silent CS2 team restore on reconnect.", SafePlayerName(player));
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("HandlePlayerChangeTeam: Adopted untracked {PlayerName} into playingTPlayers (pre-swap team T) during programmatic move - likely a silent CS2 team restore on reconnect.", SafePlayerName(player));
                     return HookResult.Continue;
                 }
             }
@@ -1081,8 +1085,11 @@ partial class MixScrims
                     return;
                 }
 
-                logger.LogInformation("SchedulePostJoinOverflowCheck - {Team}: over cap ({Count}/{Max}) after {PlayerName} joined - reverting most recent joiner to Spectator.",
-                    team, physicalCount, maxTeamSize, SafePlayerName(live));
+                if (cfg.DetailedLogging)
+                {
+                    logger.LogInformation("SchedulePostJoinOverflowCheck - {Team}: over cap ({Count}/{Max}) after {PlayerName} joined - reverting most recent joiner to Spectator.",
+                        team, physicalCount, maxTeamSize, SafePlayerName(live));
+                }
 
                 playingList.RemoveAll(p => SafeSteamId(p) == playerSteamId);
                 ScheduleForceToSpectator(live, "error.team.slot_unavailable");

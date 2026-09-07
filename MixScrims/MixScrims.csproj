@@ -66,6 +66,7 @@
 	    <Copy SourceFiles="$(ProjectDir)csgo_configs\warmup.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
 	    <Copy SourceFiles="$(ProjectDir)csgo_configs\teampick.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
 	    <Copy SourceFiles="$(ProjectDir)csgo_configs\knife_round.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
+	    <Copy SourceFiles="$(ProjectDir)csgo_configs\match_base.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
 	    <Copy SourceFiles="$(ProjectDir)csgo_configs\match_start.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
 	    <Copy SourceFiles="$(ProjectDir)csgo_configs\staging_overrides.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />
 	    <Copy SourceFiles="$(ProjectDir)csgo_configs\production_overrides.cfg" DestinationFolder="$(ConfigOutputDir)cfg\mixscrims" />

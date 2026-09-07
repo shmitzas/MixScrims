@@ -130,6 +130,22 @@ Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");  // mp_give_player
 ```
 CFG files **must exist on CS2 server** at `csgo/cfg/mixscrims/`. Environment-specific overrides use `staging_overrides.cfg` or `production_overrides.cfg` (controlled by `cfg.TestMode`).
 
+> **Invariant: keep phase cfgs small — a big cfg exec'd with players connected freezes the server.**
+> `match_start.cfg` used to carry all ~112 match cvars. Exec'ing it at match start cost **2-4s of
+> skipped simulation every single time** (9/9 matches in one session): the engine dropped 130-240
+> ticks, every client logged `high frame misdelivery ... 128/0 of 815 frames dropped`, and
+> `StartMatch`'s T+1.0s callback landed at T+3..T+5. The other three phase cfgs (36-41 cvars each)
+> never did it. Split as of v1.11.1:
+> - **`match_base.cfg`** (~87 cvars) — everything no phase cfg overrides. Exec'd **once per map**
+>   by `LoadMatchBaseConfig()` (`States/Warmup/Main.cs`), called from `LoadWarmupConfig()` and
+>   deduped on map name, so the cost lands while nobody is playing.
+> - **`match_start.cfg`** (23 cvars) — only what `warmup.cfg` / `teampick.cfg` / `knife_round.cfg`
+>   actually change and therefore has to be restored.
+>
+> Adding a cvar to `match_start.cfg` is only correct if a pre-match cfg sets it to a *different*
+> value; otherwise it belongs in `match_base.cfg`. Diagnosis in repo memory
+> `mixscrims-match-start-cfg-exec-freeze.md`.
+
 > **Invariant: phase cfgs are cvars-only. Never add `mp_restartgame` to one.**
 > Every round transition is driven from C# via `RestartRoundManually(callSite, RoundEndReason.GameCommencing, delay)`
 > (`States/Match/Events.cs`), which routes through `CCSGameRules::TerminateRound` instead of
