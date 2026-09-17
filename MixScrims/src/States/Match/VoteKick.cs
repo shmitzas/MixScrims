@@ -225,14 +225,13 @@ public partial class MixScrims
 
         SendVoteKickProgressCenterHtml(team);
 
-        // Any NO vote fails the kick immediately
+        // Any NO vote fails the kick immediately. Routed through VoteKickResult
+        // rather than torn down inline: it is the only path that raises
+        // VoteKickResult, and a consumer replacing the built-in UI has nothing
+        // else telling it the vote closed.
         if (!voteYes)
         {
-            var target = team == Team.CT ? voteKickTargetCt : voteKickTargetT;
-            var targetName = target?.Name ?? "?";
-            PrintMessageToTeam(team, Core.Localizer["command.votekick.failed", targetName]);
-            CloseVoteKickMenusForTeam(team);
-            ResetVoteKickState(team);
+            VoteKickResult(team, false);
             return;
         }
 
