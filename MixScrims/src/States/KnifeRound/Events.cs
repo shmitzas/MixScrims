@@ -2,6 +2,7 @@
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.Misc;
+using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using MixScrims.Contract;
 
@@ -11,7 +12,7 @@ public partial class MixScrims
 {
     /// <summary>
     /// Handles the end of a knife round and initiates the process for the winning team's captain to choose the starting
-    /// side.
+    /// side. A knife round ended by the clock (or drawn) gets a random winner so the match never stalls.
     /// </summary>
     [GameEventHandler(HookMode.Pre)]
     public HookResult HandleRoundEndOnKnifeRound(EventRoundEnd @event)
@@ -30,22 +31,41 @@ public partial class MixScrims
                 return HookResult.Continue;
             }
 
+            var reason = (RoundEndReason)@event.Reason;
+            var eventWinner = (Team)@event.Winner;
+            // No C4 here: these mean the clock ran out, or (RoundDraw) both teams died at once.
+            var clockOrDraw = reason is RoundEndReason.RoundDraw or RoundEndReason.TargetSaved
+                or RoundEndReason.HostagesNotRescued or RoundEndReason.TerroristsNotEscaped;
+
+            Team winner;
+            if (!clockOrDraw && eventWinner is Team.T or Team.CT)
+            {
+                winner = eventWinner;
+            }
+            else if (reason == RoundEndReason.GameCommencing)
+            {
+                // Not our start restart (consumed above): leave the engine's restart armed so the knife round replays.
+                logger.LogWarning("HandleRoundEndOnKnifeRound: GameCommencing round_end with no winner (winner={Winner}); not holding the restart, the knife round replays.", @event.Winner);
+                return HookResult.Continue;
+            }
+            else
+            {
+                winner = Random.Shared.Next(2) == 0 ? Team.CT : Team.T;
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("HandleRoundEndOnKnifeRound: no decisive knife-round result (winner={Winner}, reason={Reason}:{ReasonName}); picked {Team} at random.",
+                        @event.Winner, @event.Reason, reason, winner);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.time_expired"]);
+            }
+
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleRoundEndOnKnifeRound: Knife round ended, transitioning to PickingStartingSide state.");
 
             // Earliest possible grab of the restart this very round_end arms. The engine may
             // write m_flRestartRoundTime after this Pre hook returns, so the phase's own 0.5s
             // ticker (BeginStartingSideRestartHold) is what actually guarantees the hold.
+            // Only held once a winner exists: a parked restart with no phase to release it is a permanent stall.
             HoldPendingRoundRestart("KnifeRoundEnd");
-
-            if (@event.Winner == 2)
-            {
-                PromptWinnerTCaptainoChoseStartingSide(Team.T);
-            }
-            else if (@event.Winner == 3)
-            {
-                PromptWinnerTCaptainoChoseStartingSide(Team.CT);
-            }
+            PromptWinnerTCaptainoChoseStartingSide(winner);
         }
         return HookResult.Continue;
     }

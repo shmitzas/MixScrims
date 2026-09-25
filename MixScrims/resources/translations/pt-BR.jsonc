@@ -33,6 +33,7 @@
   "announcement.team_picking.turn_to_pick.t": "É a vez de [orange]{0} [default]escolher",
   "announcement.knife_round.winner.ct": "[lightblue]Contra-Terroristas [green]venceram [default]o Round Faca!",
   "announcement.knife_round.winner.t": "[orange]Terroristas [green]venceram [default]o Round Faca!",
+  "announcement.knife_round.time_expired": "[red]O tempo do Round Faca [default]acabou - o vencedor será escolhido [gold]aleatoriamente[default]!",
   "announcement.knife_round.team_vote_started": "Todos os jogadores do time vencedor podem votar com [gold]!stay [default]ou [gold]!switch [default]- 30 segundos para votar!",
   "announcement.knife_round.vote_results": "Resultados da votação: Trocar: [green]{0} [default]| Ficar: [green]{1}",
   "announcement.knife_round.waiting_for_side_pick.ct": "Aguardando [lightblue]{0} [default]usar [gold]!switch [default]ou [gold]!stay",

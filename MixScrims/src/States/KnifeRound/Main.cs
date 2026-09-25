@@ -19,6 +19,9 @@ public partial class MixScrims
     internal CancellationTokenSource? startingSideRestartHoldTimer;
     internal CancellationTokenSource? startingSidePickTimeoutTimer;
 
+    // The built-in Stay/Switch menu for the current phase, closed when the phase ends.
+    internal IMenuAPI? sidePickMenu;
+
     // Matches the DisableCaptains vote window below; a captain who never picks must not leave
     // the parked restart (and the server) frozen indefinitely.
     private const int StartingSidePickTimeoutSeconds = 30;
@@ -253,9 +256,8 @@ public partial class MixScrims
             {
                 if (player != null && IsPlayerValid(player) && !IsBot(player))
                 {
-                    var menu = BuildSidePickingMenu();
                     if (!suppressBuiltInMenus)
-                        Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                        Core.MenusAPI.OpenMenuForPlayer(player, sidePickMenu ??= BuildSidePickingMenu());
                 }
             }
 
@@ -308,10 +310,9 @@ public partial class MixScrims
                 return;
             }
 
-            var menu = BuildSidePickingMenu();
             if (IsPlayerValid(captainCt) && !suppressBuiltInMenus)
             {
-                Core.MenusAPI.OpenMenuForPlayer(captainCt, menu);
+                Core.MenusAPI.OpenMenuForPlayer(captainCt, sidePickMenu ??= BuildSidePickingMenu());
             }
         }
 
@@ -342,10 +343,9 @@ public partial class MixScrims
                 return;
             }
 
-            var menu = BuildSidePickingMenu();
             if (IsPlayerValid(captainT) && !suppressBuiltInMenus)
             {
-                Core.MenusAPI.OpenMenuForPlayer(captainT, menu);
+                Core.MenusAPI.OpenMenuForPlayer(captainT, sidePickMenu ??= BuildSidePickingMenu());
             }
         }
     }
@@ -604,6 +604,24 @@ public partial class MixScrims
         startingSideRestartHoldTimer = null;
         startingSidePickTimeoutTimer?.Cancel();
         startingSidePickTimeoutTimer = null;
+    }
+
+    /// <summary>
+    /// Closes the built-in Stay/Switch menu for every player still showing it. Main thread only.
+    /// </summary>
+    internal void CloseSidePickMenu()
+    {
+        if (sidePickMenu is not { } menu) return;
+        sidePickMenu = null;
+        try
+        {
+            Core.MenusAPI.CloseMenu(menu);
+        }
+        catch (Exception ex)
+        {
+            // Runs inside SetMatchState's phase exit; a failed close must not skip the restart release after it.
+            logger.LogWarning(ex, "CloseSidePickMenu: failed to close the side-pick menu.");
+        }
     }
 
     /// <summary>

@@ -33,6 +33,7 @@
   "announcement.team_picking.turn_to_pick.t": "[orange]{0} [default]的回合来选人",
   "announcement.knife_round.winner.ct": "[lightblue]CT [lime]赢得 [default]了拼刀局！",
   "announcement.knife_round.winner.t": "[orange]T [lime]赢得 [default]了拼刀局！",
+  "announcement.knife_round.time_expired": "[red]拼刀局[default]时间已到 - 将[gold]随机[default]选出获胜方！",
   "announcement.knife_round.team_vote_started": "获胜方所有玩家可使用 [gold]!stay [default]或 [gold]!switch [default]投票 - 30 秒内投票！",
   "announcement.knife_round.vote_results": "投票结果: 换边: [lime]{0} [default]| 不换边: [lime]{1}",
   "announcement.knife_round.waiting_for_side_pick.ct": "等待 [lightblue]{0} [default]使用 [gold]!switch [default]或 [gold]!stay",

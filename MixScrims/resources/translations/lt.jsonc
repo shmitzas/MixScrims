@@ -33,6 +33,7 @@
   "announcement.team_picking.turn_to_pick.t": "[orange]{0} [default]eilė rinktis",
   "announcement.knife_round.winner.ct": "[lightblue]Counter-Teroristai [lime]laimėjo [default]peilių raundą!",
   "announcement.knife_round.winner.t": "[orange]Teroristai [lime]laimėjo [default]peilių raundą!",
+  "announcement.knife_round.time_expired": "[red]Peilių raundo [default]laikas baigėsi - laimėtojas parenkamas [gold]atsitiktinai[default]!",
   "announcement.knife_round.team_vote_started": "Visi laimėjusios komandos žaidėjai gali balsuoti su [gold]!stay [default]arba [gold]!switch [default]- 30 sekundžių balsavimui!",
   "announcement.knife_round.vote_results": "Balsavimo rezultatai - Keisti: [lime]{0} [default]| Pasilikti: [lime]{1}",
   "announcement.knife_round.waiting_for_side_pick.ct": "Laukiama [lightblue]{0} [default]pasirinkimo [gold]!switch [default]arba [gold]!stay",

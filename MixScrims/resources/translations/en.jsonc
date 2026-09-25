@@ -33,6 +33,7 @@
   "announcement.team_picking.turn_to_pick.t": "[orange]{0} [default]turn to pick",
   "announcement.knife_round.winner.ct": "[lightblue]Counter-Terorists [lime]won [default]the knife round!",
   "announcement.knife_round.winner.t": "[orange]Terorists [lime]won [default]the knife round!",
+  "announcement.knife_round.time_expired": "[red]Knife round [default]time ran out - the winner is picked [gold]at random[default]!",
   "announcement.knife_round.team_vote_started": "All winning team players can vote with [gold]!stay [default]or [gold]!switch [default]- 30 seconds to vote!",
   "announcement.knife_round.vote_results": "Vote results: Switch: [lime]{0} [default]| Stay: [lime]{1}",
   "announcement.knife_round.waiting_for_side_pick.ct": "Waiting for [lightblue]{0} [default]to [gold]!switch [default]or [gold]!stay",

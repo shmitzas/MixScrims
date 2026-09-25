@@ -682,6 +682,7 @@ public class MixScrimsService : IMixScrims
             if (previous == MatchState.PickingStartingSide)
             {
                 _mixScrims.EndStartingSideRestartHold();
+                _mixScrims.CloseSidePickMenu();
                 // StartMatch releases the parked restart deliberately once its cvars have
                 // landed; every other exit (reset, surrender, map change, captain disconnect)
                 // has to hand it back here or the round stays frozen for an hour.
