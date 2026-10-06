@@ -128,7 +128,6 @@ public partial class MixScrims
                 logger.LogInformation("EndTimeout: Dequeued timeout for team {Team}. Remaining queue count: {Count}", nextTeam, timeoutQueue.Count);
             }
 
-            // If we're in freeze time, start immediately
             if (isFreezeTime)
             {
                 if (cfg.DetailedLogging)
@@ -139,7 +138,6 @@ public partial class MixScrims
             }
             else
             {
-                // Otherwise, set as pending for next freeze time
                 timeoutPending = nextTeam == Team.CT ? TimeoutPending.CT : TimeoutPending.T;
                 if (cfg.DetailedLogging)
                 {

@@ -10,6 +10,7 @@ public sealed partial class MixScrims
 {
     internal CancellationTokenSource? playerStatusTimer;
     internal CancellationTokenSource? playerStatusTimerCenterHtml;
+    internal CancellationTokenSource? readyScoreboardTimer;
     internal CancellationTokenSource? commandRemindersTimer;
     internal CancellationTokenSource? captainsAnnouncementsTimer;
     internal CancellationTokenSource? autoResetOnLeaveTimer;
@@ -159,6 +160,7 @@ public sealed partial class MixScrims
         // Cancel any existing timers first to prevent duplicates
         playerStatusTimer?.Cancel();
         playerStatusTimerCenterHtml?.Cancel();
+        readyScoreboardTimer?.Cancel();
         commandRemindersTimer?.Cancel();
 
         // Players ready status
@@ -167,6 +169,17 @@ public sealed partial class MixScrims
             task: PrintReadyAndNotReadyPlayers
         );
         Core.Scheduler.StopOnMapChange(playerStatusTimer);
+
+        // 1 s, not ChatAnnouncementTimers.PlayersReadyStatus: the tag must be re-asserted faster
+        // than VipCore and K4-Guilds blank Controller.Clan. Task self-gates on match state.
+        if (cfg.ShowReadyStatusInScoreboard)
+        {
+            readyScoreboardTimer = Core.Scheduler.RepeatBySeconds(
+                periodSeconds: 1,
+                task: ShowReadyAndNotReadyPlayersInScoreboard
+            );
+            Core.Scheduler.StopOnMapChange(readyScoreboardTimer);
+        }
 
         // Player ready status center html
         if (cfg.ShowReadyStatusInCenterHtml)
@@ -341,7 +354,6 @@ public sealed partial class MixScrims
         // is captured there. Manual !map during Warmup captures Warmup, etc.
         stateBeforeMapLoading = matchState;
 
-        //Core.Engine.ExecuteCommand("tv_stoprecord");
         var loadMapToken = Core.Scheduler.DelayBySeconds(5, () => LoadMap(map));
         Core.Scheduler.StopOnMapChange(loadMapToken);
 
@@ -788,6 +800,7 @@ public sealed partial class MixScrims
         commandRemindersTimer?.Cancel();
         playerStatusTimer?.Cancel();
         playerStatusTimerCenterHtml?.Cancel();
+        readyScoreboardTimer?.Cancel();
         captainsAnnouncementsTimer?.Cancel();
     }
 
@@ -799,5 +812,7 @@ public sealed partial class MixScrims
         playerStatusTimer?.Cancel();
         playerStatusTimerCenterHtml?.Cancel();
         captainsAnnouncementsTimer?.Cancel();
+        // readyScoreboardTimer deliberately left running: MapChosen, which this leads to, still
+        // accepts !ready.
     }
 }

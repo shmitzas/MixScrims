@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.11.4",
+    Version = "1.11.5",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -97,6 +97,7 @@ public partial class MixScrims : BasePlugin
         {
             playerStatusTimer?.Cancel();
             playerStatusTimerCenterHtml?.Cancel();
+            readyScoreboardTimer?.Cancel();
             commandRemindersTimer?.Cancel();
             captainsAnnouncementsTimer?.Cancel();
             autoResetOnLeaveTimer?.Cancel();

@@ -150,6 +150,18 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
+    /// Controller validity without <see cref="IPlayer.IsValid"/>'s pawn demand, so callers reach
+    /// players who are connected but not spawned - the team-select screen most of all.
+    /// </summary>
+    internal bool IsPlayerConnected(IPlayer? player)
+    {
+        if (player == null) return false;
+        try { return player.Controller is { IsValid: true, IsHLTV: false }; }
+        catch (ObjectDisposedException) { return false; }
+        catch (Exception) { return false; }
+    }
+
+    /// <summary>
     /// Validates the current captain references and clears any that are null, disposed, or otherwise
     /// invalid. If a captain reference is cleared and the corresponding team has playing/picked players
     /// available, attempts to re-pick a replacement captain from those rosters.
@@ -263,7 +275,9 @@ public sealed partial class MixScrims
     /// </summary>
     internal List<IPlayer> GetNotReadyPlayers()
     {
-        var allPlayers = GetPlayers();
+        // Not GetPlayers(): that demands a pawn, hiding everyone on the team-select screen. Chat
+        // and center-HTML re-filter on IsPlayerValid, so this widens only the scoreboard path.
+        var allPlayers = Core.PlayerManager.GetAllPlayers().Where(IsPlayerConnected).ToList();
         if (allPlayers.Count == 0)
             return new List<IPlayer>();
 

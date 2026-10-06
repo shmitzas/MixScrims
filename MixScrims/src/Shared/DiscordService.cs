@@ -54,11 +54,9 @@ partial class MixScrims
         if (!string.IsNullOrEmpty(invite.AvatarUrl))
             payload["avatar_url"] = invite.AvatarUrl;
 
-        // Add content if provided
         if (!string.IsNullOrEmpty(invite.Content))
             payload["content"] = invite.Content;
 
-        // Add embed if it has content
         if (invite.Embed != null && HasEmbedContent(invite.Embed))
         {
             var embed = new Dictionary<string, object>();

@@ -21,11 +21,8 @@ public partial class MixScrims
         {
             ShowReadyAndNotReadyPlayersInChat();
         }
-       
-        if (cfg.ShowReadyStatusInScoreboard)
-        {
-            ShowReadyAndNotReadyPlayersInScoreboard();
-        }
+
+        // Scoreboard prefix is deliberately not refreshed here - it needs its own 1 s timer.
     }
 
     internal void ShowReadyAndNotReadyPlayersInChat()
@@ -53,26 +50,32 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Displays a prefix for each ready and not ready players in the scoreboard.
+    /// Re-asserts the ready / not-ready scoreboard prefix. Runs on a 1 s timer because nothing
+    /// arbitrates <c>Controller.Clan</c> - VipCore (every spawn) and K4-Guilds (60 s sweep) assign
+    /// it outright, blanking it for players with no VIP tag or guild.
     /// </summary>
     internal void ShowReadyAndNotReadyPlayersInScoreboard()
     {
-        var notReadyPlayers = GetNotReadyPlayers();
+        if (!cfg.ShowReadyStatusInScoreboard)
+            return;
 
-        foreach(var player in readyPlayers)
+        // KnifeRound/Match deliberately sweep these tags off - never fight those paths.
+        var matchState = mixScrimsService.GetCurrentMatchState();
+        if (matchState != MatchState.Warmup && matchState != MatchState.MapChosen)
+            return;
+
+        // Snapshot: !ready / !unready mutate readyPlayers.
+        foreach (var player in readyPlayers.ToList())
         {
-            if (IsPlayerValid(player))
+            if (IsPlayerConnected(player))
             {
                 SetPlayerReadyStatusInScoreboard(player, true);
             }
         }
 
-        foreach(var player in notReadyPlayers)
+        foreach (var player in GetNotReadyPlayers())
         {
-            if (IsPlayerValid(player))
-            {
-                SetPlayerReadyStatusInScoreboard(player, false);
-            }
+            SetPlayerReadyStatusInScoreboard(player, false);
         }
     }
 
@@ -90,7 +93,11 @@ public partial class MixScrims
                 return;
             }
 
-            var playerClanTag = player.Controller.Clan;
+            // No IPlayer.IsValid pawn demand - this also runs from the team-change hook, pre-spawn.
+            if (player.Controller is not { IsValid: true } controller)
+                return;
+
+            var playerClanTag = controller.Clan ?? string.Empty;
             if (isReady)
             {
                 if (playerClanTag.Contains(Core.Localizer["info.clan_tag.ready"]))
@@ -116,8 +123,8 @@ public partial class MixScrims
                 playerClanTag = $"{Core.Localizer["info.clan_tag.not_ready"]} {playerClanTag}";
             }
 
-            player.Controller.Clan = playerClanTag;
-            player.Controller.ClanUpdated();
+            controller.Clan = playerClanTag;
+            controller.ClanUpdated();
             if (Core.GameEvent.IsListeningToEvent<EventNextlevelChanged>(player.PlayerID))
                 Core.GameEvent.FireToPlayerAsync<EventNextlevelChanged>(player.PlayerID);
         }
@@ -132,11 +139,16 @@ public partial class MixScrims
     /// </summary>
     internal void RemoveReadyClanTagsFromAllPlayers()
     {
-        var allPlayers = Core.PlayerManager.GetAllValidPlayers();
-        
+        // Before stripping: StartTeamPickingPhase calls this while the state is still MapChosen
+        // and only flips ~80 lines later, so a live re-assert would put the tags straight back.
+        readyScoreboardTimer?.Cancel();
+
+        // Must mirror the set path's reach, or a pawn-less player keeps a stale tag into the match.
+        var allPlayers = Core.PlayerManager.GetAllPlayers();
+
         foreach (var player in allPlayers)
         {
-            if (!IsPlayerValid(player) || player.IsFakeClient)
+            if (!IsPlayerConnected(player) || player.IsFakeClient)
                 continue;
 
             try
@@ -184,7 +196,7 @@ public partial class MixScrims
     /// </summary>
     internal void SetCaptainClanTag(IPlayer? player, Team team)
     {
-        if (player == null || !IsPlayerValid(player) || player.IsFakeClient)
+        if (!IsPlayerConnected(player) || player!.IsFakeClient)
             return;
 
         var tag = team == Team.CT ? CaptainCtClanTag : CaptainTClanTag;
@@ -199,7 +211,7 @@ public partial class MixScrims
             // an admin re-picking the same player for the other team).
             if (playerClanTag.Contains(otherTag))
                 playerClanTag = playerClanTag.Replace(otherTag, "").Trim();
-            // Strip ready/not-ready markers so the captain prefix ends up first.
+            // Strip ready markers; the 1 s re-assert re-adds the current one in front.
             if (playerClanTag.Contains(Core.Localizer["info.clan_tag.ready"]))
                 playerClanTag = playerClanTag.Replace(Core.Localizer["info.clan_tag.ready"], "").Trim();
             if (playerClanTag.Contains(Core.Localizer["info.clan_tag.not_ready"]))
@@ -228,7 +240,7 @@ public partial class MixScrims
     /// </summary>
     internal void RemoveCaptainClanTagFromPlayer(IPlayer? player)
     {
-        if (player == null || !IsPlayerValid(player) || player.IsFakeClient)
+        if (!IsPlayerConnected(player) || player!.IsFakeClient)
             return;
 
         try
@@ -267,11 +279,13 @@ public partial class MixScrims
     /// </summary>
     internal void RemoveCaptainClanTagsFromAllPlayers()
     {
-        var allPlayers = Core.PlayerManager.GetAllValidPlayers();
+        // Pawn-free, like the ready sweep: this runs ~5 s into StartMatch, inside the
+        // mp_restartgame respawn window, where a pawn-gated walk strands the tag for the match.
+        var allPlayers = Core.PlayerManager.GetAllPlayers();
 
         foreach (var player in allPlayers)
         {
-            if (!IsPlayerValid(player) || player.IsFakeClient)
+            if (!IsPlayerConnected(player) || player.IsFakeClient)
                 continue;
 
             RemoveCaptainClanTagFromPlayer(player);

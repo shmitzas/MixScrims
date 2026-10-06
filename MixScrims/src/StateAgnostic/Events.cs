@@ -1140,9 +1140,6 @@ partial class MixScrims
             return;
         }
 
-        //if (cfg.DetailedLogging)
-        //    logger.LogInformation($"HandleTakeDamage: {attacker.Controller.Value?.PlayerName} damaged {victim.Controller.Value?.PlayerName} with {weapon}");
-
         if (attacker.Team == victim.Team)
         {
             if (weapon == DamageTypes_t.DMG_BULLET || weapon == DamageTypes_t.DMG_SLASH || weapon == DamageTypes_t.DMG_SHOCK)

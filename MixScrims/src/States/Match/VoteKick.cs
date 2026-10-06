@@ -87,7 +87,6 @@ public partial class MixScrims
                     EligibleVotes: eligibleCount));
         }
 
-        // Players that need to see the menu (eligible minus caller)
         var menuPlayers = eligible.Where(p => p.SteamID != caller.SteamID).ToList();
 
         // If the caller is the only eligible voter, auto-pass immediately
