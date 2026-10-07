@@ -69,6 +69,6 @@ public partial class MixScrims
         });
 
         lastDiscordInviteSentAt = DateTime.Now;
-        PrintMessageToAllPlayers(Core.Localizer["command.invite", player.Controller.PlayerName]);
+        PrintMessageToAllPlayers(Core.Localizer["command.invite", player.Name]);
     }
 }

@@ -341,7 +341,7 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Returns a player by their Controller.PlayerName.
+    /// Returns a player by their name.
     /// </summary>
     internal IPlayer? GetPlayerByName(string playerName)
     {
@@ -418,7 +418,7 @@ public sealed partial class MixScrims
         }
 
         if (cfg.DetailedLogging)
-            logger.LogInformation("Respawning player {PlayerName}", player.Controller.PlayerName);
+            logger.LogInformation("Respawning player {PlayerName}", player.Name);
 
         try
         {
@@ -525,23 +525,25 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Safely reads <see cref="IPlayer.Controller"/>.<c>PlayerName</c> from a possibly-null or
-    /// possibly-disposed player reference. Returns a sentinel string (<c>&lt;null&gt;</c>,
-    /// <c>&lt;disposed&gt;</c>, or <c>&lt;error&gt;</c>) on any failure, and a <c>Slot {id}</c>
-    /// fallback (via <see cref="SafePlayerId"/>) when the controller itself is null or its
-    /// <c>PlayerName</c> is null. Use this for structured-log <c>{PlayerName}</c> placeholders
-    /// over the plugin's stored roster lists so log formatting never throws when SwiftlyS2 has
-    /// disposed the underlying Player object between the time we added it and the time we read
-    /// it. Same disposal-safety rationale as <see cref="SafeSteamId"/>.
+    /// Safely reads the player's name from a possibly-null or possibly-disposed player
+    /// reference. Returns a sentinel string (<c>&lt;null&gt;</c>, <c>&lt;disposed&gt;</c>, or
+    /// <c>&lt;error&gt;</c>) on any failure, and a <c>Slot {id}</c> fallback (via
+    /// <see cref="SafePlayerId"/>) when the name is empty. Use this for structured-log
+    /// <c>{PlayerName}</c> placeholders over the plugin's stored roster lists so log formatting
+    /// never throws when SwiftlyS2 has disposed the underlying Player object between the time we
+    /// added it and the time we read it. Same disposal-safety rationale as
+    /// <see cref="SafeSteamId"/>.
     /// </summary>
     internal string SafePlayerName(IPlayer? player)
     {
         if (player is null) return "<null>";
         try
         {
-            var controller = player.Controller;
-            if (controller is null) return $"Slot {SafePlayerId(player)}";
-            return controller.PlayerName ?? $"Slot {SafePlayerId(player)}";
+            // IPlayer.Name is a slot-indexed engine lookup. Controller.PlayerName instead walks
+            // the controller's schema memory, which SIGSEGVs the host (uncatchable) once the
+            // controller is torn down - try/catch here would not save us.
+            var name = player.Name;
+            return string.IsNullOrEmpty(name) ? $"Slot {SafePlayerId(player)}" : name;
         }
         catch (ObjectDisposedException)
         {

@@ -88,7 +88,7 @@ public partial class MixScrims
             if (!playingCtPlayers.Any(p => SafeSteamId(p) == captainCtId))
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("StartKnifeRound: Adding manually-set CT Captain {PlayerName} to playingCtPlayers.", captainCt.Controller.PlayerName);
+                    logger.LogInformation("StartKnifeRound: Adding manually-set CT Captain {PlayerName} to playingCtPlayers.", captainCt.Name);
                 playingCtPlayers.Add(captainCt);
             }
         }
@@ -99,7 +99,7 @@ public partial class MixScrims
             if (!playingTPlayers.Any(p => SafeSteamId(p) == captainTId))
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("StartKnifeRound: Adding manually-set T Captain {PlayerName} to playingTPlayers.", captainT.Controller.PlayerName);
+                    logger.LogInformation("StartKnifeRound: Adding manually-set T Captain {PlayerName} to playingTPlayers.", captainT.Name);
                 playingTPlayers.Add(captainT);
             }
         }
@@ -108,14 +108,14 @@ public partial class MixScrims
         {
             AssignCaptain(Team.CT, playingCtPlayers[0]);
             if (cfg.DetailedLogging)
-                logger.LogInformation("StartKnifeRound: CT Captain not set, assigning {PlayerName} as CT Captain.", captainCt!.Controller.PlayerName);
+                logger.LogInformation("StartKnifeRound: CT Captain not set, assigning {PlayerName} as CT Captain.", captainCt!.Name);
         }
 
         if (captainT == null && playingTPlayers.Count > 0)
         {
             AssignCaptain(Team.T, playingTPlayers[0]);
             if (cfg.DetailedLogging)
-                logger.LogInformation("StartKnifeRound: T Captain not set, assigning {PlayerName} as T Captain.", captainT!.Controller.PlayerName);
+                logger.LogInformation("StartKnifeRound: T Captain not set, assigning {PlayerName} as T Captain.", captainT!.Name);
         }
 
         readyPlayers.Clear();
@@ -133,7 +133,7 @@ public partial class MixScrims
             {
                 Core.MenusAPI.CloseMenuForPlayer(captainCt, ctMenu);
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("StartKnifeRound: Closed open menu for CT captain {PlayerName}", captainCt.Controller.PlayerName);
+                    logger.LogInformation("StartKnifeRound: Closed open menu for CT captain {PlayerName}", captainCt.Name);
             }
         }
 
@@ -144,7 +144,7 @@ public partial class MixScrims
             {
                 Core.MenusAPI.CloseMenuForPlayer(captainT, tMenu);
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("StartKnifeRound: Closed open menu for T captain {PlayerName}", captainT.Controller.PlayerName);
+                    logger.LogInformation("StartKnifeRound: Closed open menu for T captain {PlayerName}", captainT.Name);
             }
         }
 
@@ -301,7 +301,7 @@ public partial class MixScrims
             }
 
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.winner.ct"]);
-            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.waiting_for_side_pick.ct", captainCt.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.waiting_for_side_pick.ct", captainCt.Name]);
 
             // Bot captain: auto "Switch"
             if (IsBot(captainCt))
@@ -334,7 +334,7 @@ public partial class MixScrims
             }
 
             PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.winner.t"]);
-            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.waiting_for_side_pick.t", captainT.Controller.PlayerName]);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.waiting_for_side_pick.t", captainT.Name]);
 
             // Bot captain: auto "Switch"
             if (IsBot(captainT))
@@ -480,12 +480,12 @@ public partial class MixScrims
 
             if (captain?.PlayerPawn?.TeamNum == 3)
             {
-                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.ct", captain.Controller.PlayerName]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.ct", captain.Name]);
             }
 
             if (captain?.PlayerPawn?.TeamNum == 2)
             {
-                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.t", captain.Controller.PlayerName]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_switch.t", captain.Name]);
             }
 
             if (cfg.DetailedLogging)
@@ -523,8 +523,8 @@ public partial class MixScrims
             else if (preSwapTeam == 2)
                 mixScrimsService.RaiseStartingSideChosen(Team.CT);
 
-            SetTeamName(Team.CT, IsPlayerValid(captainCt) ? captainCt!.Controller.PlayerName : null);
-            SetTeamName(Team.T, IsPlayerValid(captainT) ? captainT!.Controller.PlayerName : null);
+            SetTeamName(Team.CT, IsPlayerValid(captainCt) ? captainCt!.Name : null);
+            SetTeamName(Team.T, IsPlayerValid(captainT) ? captainT!.Name : null);
 
             StartMatch();
         });
@@ -542,12 +542,12 @@ public partial class MixScrims
         {
             if (captain!.PlayerPawn?.TeamNum == 3)
             {
-                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.ct", captain.Controller.PlayerName]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.ct", captain.Name]);
                 mixScrimsService.RaiseStartingSideChosen(Team.CT);
             }
             else if (captain.PlayerPawn?.TeamNum == 2)
             {
-                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.t", captain.Controller.PlayerName]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.knife_round.captain.chose_stay.t", captain.Name]);
                 mixScrimsService.RaiseStartingSideChosen(Team.T);
             }
         }

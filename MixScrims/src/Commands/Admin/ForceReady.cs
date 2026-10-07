@@ -54,8 +54,8 @@ public partial class MixScrims
         else
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("Players were forced into ready state by {AdminName}", admin.Controller.PlayerName);
-            PrintMessageToAllPlayers(Core.Localizer["command.force.ready", admin.Controller.PlayerName]);
+                logger.LogInformation("Players were forced into ready state by {AdminName}", admin.Name);
+            PrintMessageToAllPlayers(Core.Localizer["command.force.ready", admin.Name]);
         }
     }
 

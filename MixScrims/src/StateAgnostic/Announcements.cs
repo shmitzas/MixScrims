@@ -40,7 +40,7 @@ public partial class MixScrims
             var validNotReadyPlayers = notReadyPlayers.Where(p => IsPlayerValid(p)).ToList();
             if (validNotReadyPlayers.Count > 0)
             {
-                string notReadyPlayersNames = string.Join(", ", validNotReadyPlayers.Select(p => p.Controller.PlayerName));
+                string notReadyPlayersNames = string.Join(", ", validNotReadyPlayers.Select(p => p.Name));
                 if (cfg.DetailedLogging)
                     logger.LogInformation("Not ready players: {Names}", notReadyPlayersNames);
                 PrintMessageToAllPlayers(Core.Localizer["announcement.ready_status", GetEffectiveReadyCount(), GetNumberOfPlayersRequiredToStart()]);
@@ -365,8 +365,8 @@ public partial class MixScrims
         if (captainCt != null && IsPlayerValid(captainCt))
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("Captain CT: {PlayerName}", captainCt.Controller.PlayerName);
-            PrintMessageToAllPlayers(Core.Localizer["announcement.captain.chosen.ct", captainCt.Controller.PlayerName]);
+                logger.LogInformation("Captain CT: {PlayerName}", captainCt.Name);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.captain.chosen.ct", captainCt.Name]);
         }
         else
         {
@@ -378,8 +378,8 @@ public partial class MixScrims
         if (captainT != null && IsPlayerValid(captainT))
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("Captain T: {PlayerName}", captainT.Controller.PlayerName);
-            PrintMessageToAllPlayers(Core.Localizer["announcement.captain.chosen.t", captainT.Controller.PlayerName]);
+                logger.LogInformation("Captain T: {PlayerName}", captainT.Name);
+            PrintMessageToAllPlayers(Core.Localizer["announcement.captain.chosen.t", captainT.Name]);
         }
         else
         {

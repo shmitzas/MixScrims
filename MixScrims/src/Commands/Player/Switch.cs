@@ -58,6 +58,6 @@ public partial class MixScrims
         var token = Core.Scheduler.DelayBySeconds(1, () => SwitchStartingSides(player));
         Core.Scheduler.StopOnMapChange(token);
         if (cfg.DetailedLogging)
-            logger.LogInformation("OnSwitch: Captain {PlayerName} chose to !switch", player.Controller.PlayerName);
+            logger.LogInformation("OnSwitch: Captain {PlayerName} chose to !switch", player.Name);
     }
 }

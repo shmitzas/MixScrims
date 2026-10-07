@@ -136,12 +136,12 @@ partial class MixScrims
                         if (isPicked)
                         {
                             if (cfg.DetailedLogging)
-                                logger.LogInformation("HandleClientPutInServer: {PlayerName} is picked, allowing.", player.Controller.PlayerName);
+                                logger.LogInformation("HandleClientPutInServer: {PlayerName} is picked, allowing.", player.Name);
                         }
                         else
                         {
                             if (cfg.DetailedLogging)
-                                logger.LogInformation("HandleClientPutInServer: {PlayerName} joined mid-match and is not picked, kicking.", player.Controller.PlayerName);
+                                logger.LogInformation("HandleClientPutInServer: {PlayerName} joined mid-match and is not picked, kicking.", player.Name);
                             KickPlayer(player.SteamID, Core.Localizer["info.kick_reason.not_picked"]);
                             return;
                         }
@@ -149,7 +149,7 @@ partial class MixScrims
                     else if (!isPicked)
                     {
                         if (cfg.DetailedLogging)
-                            logger.LogInformation("HandleClientPutInServer: {PlayerName} is not picked during active match - forcing to Spectator.", player.Controller.PlayerName);
+                            logger.LogInformation("HandleClientPutInServer: {PlayerName} is not picked during active match - forcing to Spectator.", player.Name);
 
                         ScheduleForceToSpectator(player);
                         return;
@@ -207,11 +207,11 @@ partial class MixScrims
         }
 
         if (cfg.DetailedLogging)
-            logger.LogInformation("OnClientCommand: {PlayerName} executing jointeam command with team {Team}", player.Controller.PlayerName, teamTojoin);
+            logger.LogInformation("OnClientCommand: {PlayerName} executing jointeam command with team {Team}", player.Name, teamTojoin);
 
         if (teamTojoin == 9)
         {
-            logger.LogError("HandleJointeamListener: {PlayerName} tried to join, but selected team was not found in command: {Command}", player.Controller.PlayerName, commandLine);
+            logger.LogError("HandleJointeamListener: {PlayerName} tried to join, but selected team was not found in command: {Command}", player.Name, commandLine);
             return HookResult.Stop;
         }
 
@@ -227,19 +227,19 @@ partial class MixScrims
         if (!freshlyJoinedPlayers.Contains(playerSlot))
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandlePlayerChangeTeamOnJoin: Player {PlayerName} is not in freshlyJoinedPlayers, ignoring.", player.Controller.PlayerName);
+                logger.LogInformation("HandlePlayerChangeTeamOnJoin: Player {PlayerName} is not in freshlyJoinedPlayers, ignoring.", player.Name);
             return;
         }
 
         freshlyJoinedPlayers.Remove(playerSlot);
 
         if (cfg.DetailedLogging)
-            logger.LogInformation("HandlePlayerChangeTeamOnJoin: Player {PlayerName} has joined the server.", player.Controller.PlayerName);
+            logger.LogInformation("HandlePlayerChangeTeamOnJoin: Player {PlayerName} has joined the server.", player.Name);
 
         if (player.IsValid && !IsBot(player))
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandlePlayerChangeTeamOnJoin: Player {PlayerName} is valid.", player.Controller.PlayerName);
+                logger.LogInformation("HandlePlayerChangeTeamOnJoin: Player {PlayerName} is valid.", player.Name);
 
             var ctPlayers = GetPlayersInTeam(Team.CT);
             var tPlayers = GetPlayersInTeam(Team.T);
@@ -393,7 +393,7 @@ partial class MixScrims
         var steamId = SafeSteamId(player);
 
         // Cache player name for logging since Controller might become invalid during disconnect
-        var playerName = IsPlayerValid(player) ? player.Controller.PlayerName : $"Player {player.PlayerID}";
+        var playerName = SafePlayerName(player);
 
         freshlyJoinedPlayers.Remove(player.Slot);
         HandlePlayerDisconnectRtv(steamId);
@@ -469,7 +469,7 @@ partial class MixScrims
                     if (cfg.DetailedLogging)
                     {
                         var newCaptainName = newCaptain != null && IsPlayerValid(newCaptain) 
-                            ? newCaptain.Controller.PlayerName 
+                            ? newCaptain.Name 
                             : "None";
                         logger.LogInformation("HandleDisconnectedPlayer: New CT captain is {NewCaptain}", newCaptainName);
                     }
@@ -487,7 +487,7 @@ partial class MixScrims
                     if (cfg.DetailedLogging)
                     {
                         var newCaptainName = newCaptain != null && IsPlayerValid(newCaptain) 
-                            ? newCaptain.Controller.PlayerName 
+                            ? newCaptain.Name 
                             : "None";
                         logger.LogInformation("HandleDisconnectedPlayer: New T captain is {NewCaptain}", newCaptainName);
                     }
@@ -619,7 +619,7 @@ partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleEventPlayerTeamPost: skipping reconcile for {PlayerName} during programmatic move (committed team {Team}).",
-                    player.Controller.PlayerName, @event.Team);
+                    player.Name, @event.Team);
             return HookResult.Continue;
         }
 
@@ -639,7 +639,7 @@ partial class MixScrims
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandleEventPlayerTeamPost: {PlayerName} committed to {Team} but not in roster - forcing to Spectator.",
-                        player.Controller.PlayerName, (Team)committedTeam);
+                        player.Name, (Team)committedTeam);
                 ScheduleForceToSpectator(player, "error.team.slot_unavailable");
                 return HookResult.Continue;
             }
@@ -655,7 +655,7 @@ partial class MixScrims
         {
             playingCtPlayers.RemoveAll(p => SafeSteamId(p) == playerSteamId);
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandleEventPlayerTeamPost: Pruned {PlayerName} from playingCtPlayers (committed team {Team}).", player.Controller.PlayerName, committedTeam);
+                logger.LogInformation("HandleEventPlayerTeamPost: Pruned {PlayerName} from playingCtPlayers (committed team {Team}).", player.Name, committedTeam);
         }
 
         // If the player is no longer on T but is still in playingTPlayers, prune.
@@ -663,7 +663,7 @@ partial class MixScrims
         {
             playingTPlayers.RemoveAll(p => SafeSteamId(p) == playerSteamId);
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandleEventPlayerTeamPost: Pruned {PlayerName} from playingTPlayers (committed team {Team}).", player.Controller.PlayerName, committedTeam);
+                logger.LogInformation("HandleEventPlayerTeamPost: Pruned {PlayerName} from playingTPlayers (committed team {Team}).", player.Name, committedTeam);
         }
 
         return HookResult.Continue;
@@ -681,20 +681,19 @@ partial class MixScrims
     /// </param>
     public HookResult HandlePlayerChangeTeam(IPlayer? player, int teamTojoin, int preSwapTeam = -1)
     {
-        if (cfg.DetailedLogging)
-            logger.LogInformation("HandlePlayerChangeTeam: Called for player {PlayerName} (slot {Slot}), teamTojoin={Team}", player?.Controller.PlayerName, player?.Slot, teamTojoin);
-
-
         if (player == null)
         {
             logger.LogWarning("HandlePlayerChangeTeam: player is null, stopping jointeam handling.");
             return HookResult.Stop;
         }
 
+        if (cfg.DetailedLogging)
+            logger.LogInformation("HandlePlayerChangeTeam: Called for player {PlayerName} (slot {Slot}), teamTojoin={Team}", SafePlayerName(player), player.Slot, teamTojoin);
+
         if (player.IsFakeClient)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandlePlayerChangeTeam: {PlayerName} is a fake client, allowing", player.Controller.PlayerName);
+                logger.LogInformation("HandlePlayerChangeTeam: {PlayerName} is a fake client, allowing", SafePlayerName(player));
             return HookResult.Continue;
         }
 
@@ -711,7 +710,7 @@ partial class MixScrims
         if (IsBot(player))
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandlePlayerChangeTeam: {PlayerName} is a bot, allowing", player.Controller.PlayerName);
+                logger.LogInformation("HandlePlayerChangeTeam: {PlayerName} is a bot, allowing", SafePlayerName(player));
             return HookResult.Continue;
         }
 
@@ -733,7 +732,7 @@ partial class MixScrims
             if (isTracked)
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("HandlePlayerChangeTeam: Skipping validation during team move for tracked {PlayerName}", player.Controller.PlayerName);
+                    logger.LogInformation("HandlePlayerChangeTeam: Skipping validation during team move for tracked {PlayerName}", SafePlayerName(player));
                 return HookResult.Continue;
             }
 
@@ -1002,7 +1001,7 @@ partial class MixScrims
             forcedToSpectator.Remove(joinSteamId);
 
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} re-joined.", team, player.Controller.PlayerName);
+                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} re-joined.", team, player.Name);
 
             Core.Scheduler.NextTick(() => FixTeammateColors());
             CheckAutoResetOnLeave();
@@ -1013,7 +1012,7 @@ partial class MixScrims
         if (preventNotPickedPlayersFromJoiningOngoingMatch)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} blocked (prevention enabled).", team, player.Controller.PlayerName);
+                logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} blocked (prevention enabled).", team, player.Name);
             PrintMessageToPlayer(player, Core.Localizer[fullErrorKey]);
             ScheduleForceToSpectator(player, fullErrorKey);
             return HookResult.Stop;
@@ -1028,7 +1027,7 @@ partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} joined (list:{List}, actual:{Actual}, effective:{Effective}, max:{Max}).",
-                    team, player.Controller.PlayerName, listCount, actualCount, effectiveCount, maxTeamSize);
+                    team, player.Name, listCount, actualCount, effectiveCount, maxTeamSize);
             playingList.Add(player);
             forcedToSpectator.Remove(player.SteamID);
             Core.Scheduler.NextTick(() => FixTeammateColors());
@@ -1039,7 +1038,7 @@ partial class MixScrims
 
         if (cfg.DetailedLogging)
             logger.LogInformation("HandleActiveMatchJoin - {Team}: {PlayerName} blocked - team full (list:{List}, actual:{Actual}, effective:{Effective}, max:{Max}).",
-                team, player.Controller.PlayerName, listCount, actualCount, effectiveCount, maxTeamSize);
+                team, player.Name, listCount, actualCount, effectiveCount, maxTeamSize);
         PrintMessageToPlayer(player, Core.Localizer[fullErrorKey]);
         ScheduleForceToSpectator(player, fullErrorKey);
         return HookResult.Stop;

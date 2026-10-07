@@ -111,7 +111,7 @@ public sealed partial class MixScrims
                     if (currentTeam == Team.T || currentTeam == Team.CT)
                     {
                         if (cfg.DetailedLogging)
-                            logger.LogInformation("ScheduleForceToSpectator: Moving {PlayerName} (SteamID {SteamId}) from {Team} to Spectator.", live.Controller.PlayerName, steamId, currentTeam);
+                            logger.LogInformation("ScheduleForceToSpectator: Moving {PlayerName} (SteamID {SteamId}) from {Team} to Spectator.", live.Name, steamId, currentTeam);
 
                         isMovingPlayersToTeams = true;
                         try

@@ -201,6 +201,27 @@ dotnet publish MixScrims/MixScrims.csproj -c Release
 ```
 Output: `MixScrims/build/publish/MixScrims/` contains deployable plugin files.
 
+### Versioning & Changelog — required on every shipped change
+
+Any change that lands in the plugin **must** do both of these in the same change:
+
+1. **Bump `PluginMetadata.Version`** in `MixScrims/src/Main.cs`.
+   - **`+0.1.0`** when a feature — or a batch of features — is implemented.
+   - **`+0.0.1`** when the change is bug fixes only.
+   - Mixed feature + fixes counts as a feature: bump the minor.
+2. **Add a matching `## [x.y.z] - YYYY-MM-DD` section** to `CHANGELOG.md`, newest
+   first. Feature releases open with a one-line "what this is / who should
+   update" summary; fix-only releases go straight to the bullets.
+
+`PluginMetadata.Version` is the single source of truth. `.github/workflows/release.yml`
+reads it out of `Main.cs`, tags `v{version}`, and extracts the CHANGELOG section whose
+heading matches. **It hard-fails when that section is missing, and again when the tag
+already exists** — so a version bump without a changelog entry, or a changelog entry
+without a bump, breaks the release rather than shipping something mislabelled.
+
+Write the entries for a server operator deciding whether to update: what changed and
+what it means in game. Not file names, method names or refactor notes.
+
 ### Project Structure for New Features
 1. **State-specific logic**: Add to `src/States/{StateName}/Main.cs` or `Events.cs`
 2. **Cross-state logic**: Add to `src/StateAgnostic/Main.cs`
@@ -341,7 +362,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 ## Key Files Reference
 
 **Core Components:**
-- [MixScrims/src/Main.cs](MixScrims/src/Main.cs) - Plugin entry point (v1.6.1), DI, lifecycle, command registration
+- [MixScrims/src/Main.cs](MixScrims/src/Main.cs) - Plugin entry point, DI, lifecycle, command registration. Holds `PluginMetadata.Version`, the single source of truth for the release tag and the matching `CHANGELOG.md` section
 - [MixScrims/src/StateAgnostic/Main.cs](MixScrims/src/StateAgnostic/Main.cs) - Ready system, team logic, player punishment, timers
 - [MixScrims/src/StateAgnostic/Announcements.cs](MixScrims/src/StateAgnostic/Announcements.cs) - Ready announcements, scoreboard/center HTML display
 - [MixScrims/src/StateAgnostic/Events.cs](MixScrims/src/StateAgnostic/Events.cs) - Cross-state event handlers
@@ -365,6 +386,10 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 **Localization:**
 - [MixScrims/resources/translations/en.jsonc](MixScrims/resources/translations/en.jsonc) - English localization keys
 - [MixScrims/resources/translations/pt-BR.jsonc](MixScrims/resources/translations/pt-BR.jsonc) - Portuguese (Brazil) localization
+
+**Release:**
+- [CHANGELOG.md](CHANGELOG.md) - Operator-facing release notes; needs a `## [x.y.z]` section per version (see Versioning & Changelog)
+- [.github/workflows/release.yml](.github/workflows/release.yml) - Reads the version out of `Main.cs`, tags, and extracts the matching changelog section. Only runs on `[release]` in the commit message or a manual dispatch
 
 ## Available Commands
 

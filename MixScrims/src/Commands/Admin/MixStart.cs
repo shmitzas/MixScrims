@@ -40,8 +40,8 @@ public partial class MixScrims
             else
             {
                 if (cfg.DetailedLogging)
-                    logger.LogInformation("Match started by force by {AdminName}", admin.Controller.PlayerName);
-                PrintMessageToAllPlayers(Core.Localizer["command.force.match_start", admin.Controller.PlayerName]);
+                    logger.LogInformation("Match started by force by {AdminName}", admin.Name);
+                PrintMessageToAllPlayers(Core.Localizer["command.force.match_start", admin.Name]);
             }
         }
         else

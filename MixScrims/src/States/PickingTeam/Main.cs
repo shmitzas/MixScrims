@@ -69,7 +69,7 @@ public partial class MixScrims
                 if (!pickedCtPlayers.Any(p => SafeSteamId(p) == captainCtId))
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("StartTeamPickingPhase: Adding CT Captain {PlayerName} to pickedCtPlayers.", captainCt.Controller.PlayerName);
+                        logger.LogInformation("StartTeamPickingPhase: Adding CT Captain {PlayerName} to pickedCtPlayers.", captainCt.Name);
                     pickedCtPlayers.Add(captainCt);
                 }
             }
@@ -80,7 +80,7 @@ public partial class MixScrims
                 if (!pickedTPlayers.Any(p => SafeSteamId(p) == captainTId))
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("StartTeamPickingPhase: Adding T Captain {PlayerName} to pickedTPlayers.", captainT.Controller.PlayerName);
+                        logger.LogInformation("StartTeamPickingPhase: Adding T Captain {PlayerName} to pickedTPlayers.", captainT.Name);
                     pickedTPlayers.Add(captainT);
                 }
             }
@@ -157,8 +157,8 @@ public partial class MixScrims
         });
         Core.Scheduler.StopOnMapChange(pickRestartToken);
 
-        SetTeamName(Team.CT, captainCt == null ? null : captainCt.Controller.PlayerName);
-        SetTeamName(Team.T, captainT == null ? null :  captainT.Controller.PlayerName);
+        SetTeamName(Team.CT, captainCt == null ? null : captainCt.Name);
+        SetTeamName(Team.T, captainT == null ? null :  captainT.Name);
 
         // Reset per-phase snapshot fields. currentPickIndex counts captains' implicit
         // self-picks as 1 and 2 — increment now. Raised for bot captains too so the

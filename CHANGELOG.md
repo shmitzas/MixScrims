@@ -5,6 +5,16 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
+## [1.11.6] - 2026-10-07
+
+Must update to this version in order to avoid random crashes.
+
+- Fixed a server crash on team changes — reconnects, spectator moves and the
+  halftime side swap could all trigger it. The plugin was reading player names
+  out of game memory that had already been torn down.
+- Servers running with `DetailedLogging` enabled were the most exposed, but one
+  path could crash with it off too.
+
 ## [1.11.5] - 2026-10-06
 
 Scoreboard tag fixes. Worth updating if you use ready tags or captains.
@@ -21,9 +31,3 @@ Scoreboard tag fixes. Worth updating if you use ready tags or captains.
   (for example when someone runs the round timer down on purpose).
 - Side pick menu now closes on match start even if the captain never picked a side.
 - Smoother VoteKick handling when a vote fails.
-
-Includes the work versioned 1.11.3, which was never released on its own.
-
----
-
-Older releases: <https://github.com/shmitzas/MixScrims/releases>
