@@ -525,6 +525,24 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
+    /// True when two possibly-disposed references point at the same player. SteamID is the
+    /// primary key; it reads 0 for a disposed reference and for a live bot alike, so the
+    /// player id is the fallback.
+    /// </summary>
+    internal bool IsSamePlayer(IPlayer? a, IPlayer? b)
+    {
+        if (a is null || b is null) return false;
+        if (ReferenceEquals(a, b)) return true;
+
+        var steamA = SafeSteamId(a);
+        var steamB = SafeSteamId(b);
+        if (steamA != 0 && steamB != 0) return steamA == steamB;
+
+        var idA = SafePlayerId(a);
+        return idA >= 0 && idA == SafePlayerId(b);
+    }
+
+    /// <summary>
     /// Safely reads the player's name from a possibly-null or possibly-disposed player
     /// reference. Returns a sentinel string (<c>&lt;null&gt;</c>, <c>&lt;disposed&gt;</c>, or
     /// <c>&lt;error&gt;</c>) on any failure, and a <c>Slot {id}</c> fallback (via

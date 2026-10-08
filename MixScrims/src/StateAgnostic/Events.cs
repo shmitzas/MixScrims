@@ -435,12 +435,14 @@ partial class MixScrims
         {
             if (!cfg.DisableCaptains)
             {
-                if (player.SteamID == captainCt?.SteamID)
+                // IsSamePlayer, not a raw SteamID compare: a disposed reference would throw here
+                // and abort every cleanup step below, and every bot shares SteamID 0.
+                if (IsSamePlayer(player, captainCt))
                 {
                     AssignCaptain(Team.CT, null);
                     StartTeamPickingPhase();
                 }
-                if (player.SteamID == captainT?.SteamID)
+                if (IsSamePlayer(player, captainT))
                 {
                     AssignCaptain(Team.T, null);
                     StartTeamPickingPhase();
@@ -456,7 +458,7 @@ partial class MixScrims
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandleDisconnectedPlayer: MatchState is {MatchState}", matchState);
-                if (player.SteamID == captainCt?.SteamID)
+                if (IsSamePlayer(player, captainCt))
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is CT captain");
@@ -476,7 +478,7 @@ partial class MixScrims
 
                     PickCtCaptain(newCaptain);
                 }
-                if (player.SteamID == captainT?.SteamID)
+                if (IsSamePlayer(player, captainT))
                 {
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is T captain");
@@ -498,7 +500,7 @@ partial class MixScrims
 
         if (matchState == MatchState.PickingStartingSide)
         {
-            if (!cfg.DisableCaptains && player.SteamID == winnerCaptain?.SteamID)
+            if (!cfg.DisableCaptains && IsSamePlayer(player, winnerCaptain))
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is winner captain");
@@ -533,6 +535,10 @@ partial class MixScrims
         }
 
         CheckAutoResetOnLeave();
+
+        // Last, and self-guarded: resolving a vote here can end the round, queue a timeout or
+        // kick someone, so every cleanup above must already have run against the leaver.
+        ReconcileVotesAfterDisconnect(player);
     }
 
     /// <summary>

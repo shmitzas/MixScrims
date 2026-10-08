@@ -42,6 +42,7 @@ public partial class MixScrims
         pickedTPlayers.Clear();
         activePickingTeam = null;
         currentPickIndex = 0;
+        openPickMenuPoolSlots.Clear();
         votedMaps.Clear();
         currentBallotDisplayNames.Clear();
         mapVoteDeadline = null;

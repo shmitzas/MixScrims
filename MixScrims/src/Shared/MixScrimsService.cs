@@ -294,7 +294,9 @@ public class MixScrimsService : IMixScrims
         return (
             _mixScrims.surrenderVoteYesCount,
             _mixScrims.surrenderVoteYesCount + _mixScrims.surrenderVoteNoCount,
-            _mixScrims.surrenderTotalEligibleVotes);
+            // Not surrenderTotalEligibleVotes: that excludes the caller while Yes and Cast carry
+            // their implicit yes, so Cast reached Eligible a whole vote early.
+            _mixScrims.SurrenderRequiredVotes());
     }
 
     public string GetLocalizedString(ulong steamId, string key, params object[] args)
@@ -510,21 +512,14 @@ public class MixScrimsService : IMixScrims
             return;
         }
 
-        // AssignPickedPlayerToTeam* resolves by name (that's what the built-in menu passes).
-        // Round-trip the name back through GetPlayerByName so a duplicate-name collision
-        // can't silently route the pick onto a different player.
-        var pickedName = picked.Name;
-        if (string.IsNullOrEmpty(pickedName)
-            || _mixScrims.SafeSteamId(_mixScrims.GetPlayerByName(pickedName)) != pickedSteamId)
-        {
-            _mixScrims.logger?.LogWarning("PickPlayerForTeam: ignored, {SteamId} has an empty or ambiguous name ({Name}).", pickedSteamId, pickedName);
-            return;
-        }
+        // Slot-keyed from here on, so a duplicate name can no longer misroute the pick.
+        var pickedName = picked.Name ?? string.Empty;
+        var pickedSlot = SafePlayerId(picked);
 
         if (activeTeam == Team.CT)
-            _mixScrims.AssignPickedPlayerToTeamCt(expectedCaptain, pickedName);
+            _mixScrims.AssignPickedPlayerToTeamCt(expectedCaptain, pickedName, pickedSlot);
         else
-            _mixScrims.AssignPickedPlayerToTeamT(expectedCaptain, pickedName);
+            _mixScrims.AssignPickedPlayerToTeamT(expectedCaptain, pickedName, pickedSlot);
     }
 
     public void PickPlayerForTeamBySlot(ulong captainSteamId, int pickedSlot)
@@ -553,18 +548,12 @@ public class MixScrimsService : IMixScrims
             return;
         }
 
-        var pickedName = picked.Name;
-        if (string.IsNullOrEmpty(pickedName)
-            || SafePlayerId(_mixScrims.GetPlayerByName(pickedName)) != pickedSlot)
-        {
-            _mixScrims.logger?.LogWarning("PickPlayerForTeamBySlot: ignored, slot {Slot} has an empty or ambiguous name ({Name}).", pickedSlot, pickedName);
-            return;
-        }
+        var pickedName = picked.Name ?? string.Empty;
 
         if (activeTeam == Team.CT)
-            _mixScrims.AssignPickedPlayerToTeamCt(expectedCaptain, pickedName);
+            _mixScrims.AssignPickedPlayerToTeamCt(expectedCaptain, pickedName, pickedSlot);
         else
-            _mixScrims.AssignPickedPlayerToTeamT(expectedCaptain, pickedName);
+            _mixScrims.AssignPickedPlayerToTeamT(expectedCaptain, pickedName, pickedSlot);
     }
 
     /// <summary>Shared state + active-picker guard for both PickPlayerForTeam overloads.</summary>

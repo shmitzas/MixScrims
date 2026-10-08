@@ -409,15 +409,7 @@ public partial class MixScrims
             sideVotes[captain.PlayerID] = choice;
             PrintMessageToPlayer(captain, Core.Localizer["command.side_vote.recorded", choice]);
 
-            var winningTeamPlayers = sideVoteWinnerTeam != Team.None
-                ? (sideVoteWinnerTeam == Team.CT ? playingCtPlayers : playingTPlayers)
-                : (playerTeam == Team.CT ? playingCtPlayers : playingTPlayers);
-            var validPlayers = winningTeamPlayers.Count(p => p != null && IsPlayerValid(p) && !IsBot(p));
-
-            if (sideVotes.Count >= validPlayers)
-            {
-                ProcessTeamSideVotes();
-            }
+            TryCloseTeamSideVote(playerTeam);
             return;
         }
 
@@ -433,6 +425,42 @@ public partial class MixScrims
         }
 
         logger.LogError("HandleCaptainSideChoice: Invalid choice made by captain.");
+    }
+
+    /// <summary>
+    /// Closes the <c>DisableCaptains</c> side vote once every winning-team player still present
+    /// has answered. <paramref name="fallbackTeam"/> is only consulted when
+    /// <see cref="sideVoteWinnerTeam"/> was never set; <paramref name="leaver"/> is excluded up
+    /// front because a disconnecting player still reads as valid while the event is handled.
+    /// </summary>
+    internal void TryCloseTeamSideVote(Team fallbackTeam = Team.None, IPlayer? leaver = null)
+    {
+        var votingTeam = sideVoteWinnerTeam != Team.None ? sideVoteWinnerTeam : fallbackTeam;
+        if (votingTeam is not (Team.CT or Team.T)) return;
+
+        var roster = votingTeam == Team.CT ? playingCtPlayers : playingTPlayers;
+        // Two sets on purpose: membership decides whose ballot survives, validity decides who we
+        // are still waiting on. Purging on validity would discard a ballot from a team member
+        // whose pawn happens to read null at that instant.
+        var onTeam = new HashSet<int>();
+        var eligible = new HashSet<int>();
+        foreach (var player in roster)
+        {
+            if (leaver != null && IsSamePlayer(player, leaver)) continue;
+            var slot = SafePlayerId(player);
+            if (slot < 0) continue;
+            onTeam.Add(slot);
+            if (!IsBot(player) && IsPlayerValid(player)) eligible.Add(slot);
+        }
+
+        // A ballot from someone no longer on the team counts toward both the quorum below and
+        // the Switch/Stay tally, so leaving it in lets a departed player close and decide the vote.
+        foreach (var slot in sideVotes.Keys.Where(k => !onTeam.Contains(k)).ToList())
+            sideVotes.Remove(slot);
+
+        if (sideVotes.Count < eligible.Count) return;
+
+        ProcessTeamSideVotes();
     }
 
     /// <summary>

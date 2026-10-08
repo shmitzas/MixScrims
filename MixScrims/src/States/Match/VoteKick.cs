@@ -254,7 +254,11 @@ public partial class MixScrims
             return;
 
         var target = team == Team.CT ? voteKickTargetCt : voteKickTargetT;
-        var targetName = target?.Name ?? "?";
+        // Reads guarded rather than raw: the disconnect reconciler closes a vote whose target
+        // has just left, and a throw here would land before RaiseVoteKickResult and strand both
+        // the vote state and any consumer's UI. "?" is the same fallback a null target gets.
+        var targetName = IsPlayerValid(target) ? SafePlayerName(target) : "?";
+        var targetSteamId = SafeSteamId(target);
 
         if (cfg.DetailedLogging)
             logger.LogInformation("VoteKickResult: team {Team}, passed {Passed}, target {Target}", team, passed, targetName);
@@ -263,11 +267,11 @@ public partial class MixScrims
 
         CloseVoteKickMenusForTeam(team);
 
-        if (passed && target != null)
+        if (passed && targetSteamId != 0)
         {
             var locKey = team == Team.CT ? "command.votekick.passed.ct" : "command.votekick.passed.t";
             PrintMessageToTeam(team, Core.Localizer[locKey, targetName]);
-            KickPlayer(target.SteamID, Core.Localizer["info.kick_reason.votekicked"]);
+            KickPlayer(targetSteamId, Core.Localizer["info.kick_reason.votekicked"]);
         }
         else
         {

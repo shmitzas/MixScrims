@@ -5,6 +5,25 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
+## [1.11.7] - 2026-10-08
+
+- Votes no longer hang when a player leaves mid-vote. Surrender, timeout and vote
+  kick re-count who is still on the team and close as soon as the rest have decided
+  it — a unanimous surrender used to sit open until the timer ran out, then announce
+  itself as failed.
+- A vote kick ends immediately when its target disconnects.
+- The starting-side vote closes once the remaining winners have answered, and votes
+  left behind by players who already left no longer count toward the result.
+- Leaving during map voting now withdraws your vote; the next player to connect used
+  to inherit it.
+- The team pick menu is rebuilt when a player it lists disconnects, so captains can
+  no longer click a name that is already gone. If nobody is left to pick, the knife
+  round starts instead of stalling.
+- Two players with the same name can no longer be picked as the same person, which
+  left the other unpickable for the rest of the draft.
+- Surrender vote progress now shows the correct total in replacement menus — it read
+  100% one vote before the team had agreed.
+
 ## [1.11.6] - 2026-10-07
 
 Must update to this version in order to avoid random crashes.

@@ -18,6 +18,10 @@ public partial class MixScrims
     internal Team? activePickingTeam = null;
     internal int currentPickIndex = 0;
 
+    // Slots the currently-open pick menu offers. A disconnect only has to rebuild the menu
+    // when it removes one of these; see HandlePlayerDisconnectTeamPickMenu.
+    internal readonly HashSet<int> openPickMenuPoolSlots = [];
+
     /// <summary>
     /// Initiates the team-picking phase of the match, assigning captains to teams and prompting the first captain to
     /// pick a player.
@@ -282,9 +286,13 @@ public partial class MixScrims
 
     /// <summary>
     /// Prompts the specified team captain to select a player for their team.
+    /// <paramref name="excludeSlot"/> drops one slot, for callers that run while a player is
+    /// leaving and still reads as valid.
     /// </summary>
-    internal void PromptCaptainToPickPlayer(IPlayer? captain, Team team)
+    internal void PromptCaptainToPickPlayer(IPlayer? captain, Team team, int excludeSlot = -1)
     {
+        openPickMenuPoolSlots.Clear();
+
         if (captain == null)
         {
             logger.LogError("PromptCaptainToPickPlayer: Captain is null.");
@@ -310,12 +318,13 @@ public partial class MixScrims
         players.RemoveAll(p =>
         {
             var slot = SafePlayerId(p);
-            return slot < 0 || slot == captainSlot || pickedSlots.Contains(slot);
+            return slot < 0 || slot == captainSlot || slot == excludeSlot || pickedSlots.Contains(slot);
         });
 
         if (players.Count == 0)
         {
             logger.LogWarning("PromptCaptainToPickPlayer: No players available to pick.");
+            activePickingTeam = null;
             Core.Scheduler.NextTick(() => StartKnifeRound());
             return;
         }
@@ -336,6 +345,7 @@ public partial class MixScrims
             var randomIndex = Random.Shared.Next(players.Count);
             var selectedPlayer = players[randomIndex];
             var selectedPlayerName = selectedPlayer.Name;
+            var selectedPlayerSlot = SafePlayerId(selectedPlayer);
             if (cfg.DetailedLogging)
             {
                 logger.LogInformation("PromptCaptainToPickPlayer: {Team} captain {CaptainName} is a bot; auto-picking {PlayerName}.",
@@ -343,11 +353,11 @@ public partial class MixScrims
             }
             if (team == Team.CT)
             {
-                AssignPickedPlayerToTeamCt(captain, selectedPlayerName);
+                AssignPickedPlayerToTeamCt(captain, selectedPlayerName, selectedPlayerSlot);
             }
             else
             {
-                AssignPickedPlayerToTeamT(captain, selectedPlayerName);
+                AssignPickedPlayerToTeamT(captain, selectedPlayerName, selectedPlayerSlot);
             }
             return;
         }
@@ -365,19 +375,21 @@ public partial class MixScrims
         foreach (var player in players)
         {
             var displayName = player.Name ?? $"#{player.PlayerID}";
+            var pickedSlot = SafePlayerId(player);
+            openPickMenuPoolSlots.Add(pickedSlot);
             var button = new ButtonMenuOption(displayName);
             if (team == Team.CT)
             {
                 button.Click += async (sender, args) =>
                 {
-                    AssignPickedPlayerToTeamCt(captain, displayName);
+                    AssignPickedPlayerToTeamCt(captain, displayName, pickedSlot);
                 };
             }
             else
             {
                 button.Click += async (sender, args) =>
                 {
-                    AssignPickedPlayerToTeamT(captain, displayName);
+                    AssignPickedPlayerToTeamT(captain, displayName, pickedSlot);
                 };
             }
             if (cfg.DetailedLogging)
@@ -620,12 +632,24 @@ public partial class MixScrims
     }
 
     /// <summary>
+    /// Resolves a pick to the player it was made against. Slot first: two players can share a
+    /// display name, and name lookup hands both of their buttons to whichever one
+    /// <see cref="GetPlayerByName"/> lists first - picking it twice and leaving the other
+    /// unpickable for the rest of the ladder.
+    /// </summary>
+    private IPlayer? ResolvePickTarget(string pickedPlayerName, int pickedSlot)
+    {
+        if (pickedSlot < 0) return GetPlayerByName(pickedPlayerName);
+        return GetPlayers().FirstOrDefault(p => SafePlayerId(p) == pickedSlot);
+    }
+
+    /// <summary>
     /// Assigns the player selected by the CT captain to the CT team.
     /// </summary>
-    internal void AssignPickedPlayerToTeamCt(IPlayer captain, string pickedPlayerName)
+    internal void AssignPickedPlayerToTeamCt(IPlayer captain, string pickedPlayerName, int pickedSlot = -1)
     {
         CloseMenuForPlayer(captain);
-        var player = GetPlayerByName(pickedPlayerName);
+        var player = ResolvePickTarget(pickedPlayerName, pickedSlot);
 
         if (player == null || !IsPlayerValid(player))
         {
@@ -665,10 +689,10 @@ public partial class MixScrims
     /// <summary>
     /// Assigns the player selected by the T captain to the T team.
     /// </summary>
-    internal void AssignPickedPlayerToTeamT(IPlayer captain, string pickedPlayerName)
+    internal void AssignPickedPlayerToTeamT(IPlayer captain, string pickedPlayerName, int pickedSlot = -1)
     {
         CloseMenuForPlayer(captain);
-        var player = GetPlayerByName(pickedPlayerName);
+        var player = ResolvePickTarget(pickedPlayerName, pickedSlot);
 
         if (player == null || !IsPlayerValid(player))
         {

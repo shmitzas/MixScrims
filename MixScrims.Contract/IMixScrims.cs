@@ -420,6 +420,11 @@ public interface IMixScrims : IDisposable
     /// Current CT vote-kick tally (yes count, votes cast, eligible voters).
     /// All three are 0 when no vote is active.
     /// </summary>
+    /// <remarks>
+    /// <c>Eligible</c> is the whole electorate - the team minus the kick target, initiator
+    /// included - so it is also the pass threshold and <c>Cast</c> can never exceed it.
+    /// It shrinks when an eligible voter disconnects mid-vote.
+    /// </remarks>
     (int Yes, int Cast, int Eligible) GetVoteKickTallyCt();
 
     /// <summary>Same shape as <see cref="GetVoteKickTallyCt"/> for the T team.</summary>
@@ -434,6 +439,13 @@ public interface IMixScrims : IDisposable
     /// Current surrender vote tally (yes count, votes cast, eligible voters).
     /// All three are 0 when no vote is active.
     /// </summary>
+    /// <remarks>
+    /// <c>Eligible</c> is the whole electorate - the whole team, caller included, whose
+    /// implicit yes is already inside <c>Yes</c> and <c>Cast</c> - so it is also the
+    /// unanimity threshold and a safe denominator. It shrinks when a voter disconnects
+    /// mid-vote. Timeout exposes no tally getter; its threshold is one below its electorate,
+    /// so a passing timeout legitimately closes before every ballot is in.
+    /// </remarks>
     (int Yes, int Cast, int Eligible) GetSurrenderVoteTally();
 
     // -- Localization pass-through --
