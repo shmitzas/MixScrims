@@ -10,13 +10,11 @@ public partial class MixScrims
 {
     internal List<VotedMap> votedMaps { get; set; } = [];
     internal IMenuAPI? mapVotingMenu { get; set; } = null;
-    // Votable map list + deadline snapshot for IMixScrims consumers (v2.0.0+). Rebuilt every
-    // StartMapVotingPhase and cleared when the vote closes.
+    // Rebuilt every StartMapVotingPhase and cleared when the vote closes.
     internal List<string> currentVoteMapNames = new();
     internal DateTime? mapVoteDeadline = null;
 
-    // Slots still owed a mid-vote menu. Membership is what stops a later retry reopening a
-    // vote the player has already answered.
+    // Membership is what stops a later retry reopening a vote the player has already answered.
     private readonly HashSet<int> mapVotePendingJoiners = [];
 
     // Retried because IsPlayerValid demands a pawn, which a joiner lacks for a second or two.
@@ -48,7 +46,6 @@ public partial class MixScrims
         // shuffle maps order
         mapsToVote = mapsToVote.OrderBy(_ => Guid.NewGuid()).ToList();
 
-        // Snapshot the votable maps + deadline for IMixScrims consumers before we build the menu.
         currentVoteMapNames = mapsToVote.Select(m => m.DisplayName).ToList();
         mapVoteDeadline = DateTime.UtcNow.AddSeconds(cfg.DefaultVoteTimeSeconds);
         mixScrimsService.RaiseMapVotingStarted(currentVoteMapNames.AsReadOnly(), cfg.DefaultVoteTimeSeconds);
@@ -105,9 +102,7 @@ public partial class MixScrims
             return;
         }
 
-        // SwiftlyS2 dispatches built-in menu clicks through Task.Run, so callers reach us on a
-        // thread-pool thread where every native read below is an uncatchable AV. PlayerID is a
-        // plain managed field, so it is the only thing safe to carry across the hop.
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
         var slot = player.PlayerID;
         Core.Scheduler.NextTick(() => RegisterMapVoteOnGameThread(slot, mapDisplayName));
     }
@@ -204,10 +199,9 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Opens the vote for a player who connected after <see cref="StartMapVotingPhase"/> ran,
-    /// covering both the built-in menu and the suppressed consumer-rendered path. Deferred,
-    /// never opened inline: the connect hook is the call stack where opening a menu crashed the host.
+    /// Opens the map vote for a player who connected after <see cref="StartMapVotingPhase"/> ran.
     /// </summary>
+    /// <remarks>Always deferred - opening a menu inline on the connect hook crashes the host.</remarks>
     internal void ScheduleMapVoteForJoiner(int playerSlot)
     {
         if (!mapVotePendingJoiners.Add(playerSlot))
@@ -244,8 +238,8 @@ public partial class MixScrims
     /// </summary>
     internal void AnnouncePickedMap()
     {
-        // The vote timer is only StopOnMapChange, so a phase abandoned before it elapses
-        // leaves it armed — it would otherwise fire in Warmup and force-load a map.
+        // The vote timer is only StopOnMapChange, so an abandoned phase leaves it armed to fire
+        // in Warmup and force-load a map.
         if (MatchState != MatchState.MapVoting)
         {
             if (cfg.DetailedLogging)
@@ -287,8 +281,6 @@ public partial class MixScrims
         VotedMap pickedMap = GetMostVotedMap();
         PrintMessageToAllPlayers(Core.Localizer["announcement.map.chosen", pickedMap.Map.DisplayName, pickedMap.Votes]);
         mixScrimsService.RaiseMapVotingEnded(pickedMap.Map.DisplayName, pickedMap.Votes);
-        // Voting is closed — clear the snapshot state so consumers get an empty map list
-        // between votes rather than the stale one.
         currentVoteMapNames.Clear();
         mapVotePendingJoiners.Clear();
         mapVoteDeadline = null;

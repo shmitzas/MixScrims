@@ -543,24 +543,19 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Safely reads the player's name from a possibly-null or possibly-disposed player
-    /// reference. Returns a sentinel string (<c>&lt;null&gt;</c>, <c>&lt;disposed&gt;</c>, or
-    /// <c>&lt;error&gt;</c>) on any failure, and a <c>Slot {id}</c> fallback (via
-    /// <see cref="SafePlayerId"/>) when the name is empty. Use this for structured-log
-    /// <c>{PlayerName}</c> placeholders over the plugin's stored roster lists so log formatting
-    /// never throws when SwiftlyS2 has disposed the underlying Player object between the time we
-    /// added it and the time we read it. Same disposal-safety rationale as
-    /// <see cref="SafeSteamId"/>.
+    /// Reads a player's name from a possibly-null or possibly-disposed reference, falling back to
+    /// <c>Slot {id}</c> or a sentinel (<c>&lt;null&gt;</c>, <c>&lt;disposed&gt;</c>, <c>&lt;error&gt;</c>).
     /// </summary>
+    /// <remarks>
+    /// <b>Call only below an <see cref="IsPlayerValid"/> guard, and only on the game thread.</b>
+    /// <c>IPlayer.Name</c> derefs a ServerSideClient pointer unguarded, so a torn-down client
+    /// SIGSEGVs the host - the catch below cannot contain that.
+    /// </remarks>
     internal string SafePlayerName(IPlayer? player)
     {
         if (player is null) return "<null>";
         try
         {
-            // IPlayer.Name is a slot-indexed lookup of a ServerSideClient POINTER followed by two
-            // unguarded derefs, so it SIGSEGVs the host (uncatchable) once that client is torn
-            // down - the same AV class as Controller.PlayerName, not a safer alternative to it.
-            // Call this only below an IsPlayerValid guard, and only on the game thread.
             var name = player.Name;
             return string.IsNullOrEmpty(name) ? $"Slot {SafePlayerId(player)}" : name;
         }

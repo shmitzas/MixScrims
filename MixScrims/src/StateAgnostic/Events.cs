@@ -112,8 +112,6 @@ partial class MixScrims
             LoadWarmupConfig();
         }
 
-        // StartMapVotingPhase only opened the vote for players connected at the time, so a
-        // mid-vote joiner is otherwise disenfranchised. Scheduled, never opened from this hook.
         if (MatchState == MatchState.MapVoting)
             ScheduleMapVoteForJoiner(playerSlot);
 
@@ -365,9 +363,8 @@ partial class MixScrims
     /// Handles the removal and cleanup of a player who has disconnected from the match.
     /// </summary>
     /// <remarks>
-    /// Every step runs under <see cref="RunDisconnectCleanupStep"/>. The steps are independent
-    /// cleanups of separate state, so one throwing surface must not strand the rest - a single
-    /// abort here leaves the leaver in rosters, votes and menus for the remainder of the match.
+    /// Steps run isolated under <see cref="RunDisconnectCleanupStep"/>: one aborting would leave
+    /// the leaver in rosters, votes and menus for the rest of the match.
     /// </remarks>
     internal void HandleDisconnectedPlayer(IPlayer? player)
     {
@@ -477,7 +474,8 @@ partial class MixScrims
                     var newCaptain = playingCtPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandleDisconnectedPlayer: New CT captain is {NewCaptain}", SafePlayerName(newCaptain));
+                        logger.LogInformation("HandleDisconnectedPlayer: New CT captain is {NewCaptain}",
+                            newCaptain != null && IsPlayerValid(newCaptain) ? SafePlayerName(newCaptain) : "None");
 
                     PickCtCaptain(newCaptain);
                 }
@@ -490,7 +488,8 @@ partial class MixScrims
                     var newCaptain = playingTPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("HandleDisconnectedPlayer: New T captain is {NewCaptain}", SafePlayerName(newCaptain));
+                        logger.LogInformation("HandleDisconnectedPlayer: New T captain is {NewCaptain}",
+                            newCaptain != null && IsPlayerValid(newCaptain) ? SafePlayerName(newCaptain) : "None");
 
                     PickTCaptain(newCaptain);
                 }

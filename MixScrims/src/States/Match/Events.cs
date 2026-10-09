@@ -21,10 +21,8 @@ public partial class MixScrims
         if (matchState != MatchState.Match)
             return HookResult.Continue;
 
-        // Set before MatchEnded is raised so a subscriber re-reading GetCurrentMatchState()
-        // sees Ended, and before the delayed reset so a second cs_win_panel_match hits the
-        // guard above. Ended must stay OUT of the map-change bail list below — it is the
-        // state this very callback runs in.
+        // Set before MatchEnded is raised so a subscriber re-reading the state sees Ended. Ended
+        // must stay out of the map-change bail list below - it is the state this callback runs in.
         mixScrimsService.SetMatchState(MatchState.Ended);
 
         // Fire MatchEnded synchronously here rather than inside the 10s delayed callback:
@@ -51,8 +49,7 @@ public partial class MixScrims
         {
             try
             {
-                // A held consumer owns every transition, including what follows the match.
-                // Checked at fire time, not schedule time, so a hold taken during the window counts.
+                // Read at fire time, not schedule time, so a hold taken during the window counts.
                 if (mixScrimsService.IsPhaseProgressionHeld())
                 {
                     if (cfg.DetailedLogging)

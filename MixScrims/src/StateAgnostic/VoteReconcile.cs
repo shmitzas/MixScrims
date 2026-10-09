@@ -64,8 +64,7 @@ public partial class MixScrims
     /// <remarks>
     /// Recomputed as "votes cast + voters who can still answer", never decremented:
     /// <see cref="SafeSteamId"/> reads 0 off a disposed reference, so a decrement keyed on the
-    /// leaver would no-op exactly when it is needed - and would lose the caller's counted yes
-    /// when the caller is the one leaving.
+    /// leaver would no-op exactly when it is needed.
     /// </remarks>
     internal void HandlePlayerDisconnectSurrenderVote(IPlayer leaver)
     {
@@ -170,11 +169,8 @@ public partial class MixScrims
     /// Withdraws the leaver's map vote.
     /// </summary>
     /// <remarks>
-    /// The vote picks the map the players who are still here will load, so a departed voter has
-    /// no stake in it. The slot key is the forcing reason: <c>VotedBy</c> holds player ids, and a
-    /// vote left behind makes the next connection into that slot read as a revote in
-    /// <see cref="RegisterMapVoteByName"/> - their first vote would silently decrement a map they
-    /// never chose. Votes and VotedBy are decremented together, matching the revote path.
+    /// Keyed on slot: a vote left behind makes the next connection into that slot read as a revote
+    /// in <see cref="RegisterMapVoteByName"/>, decrementing a map they never chose.
     /// </remarks>
     internal void HandlePlayerDisconnectMapVote(IPlayer leaver)
     {

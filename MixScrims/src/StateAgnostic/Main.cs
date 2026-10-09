@@ -211,7 +211,6 @@ public sealed partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation("CheckReadyPlayersToStart: readyPlayers={ReadyCount} (effective={Effective}) | Required={Required}", readyPlayers.Count, effectiveReady, required);
 
-        // Also reached from a disconnect, which is what lets a consumer hold Warmup open.
         if (phaseProgressionHeld)
         {
             if (cfg.DetailedLogging)
@@ -304,9 +303,7 @@ public sealed partial class MixScrims
     /// </summary>
     internal void RemovePlayerFromReadyList(IPlayer player, bool announce = false)
     {
-        // Safe* reads, not raw: HandleDisconnectedPlayer calls this with the leaver, whose
-        // reference may already be disposed - a raw .Name/.SteamID throws and aborts every
-        // cleanup step queued after this one.
+        // HandleDisconnectedPlayer passes an already-disposed leaver, so Safe* reads only.
         var name = SafePlayerName(player);
         if (cfg.DetailedLogging)
             logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
@@ -508,9 +505,7 @@ public sealed partial class MixScrims
             return;
         }
 
-        // SwiftlyS2 dispatches built-in menu clicks through Task.Run, so callers reach us on a
-        // thread-pool thread where every native read below is an uncatchable AV. PlayerID is a
-        // plain managed field, so it is the only thing safe to carry across the hop.
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
         var slot = admin.PlayerID;
         Core.Scheduler.NextTick(() => SetCtCaptainOnGameThread(slot, pickedPlayerName));
     }
@@ -600,8 +595,7 @@ public sealed partial class MixScrims
         var steamId = SafeSteamId(player);
         if (steamId == 0)
         {
-            // Disposed reference or a bot - neither is punishable, and a raw read would have
-            // thrown here and skipped the rest of the disconnect cleanup.
+            // Disposed reference or a bot - neither is punishable.
             return;
         }
         var matchState = mixScrimsService.GetCurrentMatchState();

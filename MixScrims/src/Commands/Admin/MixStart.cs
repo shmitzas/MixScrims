@@ -51,9 +51,7 @@ public partial class MixScrims
             PrintMessageToAllPlayers(Core.Localizer["command.force.match_start", "Console"]);
         }
 
-        // Only force-start from pre-match phases. Past picking the rosters are already sealed and
-        // re-entering would restart a live match (first seen as a knife-round loop, when a disposed
-        // captain ref left the side-pick menu unopened and admins reached for !start).
+        // Past picking the rosters are sealed, so re-entering would restart a live match.
         var currentState = mixScrimsService.GetCurrentMatchState();
         if (currentState != MatchState.Warmup
             && currentState != MatchState.MapChosen

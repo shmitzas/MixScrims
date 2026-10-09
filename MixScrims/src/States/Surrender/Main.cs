@@ -198,9 +198,7 @@ public partial class MixScrims
             return;
         }
 
-        // SwiftlyS2 dispatches built-in menu clicks through Task.Run, so callers reach us on a
-        // thread-pool thread where every native read below is an uncatchable AV. PlayerID is a
-        // plain managed field, so it is the only thing safe to carry across the hop.
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
         var slot = player.PlayerID;
         Core.Scheduler.NextTick(() => HandleSurrenderVoteOnGameThread(slot, choice));
     }

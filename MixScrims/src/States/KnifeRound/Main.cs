@@ -51,9 +51,8 @@ public partial class MixScrims
         mixScrimsService.RaiseKnifeRoundStarted();
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.knife_round"]);
 
-        // Only the pick phase seals. A consumer running its own knife round earlier (captain
-        // election before picking) would otherwise seal empty picked lists and latch
-        // teamPickingFinalized, making the real CompleteTeamPicking a no-op that drops the picks.
+        // Only the pick phase seals: sealing from elsewhere latches teamPickingFinalized against
+        // empty picked lists, turning the real CompleteTeamPicking into a no-op.
         if (previousState == MatchState.PickingTeam)
             FinalizeTeamPicking();
         else if (cfg.DetailedLogging)
@@ -306,9 +305,7 @@ public partial class MixScrims
             return;
         }
 
-        // SwiftlyS2 dispatches built-in menu clicks through Task.Run, so callers reach us on a
-        // thread-pool thread where every native read below is an uncatchable AV. PlayerID is a
-        // plain managed field, so it is the only thing safe to carry across the hop.
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
         var slot = captain.PlayerID;
         Core.Scheduler.NextTick(() => HandleCaptainSideChoiceOnGameThread(slot, choice));
     }
@@ -340,10 +337,6 @@ public partial class MixScrims
             return;
         }
 
-        // The !stay / !switch commands have always checked this; the built-in menu and the
-        // ChooseStartingSide driver did not, so any connected player could decide the side
-        // for everyone. It is also what lets SwitchStartingSides / StayStartingSides keep
-        // deriving the winning side from the caller's own TeamNum.
         if (!IsSamePlayer(captain, winnerCaptain))
         {
             logger.LogWarning("HandleCaptainSideChoice: {Player} is not the winning captain; ignoring their {Choice}.", SafePlayerName(captain), choice);
@@ -501,9 +494,8 @@ public partial class MixScrims
     /// Keeps the teams on their starting sides based on the captain's current team.
     /// </summary>
     /// <remarks>
-    /// The <c>StartingSideChosen</c> team is read off <paramref name="captain"/>, so every
-    /// caller must pass a winning-side player — enforced in HandleCaptainSideChoiceOnGameThread
-    /// and, for the <c>DisableCaptains</c> vote, by TryCloseTeamSideVote purging foreign votes.
+    /// <c>StartingSideChosen</c> is read off <paramref name="captain"/>, so every caller must pass
+    /// a winning-side player.
     /// </remarks>
     internal void StayStartingSides(IPlayer? captain)
     {

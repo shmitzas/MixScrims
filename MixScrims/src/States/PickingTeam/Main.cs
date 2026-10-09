@@ -18,15 +18,13 @@ public partial class MixScrims
     internal Team? activePickingTeam = null;
     internal int currentPickIndex = 0;
 
-    // One-shot: a second pass finds the picked lists already cleared and would overwrite the
-    // sealed rosters with live team membership.
+    // One-shot: a second pass finds the picked lists cleared and would overwrite the sealed
+    // rosters with live team membership.
     internal bool teamPickingFinalized = false;
 
     internal const int NoPickingTeamOverride = -1;
 
-    // Coin-toss override from IMixScrims.SetNextPickingTeam, held as an int so a set from a
-    // consumer's worker thread cannot tear a Team? and the consume is one atomic swap. One-shot:
-    // a consumer that dies without clearing it costs one biased toss, not every toss.
+    // int, not Team?: a consumer sets this from a worker thread, and an int cannot tear.
     internal int nextPickingTeamOverride = NoPickingTeamOverride;
 
     // Slots the currently-open pick menu offers. A disconnect only has to rebuild the menu
@@ -192,8 +190,7 @@ public partial class MixScrims
             mixScrimsService.RaisePlayerPickedForTeam(Team.T, SafeSteamId(captainT), currentPickIndex);
         }
 
-        // Consumed here and not at phase entry: every abort above returns before a toss happens,
-        // so a pending override survives them rather than being silently burned.
+        // Consumed here, not at phase entry: every abort above returns before a toss happens.
         var pickFirst = ConsumeNextPickingTeamOverride()
             ?? (Random.Shared.Next(2, 4) == 3 ? Team.CT : Team.T);
         activePickingTeam = pickFirst;
@@ -308,9 +305,8 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Seals the result of team picking: promotes the picked rosters to the playing ones,
-    /// guarantees both captains, and tears down the phase's own presentation. Shared by every
-    /// exit from picking, so every path into the match sees the same rosters.
+    /// Promotes the picked rosters to the playing ones, guarantees both captains and tears down
+    /// the pick phase's presentation.
     /// </summary>
     internal void FinalizeTeamPicking()
     {
@@ -322,12 +318,8 @@ public partial class MixScrims
         }
         teamPickingFinalized = true;
 
-        // Clear the per-phase snapshot fields so IMixScrims consumers reading
-        // GetActivePickingTeam / GetCurrentPickIndex don't see stale values afterwards.
         activePickingTeam = null;
 
-        // Drop any stale (disposed) captain references that survived a reconnect/map change
-        // before we use them below to seed playingCtPlayers/playingTPlayers.
         EnsureCaptainsAlive();
 
         if (pickedCtPlayers.Count == 0)
@@ -356,8 +348,6 @@ public partial class MixScrims
 
         if (captainCt != null && IsPlayerValid(captainCt))
         {
-            // Cache captain SteamID once; playingCtPlayers can carry disposed IPlayer refs so
-            // predicate reads use SafeSteamId to avoid ObjectDisposedException per iteration.
             var captainCtId = captainCt.SteamID;
             if (!playingCtPlayers.Any(p => SafeSteamId(p) == captainCtId))
             {
@@ -399,7 +389,6 @@ public partial class MixScrims
         if (cfg.ShowReadyStatusInScoreboard)
             RemoveReadyClanTagsFromAllPlayers();
 
-        // Close any open team picking menus for captains
         if (captainCt != null && IsPlayerValid(captainCt))
         {
             var ctMenu = Core.MenusAPI.GetCurrentMenu(captainCt);
@@ -425,15 +414,13 @@ public partial class MixScrims
 
     /// <summary>
     /// The single exit from a completed pick ladder, and the one place deciding whether a knife
-    /// round runs. Seals the rosters either way; held, it stops there rather than choosing the
-    /// next phase for the consumer.
+    /// round runs.
     /// </summary>
     internal void CompleteTeamPicking()
     {
         if (phaseProgressionHeld)
         {
-            // Sealed even when held: StartMatch kicks everyone outside the playing rosters,
-            // so a consumer calling it against unsealed ones would empty the server.
+            // Sealed even when held: StartMatch kicks everyone outside the playing rosters.
             FinalizeTeamPicking();
             if (cfg.DetailedLogging)
                 logger.LogInformation("CompleteTeamPicking: phase progression is held; rosters sealed, next phase left to the consumer.");
@@ -453,8 +440,7 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Seals the rosters and goes straight to the match, skipping the knife round. The
-    /// <c>!mix_start</c> force-start path.
+    /// Seals the rosters and goes straight to the match, skipping the knife round.
     /// </summary>
     internal void StartMatchWithoutKnifeRound()
     {
@@ -653,8 +639,6 @@ public partial class MixScrims
 
         if (captainCt == null || !IsPlayerValid(captainCt))
         {
-            // PickCaptains passes null to request an automatic pick, so only a caller-supplied
-            // player failing validation is a fault.
             if (player == null)
             {
                 if (cfg.DetailedLogging)
@@ -734,8 +718,6 @@ public partial class MixScrims
 
         if (captainT == null || !IsPlayerValid(captainT))
         {
-            // PickCaptains passes null to request an automatic pick, so only a caller-supplied
-            // player failing validation is a fault.
             if (player == null)
             {
                 if (cfg.DetailedLogging)
@@ -846,9 +828,11 @@ public partial class MixScrims
 
     /// <summary>
     /// Re-runs the picker-side guards on the game thread, immediately before the roster mutation.
-    /// Both entry points validate on the caller's thread and defer the mutation a tick, so two
-    /// picks landing in one tick both clear that check against a roster neither has touched yet.
     /// </summary>
+    /// <remarks>
+    /// Both entry points validate on the caller's thread and defer the mutation a tick, so two
+    /// picks landing in one tick both clear that check against an untouched roster.
+    /// </remarks>
     private bool CanApplyPickOnGameThread(Team team, IPlayer picked, string caller)
     {
         var state = mixScrimsService.GetCurrentMatchState();
@@ -864,8 +848,7 @@ public partial class MixScrims
             return false;
         }
 
-        // Slot, not SteamID: every bot reports 0, so a SteamID compare reads the whole bot pool
-        // as one already-picked player.
+        // Slot, not SteamID: every bot reads 0, which collapses the whole bot pool onto one entry.
         var slot = SafePlayerId(picked);
         if (slot < 0)
         {
@@ -892,9 +875,7 @@ public partial class MixScrims
             return;
         }
 
-        // SwiftlyS2 dispatches built-in menu clicks through Task.Run, so callers reach us on a
-        // thread-pool thread where every native read below is an uncatchable AV. PlayerID is a
-        // plain managed field, so it is the only thing safe to carry across the hop.
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
         var captainSlot = captain.PlayerID;
         Core.Scheduler.NextTick(() => AssignPickedPlayerToTeamCtOnGameThread(captainSlot, pickedPlayerName, pickedSlot));
     }

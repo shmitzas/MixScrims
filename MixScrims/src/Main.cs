@@ -49,10 +49,6 @@ public partial class MixScrims : BasePlugin
     internal bool suppressBuiltInMenus = false;
     internal bool suppressBuiltInCenterHtml = false;
 
-    // Phase-progression hold (v2.8.0 contract). Not a suppression flag: it moves the
-    // decision, not the presentation. Set only through SetPhaseProgressionHeld —
-    // deliberately has no config key, because a server with no consumer loaded would
-    // never leave warmup.
     internal bool phaseProgressionHeld = false;
 
     public MixScrims(ISwiftlyCore core) : base(core)

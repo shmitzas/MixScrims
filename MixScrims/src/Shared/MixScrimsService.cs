@@ -175,8 +175,6 @@ public class MixScrimsService : IMixScrims
 
     public IReadOnlyDictionary<string, int> GetMapVoteTallies()
     {
-        // votedMaps carries the running tallies; empty outside MapVoting because
-        // StartMapVotingPhase clears it and the flow only rebuilds when voting reopens.
         // Indexed, not foreach: a consumer reading mid-count gets a stale tally, not a throw.
         var result = new Dictionary<string, int>(StringComparer.Ordinal);
         var votedMaps = _mixScrims.votedMaps;
@@ -354,14 +352,13 @@ public class MixScrimsService : IMixScrims
     public bool IsBuiltInCenterHtmlSuppressed() => _mixScrims.suppressBuiltInCenterHtml;
 
     // =========================================================================
-    // Flow control (v2.8.0+)
+    // Flow control
     // =========================================================================
 
     public void SetPhaseProgressionHeld(bool held)
     {
         _mixScrims.phaseProgressionHeld = held;
-        // Logged unconditionally: this silences every phase transition, so an operator
-        // debugging "the match never starts" needs it without DetailedLogging.
+        // Ungated: this silences every phase transition, so it must surface without DetailedLogging.
         _mixScrims.logger?.LogInformation("SetPhaseProgressionHeld: {Held}", held);
     }
 
@@ -371,8 +368,6 @@ public class MixScrimsService : IMixScrims
     {
         if (team is { } t && t != Team.CT && t != Team.T)
         {
-            // No-op rather than treating it as a clear: null already spells that, and a consumer
-            // that computed None by accident should see it in the log instead of a silent toss.
             _mixScrims.logger?.LogWarning("SetNextPickingTeam: ignored, {Team} is not a picking team.", t);
             return;
         }
@@ -439,8 +434,8 @@ public class MixScrimsService : IMixScrims
         var player = ResolveConnectedPlayer(steamId, nameof(CastMapVote));
         if (player == null) return;
 
-        // Only the maps currently up for vote are votable — RegisterMapVoteByName would otherwise accept
-        // any map in maps.jsonc, including ones excluded by DisallowVotePreviousMaps.
+        // RegisterMapVoteByName would otherwise accept any map in maps.jsonc, including ones
+        // DisallowVotePreviousMaps excluded.
         var isVotable = _mixScrims.currentVoteMapNames
             .Any(n => string.Equals(n, mapDisplayName, StringComparison.OrdinalIgnoreCase));
         if (!isVotable)
@@ -869,7 +864,6 @@ public class MixScrimsService : IMixScrims
 
     public List<ulong> GetPickedCtPlayers()
     {
-        // Raw .SteamID on a roster entry whose player already left throws, failing the whole call.
         return SafeSteamIds(_mixScrims.pickedCtPlayers);
     }
 
@@ -1031,8 +1025,7 @@ public class MixScrimsService : IMixScrims
     /// <summary>Kicks every connected human whose SteamID is absent from <paramref name="keep"/>.</summary>
     private void KickPlayersOutside(HashSet<ulong> keep, string? reason)
     {
-        // Bots are skipped, not kept: they all read SteamID 0, so neither the keep set nor
-        // KickPlayer's lookup can tell one from another.
+        // Bots are skipped, not kept: they all read SteamID 0, so nothing here can tell them apart.
         foreach (var player in _mixScrims.GetPlayers())
         {
             ulong sid;

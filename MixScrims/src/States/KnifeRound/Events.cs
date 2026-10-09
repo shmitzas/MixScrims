@@ -31,9 +31,8 @@ public partial class MixScrims
                 return HookResult.Continue;
             }
 
-            // The restart this round_end arms is deliberately left armed: parking it with no
-            // MixScrims phase to release it is a permanent stall, so the knife round replays
-            // until the consumer moves the match on.
+            // CS2's round restart stays armed: parking it with no phase left to release it stalls
+            // the server, so the knife round replays until the consumer moves the match on.
             if (phaseProgressionHeld)
             {
                 if (cfg.DetailedLogging)

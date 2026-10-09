@@ -48,8 +48,7 @@ public partial class MixScrims
         votedMaps.Clear();
         currentVoteMapNames.Clear();
         mapVoteDeadline = null;
-        // Left stale, a slot in here makes ScheduleMapVoteForJoiner early-return on its
-        // Add(), so that slot never gets a vote again for the rest of the session.
+        // A stale slot here makes ScheduleMapVoteForJoiner early-return for the rest of the session.
         mapVotePendingJoiners.Clear();
         mapVotingMenu = null;
         sideVotes.Clear();

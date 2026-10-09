@@ -6,83 +6,35 @@ namespace MixScrims.Contract;
 /// MixScrims' shared API surface.
 /// </summary>
 /// <remarks>
-/// <b>Thread affinity (v2.8.0+): call every member on the game thread.</b> Most reads resolve a
-/// player through CS2 natives, which are not thread-safe — off the game thread they are an
-/// access violation no <c>try</c>/<c>catch</c> can contain, taking the whole server down rather
-/// than failing the call. Marshal with <c>Core.Scheduler.NextTick</c> before calling from a
-/// <c>Task</c>, an HTTP continuation or a <c>System.Threading.Timer</c>.
+/// <b>Call every member on the game thread.</b> Most reads resolve a player through CS2 natives;
+/// off the game thread that is an access violation no <c>try</c>/<c>catch</c> can contain, and it
+/// takes the server down rather than failing the call. Marshal with <c>Core.Scheduler.NextTick</c>
+/// from a <c>Task</c>, an HTTP continuation, a <c>System.Threading.Timer</c> - or a built-in
+/// SwiftlyS2 menu click, which <c>Core.MenusAPI</c> already dispatches through <c>Task.Run</c>.
+/// A CustomHUD menu click runs inline on the game thread and needs no marshal.
 /// <para>
-/// Note that a <b>built-in SwiftlyS2 menu click is already off the game thread</b> —
-/// <c>Core.MenusAPI</c> dispatches it through <c>Task.Run</c> — so marshal before calling
-/// back in from one. A CustomHUD menu click is the opposite: it runs inline on the game
-/// thread, so a consumer rendering its UI through CustomHUD needs no marshal there.
+/// Exempt because they read no native state: <see cref="GetMapVoteTallies"/>,
+/// <see cref="GetVoteableMapDisplayNames"/> and <see cref="GetMapVoteSecondsRemaining"/>.
 /// </para>
 /// <para>
-/// The three exceptions, which cannot crash the host from any thread because they read no
-/// native state: <see cref="GetMapVoteTallies"/> and <see cref="GetVoteableMapDisplayNames"/>
-/// (both snapshot before returning) and <see cref="GetMapVoteSecondsRemaining"/> (a timestamp
-/// subtraction, so a concurrent read can be stale but never invalid).
-/// </para>
-/// <para>
-/// The four suppression members — <see cref="SetBuiltInMenusSuppressed(bool)"/>,
-/// <see cref="SetBuiltInCenterHtmlSuppressed(bool)"/>, <see cref="AreBuiltInMenusSuppressed()"/>
-/// and <see cref="IsBuiltInCenterHtmlSuppressed()"/> — are also safe from any thread, and must
-/// be: a consumer can only call them from <c>Load</c>, <c>Unload</c> or a config-reload
-/// callback, none of which is guaranteed to be the game thread. They read and write plain
-/// managed fields. Do not marshal them — deferring a suppression <i>enable</i> leaves a tick in
-/// which MixScrims can still open a built-in menu, and deferring the <i>disable</i> in
-/// <c>Unload</c> risks the scheduler dropping it and leaving the built-ins suppressed with no
-/// consumer left to render them.
-/// </para>
-/// <para>
-/// <see cref="SetPhaseProgressionHeld(bool)"/>, <see cref="IsPhaseProgressionHeld()"/>,
-/// <see cref="SetNextPickingTeam(Team?)"/> and <see cref="GetNextPickingTeam()"/>
-/// carry the same exemption, for the same reason and with the same obligation not to marshal:
-/// they are a plain managed field, a consumer sets them from <c>Load</c> / <c>Unload</c> or an
-/// event handler, and a deferred write loses the race against the decision it is meant to
-/// change - a phase MixScrims has already advanced, or a coin toss already rolled.
-/// </para>
-/// <para>
-/// <b><see cref="StartKnifeRound"/> seals the pick rosters</b> when it follows the pick phase:
-/// the picked lists are promoted to the playing ones and latched for the rest of the match.
-/// From any other state it runs the knife round and leaves the rosters untouched, so a consumer
-/// staging its own knife round elsewhere - a captain election before picking, say - gets the
-/// round without consuming the pick phase. To run one with no plugin-side flow at all, call
-/// <see cref="SetMatchState(MatchState)"/> with <see cref="MatchState.KnifeRound"/> and exec the
-/// knife cfg directly.
-/// </para>
-/// <para>
-/// <b>After a match, reset before changing map.</b> Call <see cref="CancelMatch"/> and then
-/// <see cref="ChangeMap(string, string)"/>: only the reset clears the playing rosters, captains
-/// and ready list, so a <see cref="ChangeMap(string, string)"/> on its own carries the finished
-/// match's rosters onto the new map. It is not a dead end either way - a map change out of
-/// <see cref="MatchState.Ended"/> comes up in <see cref="MatchState.Warmup"/> rather than
-/// carrying Ended across, where RTV and <c>!ready</c> are both inert.
-/// </para>
-/// <para>
-/// <b>Releasing <see cref="SetPhaseProgressionHeld(bool)"/> does not re-run the decision it
-/// blocked.</b> The ready check is edge-triggered by <c>!ready</c>, <c>!unready</c> and
-/// disconnects, so a lobby that readied up while held stays where it is after the release.
-/// <see cref="ForceAllPlayersToReady"/> is not a usable nudge - it only adds players who are not
-/// already ready, so against a fully-ready lobby it does nothing at all. Drive the next phase
-/// explicitly with <see cref="StartMapVoting"/> or <see cref="StartTeamPicking"/>.
+/// The suppression and flow-control members - <see cref="SetBuiltInMenusSuppressed(bool)"/>,
+/// <see cref="SetBuiltInCenterHtmlSuppressed(bool)"/>, <see cref="AreBuiltInMenusSuppressed()"/>,
+/// <see cref="IsBuiltInCenterHtmlSuppressed()"/>, <see cref="SetPhaseProgressionHeld(bool)"/>,
+/// <see cref="IsPhaseProgressionHeld()"/>, <see cref="SetNextPickingTeam(Team?)"/> and
+/// <see cref="GetNextPickingTeam()"/> - are plain managed fields and <b>must not</b> be
+/// marshalled: a deferred write loses the race against the decision it is meant to change.
 /// </para>
 /// </remarks>
 public interface IMixScrims : IDisposable
 {
     // =========================================================================
-    // Events (v2.0.0+)
+    // Events
     // =========================================================================
     //
-    // Fire on the main game thread as a side effect of the state mutation that
-    // triggered them. Subscribers should keep handlers cheap and non-throwing;
-    // an unhandled exception in a handler is caught by the plugin and logged
-    // rather than escalating, but repeatedly-throwing handlers WILL be logged
-    // as warnings.
-    //
-    // For consumers that connect / hot-reload AFTER an event fired, every
-    // event listed here has a matching snapshot query below so state can be
-    // read without waiting for the next fire.
+    // Fire on the game thread as a side effect of the state mutation that triggered
+    // them. A handler that throws is caught and logged rather than escalating.
+    // Every event has a matching snapshot query below, so a consumer that connects
+    // or hot-reloads after a fire can read the state instead of waiting for the next.
 
     /// <summary>
     /// Fires whenever the match state transitions between two distinct
@@ -130,11 +82,8 @@ public interface IMixScrims : IDisposable
     /// the 1-based sequence within the whole picking phase; captains' implicit
     /// self-picks occupy indices 1 and 2.
     /// <para>
-    /// <c>pickedSteamId</c> is <c>0</c> when the pick was a bot — bots share
-    /// SteamID 0 and cannot be identified through it. Treat this event as a
-    /// "the pool changed, re-read it" trigger and resolve identity through
-    /// <see cref="GetUnpickedPlayerSlots"/>, which is slot-keyed and includes
-    /// bots. The roster is already updated when this fires.
+    /// <c>pickedSteamId</c> is <c>0</c> for a bot - resolve identity through
+    /// <see cref="GetUnpickedPlayerSlots"/>, which is slot-keyed.
     /// </para>
     /// </summary>
     event Action<Team, ulong, int>? PlayerPickedForTeam;
@@ -268,18 +217,13 @@ public interface IMixScrims : IDisposable
     event Action<Team, int, int>? MatchEnded;
 
     // =========================================================================
-    // Menu request events (v2.1.0+)
+    // Menu request events
     // =========================================================================
     //
-    // MixScrims owns the !captain / !volunteer_captain chat commands (argument
-    // parsing plus the "managemix" permission gate on !captain), so a consumer
-    // cannot re-register them without a command-name collision. Instead, when
-    // built-in menus are suppressed MixScrims announces the request and lets the
-    // consumer render its own picker.
-    //
-    // BOTH events are INERT unless SetBuiltInMenusSuppressed(true) is in effect
-    // (or the SuppressBuiltInMenus config flag is set). With suppression off,
-    // MixScrims handles the command itself exactly as it always has.
+    // MixScrims owns the !captain / !volunteer_captain chat commands, so a consumer
+    // cannot re-register them without a command-name collision. Both events are
+    // INERT unless built-in menus are suppressed; with suppression off MixScrims
+    // handles the command itself.
 
     /// <summary>
     /// Fires when <c>!captain</c> passes its permission, state and argument
@@ -311,31 +255,29 @@ public interface IMixScrims : IDisposable
     event Action<ulong>? MapVoteMenuRequested;
 
     // =========================================================================
-    // Snapshot queries (v2.0.0+)
+    // Snapshot queries
     // =========================================================================
     //
-    // Every event above has a matching read here so consumers that connect or
-    // hot-reload AFTER a state change can catch up without waiting for the next
-    // fire. All methods are safe to call from any state — they return
-    // sensible zero / empty values when the queried state isn't active.
+    // Safe to call from any state - they return zero / empty values when the
+    // queried state isn't active.
 
     // -- Ready system --
 
     /// <summary>Returns the list of currently-ready human players (SteamID64).</summary>
     /// <remarks>
-    /// Bots are <b>never</b> present here — they all share SteamID 0, which would
-    /// collapse them onto one slot. For a ready <i>counter</i> use
-    /// <see cref="GetEffectiveReadyCount"/> instead; this list is only correct for
-    /// per-player questions.
+    /// Bots are <b>never</b> present - they all share SteamID 0. For a ready <i>counter</i> use
+    /// <see cref="GetEffectiveReadyCount"/>.
     /// </remarks>
     IReadOnlyList<ulong> GetReadyPlayers();
 
     /// <summary>
-    /// Ready count as the plugin itself counts it, including bots as implicitly
-    /// ready while <c>TestMode</c> is on. This is the numerator MixScrims prints in
-    /// its own ready announcement and uses for state transitions — mirror it rather
-    /// than taking <c>GetReadyPlayers().Count</c>, which reads 0 in a bot lobby.
+    /// Ready count as the plugin itself counts it, including bots as implicitly ready while
+    /// <c>TestMode</c> is on.
     /// </summary>
+    /// <remarks>
+    /// This is the numerator MixScrims uses for state transitions; <c>GetReadyPlayers().Count</c>
+    /// reads 0 in a bot lobby.
+    /// </remarks>
     int GetEffectiveReadyCount();
 
     /// <summary>Returns whether the given SteamID64 is currently marked ready.</summary>
@@ -345,9 +287,8 @@ public interface IMixScrims : IDisposable
     /// <c>MinimumReadyPlayers</c> config).
     /// </summary>
     /// <remarks>
-    /// Raw config value. It ignores <c>RequireAllConnectedPlayersToBeReady</c>, so
-    /// for a ready counter's denominator use
-    /// <see cref="GetPlayersRequiredToStart"/>.
+    /// Raw config value: it ignores <c>RequireAllConnectedPlayersToBeReady</c>, so a ready
+    /// counter's denominator is <see cref="GetPlayersRequiredToStart"/>.
     /// </remarks>
     int GetMinimumReadyPlayers();
 
@@ -378,10 +319,9 @@ public interface IMixScrims : IDisposable
     /// is a bot (MixScrims resolves those automatically), or the phase isn't active.
     /// </summary>
     /// <remarks>
-    /// Snapshot pair for <see cref="PickingStartingSideStarted"/>. That event is
-    /// raised once and skipped entirely if the captain's player ref went stale, so a
-    /// consumer that only listens for it can miss the phase with no way to recover.
-    /// Drive the prompt off this read on entering <see cref="MatchState.PickingStartingSide"/>.
+    /// <see cref="PickingStartingSideStarted"/> is raised once and skipped entirely if the
+    /// captain's player ref went stale, so drive the prompt off this read on entering
+    /// <see cref="MatchState.PickingStartingSide"/>.
     /// </remarks>
     ulong? GetStartingSidePicker();
 
@@ -488,8 +428,7 @@ public interface IMixScrims : IDisposable
     /// </summary>
     /// <remarks>
     /// <c>Eligible</c> is the whole electorate - the team minus the kick target, initiator
-    /// included - so it is also the pass threshold and <c>Cast</c> can never exceed it.
-    /// It shrinks when an eligible voter disconnects mid-vote.
+    /// included - so it is also the pass threshold, and it shrinks when a voter disconnects.
     /// </remarks>
     (int Yes, int Cast, int Eligible) GetVoteKickTallyCt();
 
@@ -506,32 +445,26 @@ public interface IMixScrims : IDisposable
     /// All three are 0 when no vote is active.
     /// </summary>
     /// <remarks>
-    /// <c>Eligible</c> is the whole electorate - the whole team, caller included, whose
-    /// implicit yes is already inside <c>Yes</c> and <c>Cast</c> - so it is also the
-    /// unanimity threshold and a safe denominator. It shrinks when a voter disconnects
-    /// mid-vote. Timeout exposes no tally getter; its threshold is one below its electorate,
-    /// so a passing timeout legitimately closes before every vote is in.
+    /// <c>Eligible</c> is the whole team, caller included, so it is also the unanimity threshold,
+    /// and it shrinks when a voter disconnects. Timeout exposes no tally getter: its threshold is
+    /// one below its electorate, so a passing timeout closes before every vote is in.
     /// </remarks>
     (int Yes, int Cast, int Eligible) GetSurrenderVoteTally();
 
     // -- Localization pass-through --
 
     /// <summary>
-    /// Resolves a localization string via MixScrims' translation files. When
-    /// <paramref name="steamId"/> matches a currently-connected player their
-    /// preferred locale is used; otherwise the server default is used. Missing
-    /// keys are returned verbatim by the SwiftlyS2 localizer.
+    /// Resolves a localization string via MixScrims' translation files, using
+    /// <paramref name="steamId"/>'s locale when they are connected and the server default
+    /// otherwise.
     /// </summary>
     string GetLocalizedString(ulong steamId, string key, params object[] args);
 
     // =========================================================================
-    // Built-in presentation suppression (v2.0.0+)
+    // Built-in presentation suppression
     // =========================================================================
     //
-    // A consumer plugin that wants to render the same information through a
-    // richer UI (CustomHUD, external dashboard, etc.) can suppress the
-    // built-in menus and center-HTML broadcasts entirely. Both switches are
-    // opt-in — the built-in presentation is on by default.
+    // Both switches are opt-in - the built-in presentation is on by default.
 
     /// <summary>
     /// Runtime override of the <c>SuppressBuiltInMenus</c> config flag. When
@@ -556,7 +489,7 @@ public interface IMixScrims : IDisposable
     bool IsBuiltInCenterHtmlSuppressed();
 
     // =========================================================================
-    // Config value getters (v2.0.0+)
+    // Config value getters
     // =========================================================================
 
     /// <summary>Whether captains are enabled (<c>!DisableCaptains</c>).</summary>
@@ -581,19 +514,15 @@ public interface IMixScrims : IDisposable
     int GetDefaultVoteTimeSeconds();
 
     // =========================================================================
-    // Match flow drivers (v2.1.0+)
+    // Match flow drivers
     // =========================================================================
     //
     // Suppressing the built-in menus removes the only way a player could cast a
-    // vote or make a pick. These drivers are the replacement input path: each is
-    // a guarded pass-through to the same internal handler the built-in menu
-    // button invokes, so the full downstream pipeline (tallies, events, phase
-    // progression) runs identically.
+    // vote or make a pick; these are the replacement input path, each a guarded
+    // pass-through to the handler the built-in menu button invokes.
     //
-    // Every driver is a NO-OP when its preconditions aren't met (wrong match
-    // state, unknown SteamID, player not on the voting team, no vote open,
-    // caller isn't the active picker). Rejections log a warning on the server
-    // and never throw back into the caller.
+    // Every driver is a NO-OP when its preconditions aren't met. Rejections log a
+    // warning on the server and never throw back into the caller.
 
     /// <summary>
     /// Casts or changes <paramref name="steamId"/>'s map vote. No-op unless the
@@ -629,88 +558,71 @@ public interface IMixScrims : IDisposable
     void CastVoteKickVote(ulong steamId, Team team, bool voteYes);
 
     /// <summary>
-    /// Drives the FULL team-pick pipeline: the pick index advances,
-    /// <see cref="PlayerPickedForTeam"/> fires, the picked player is moved onto
-    /// the team, and the phase progresses to the knife round once picking
-    /// completes. This is what a consumer-built pick menu must call — the
-    /// <c>AddPlayerToPicked*Players</c> methods only touch the roster list.
-    /// No-op unless the match state is <see cref="MatchState.PickingTeam"/> and
-    /// <paramref name="captainSteamId"/> is the captain of the currently-active
-    /// picking team (see <see cref="GetActivePickingTeam"/>).
+    /// Drives the full team-pick pipeline: the index advances,
+    /// <see cref="PlayerPickedForTeam"/> fires, the player is moved onto the team, and the phase
+    /// progresses once picking completes.
     /// </summary>
+    /// <remarks>
+    /// This is what a consumer-built pick menu must call - <c>AddPlayerToPicked*Players</c> only
+    /// touches the roster list. No-op unless the state is <see cref="MatchState.PickingTeam"/> and
+    /// <paramref name="captainSteamId"/> captains the active picking team.
+    /// </remarks>
     void PickPlayerForTeam(ulong captainSteamId, ulong pickedSteamId);
 
     /// <summary>
-    /// Slot-keyed companion to <see cref="GetUnpickedPlayers"/>. Bots have a
-    /// SteamID of <c>0</c> and are therefore not addressable by the SteamID
-    /// overloads, but MixScrims' own picking flow <b>does</b> allow picking
-    /// them — which matters in <c>TestMode</c> lobbies where the pickable pool
-    /// is mostly bots. Use this (with <see cref="PickPlayerForTeamBySlot"/>)
-    /// to build a pick menu that behaves like the built-in one.
-    /// Returns the player slot (<c>IPlayer.PlayerID</c>) of every valid,
-    /// not-yet-picked player, bots included. Empty unless the match state is
+    /// Slot-keyed companion to <see cref="GetUnpickedPlayers"/>, returning every valid,
+    /// not-yet-picked player including bots. Empty outside
     /// <see cref="MatchState.PickingTeam"/>.
     /// </summary>
+    /// <remarks>
+    /// Bots have a SteamID of <c>0</c> and so are not addressable by the SteamID overloads, but
+    /// MixScrims' own picking flow does allow picking them - which matters in <c>TestMode</c>.
+    /// </remarks>
     IReadOnlyList<int> GetUnpickedPlayerSlots();
 
     /// <summary>
-    /// Slot-keyed companion to <see cref="PickPlayerForTeam"/>, so bots (SteamID
-    /// <c>0</c>) can be picked. Same guards and same full pipeline: the pick
-    /// index advances, <see cref="PlayerPickedForTeam"/> fires, the player is
-    /// moved onto the team, and the phase progresses once picking completes.
-    /// No-op unless the match state is <see cref="MatchState.PickingTeam"/> and
-    /// <paramref name="captainSteamId"/> is the captain of the currently-active
-    /// picking team.
+    /// Slot-keyed companion to <see cref="PickPlayerForTeam"/>, so bots (SteamID <c>0</c>) can be
+    /// picked. Same guards and same full pipeline.
     /// </summary>
     /// <param name="captainSteamId">The captain making the pick. Captains are always human, so a SteamID is safe here.</param>
     /// <param name="pickedSlot">Player slot (<c>IPlayer.PlayerID</c>) of the pick target.</param>
     void PickPlayerForTeamBySlot(ulong captainSteamId, int pickedSlot);
 
     /// <summary>
-    /// Volunteers <paramref name="steamId"/> as captain of <paramref name="team"/>,
-    /// honouring the same checks the <c>!volunteer_captain</c> chat command
-    /// performs (<c>AllowVolunteerCaptains</c> enabled, captains not disabled,
-    /// Warmup / MapLoading / MapChosen state, target slot still free, player not
-    /// already a captain). Distinct from <see cref="SetCtCaptain"/> /
-    /// <see cref="SetTCaptain"/>, which are admin-force setters that bypass
-    /// those checks.
+    /// Volunteers <paramref name="steamId"/> as captain of <paramref name="team"/>, honouring the
+    /// same checks the <c>!volunteer_captain</c> chat command performs.
     /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="SetCtCaptain"/> / <see cref="SetTCaptain"/>, which are admin-force
+    /// setters that bypass those checks.
+    /// </remarks>
     void VolunteerAsCaptain(ulong steamId, Team team);
 
     /// <summary>
-    /// Records a starting-side choice after the knife round. Routes to the same
-    /// handler the <c>!stay</c> / <c>!switch</c> chat commands and the built-in
-    /// side-pick menu use, so both captain modes work transparently:
-    /// <list type="bullet">
-    ///   <item><description><b>Captains enabled</b> — the winning captain's
-    ///     choice applies immediately (sides swap or hold) and
-    ///     <see cref="StartingSideChosen"/> fires.</description></item>
-    ///   <item><description><b><c>DisableCaptains</c> = true</b> — the call is
-    ///     recorded as one vote from a winning-team player. Once every valid
-    ///     winning-team player has voted, the majority is applied and
-    ///     <see cref="StartingSideChosen"/> fires.</description></item>
-    /// </list>
-    /// No-op unless the match state is
-    /// <see cref="MatchState.PickingStartingSide"/> and the caller is eligible
-    /// to choose: the winning captain (see <see cref="GetStartingSidePicker"/>),
-    /// or a member of the winning team when captains are disabled. An ineligible
-    /// caller is told so and logged as a warning.
-    /// <para>
-    /// The decision is one-shot per phase: once a side has been committed, later
-    /// calls are ignored (logged as a warning) even though
-    /// <see cref="MatchState"/> briefly still reads
-    /// <see cref="MatchState.PickingStartingSide"/> while the match start is
-    /// dispatched. Consumers therefore do not need to close their own prompt
-    /// before the driver returns to stay correct, but should still guard
-    /// double-clicks to avoid the wasted round trip.
-    /// </para>
+    /// Records a starting-side choice after the knife round, routing to the same handler the
+    /// <c>!stay</c> / <c>!switch</c> commands and the built-in side-pick menu use.
     /// </summary>
+    /// <remarks>
+    /// With captains enabled the winning captain's choice applies immediately; under
+    /// <c>DisableCaptains</c> it is recorded as one vote and the majority applies once every valid
+    /// winning-team player has voted. Either way <see cref="StartingSideChosen"/> fires.
+    /// <para>
+    /// No-op unless the state is <see cref="MatchState.PickingStartingSide"/> and the caller is
+    /// eligible: the winning captain (see <see cref="GetStartingSidePicker"/>), or a member of the
+    /// winning team when captains are disabled.
+    /// </para>
+    /// <para>
+    /// One-shot per phase - once a side is committed later calls are ignored, even though
+    /// <see cref="MatchState"/> briefly still reads
+    /// <see cref="MatchState.PickingStartingSide"/> while the match start is dispatched.
+    /// </para>
+    /// </remarks>
     /// <param name="steamId">The player making the choice.</param>
     /// <param name="stay"><c>true</c> to keep the current sides, <c>false</c> to swap.</param>
     void ChooseStartingSide(ulong steamId, bool stay);
 
     // =========================================================================
-    // Flow control (v2.8.0+)
+    // Flow control
     // =========================================================================
     //
     // Suppression changes who PRESENTS a phase. This changes who OWNS it:
@@ -721,24 +633,24 @@ public interface IMixScrims : IDisposable
     /// Stops MixScrims advancing the match on its own. While held:
     /// <list type="bullet">
     ///   <item><description>A ready check does not leave <see cref="MatchState.Warmup"/> or
-    ///     <see cref="MatchState.MapChosen"/>. This covers the check a disconnect runs too,
-    ///     so the match stays put whether the last player readies up or leaves.</description></item>
-    ///   <item><description>The <c>round_end</c> that ends a knife round resolves no winner
-    ///     and does not enter <see cref="MatchState.PickingStartingSide"/>;
-    ///     <see cref="KnifeRoundWon"/> never fires. CS2's own round restart is left armed, so
-    ///     the knife round replays until the consumer moves the match on — parking that
-    ///     restart with no MixScrims phase left to release it would freeze the
-    ///     server.</description></item>
-    ///   <item><description>A completed pick ladder seals the rosters — picked players
-    ///     promoted to playing, both captains guaranteed, pick menus closed — and stops
-    ///     there, starting neither a knife round nor the match.</description></item>
+    ///     <see cref="MatchState.MapChosen"/>, whether the last player readies up or
+    ///     leaves.</description></item>
+    ///   <item><description>The <c>round_end</c> that ends a knife round resolves no winner and
+    ///     <see cref="KnifeRoundWon"/> never fires. CS2's own round restart is left armed, so the
+    ///     knife round replays until the consumer moves the match on - parking that restart with
+    ///     no MixScrims phase left to release it would freeze the server.</description></item>
+    ///   <item><description>A completed pick ladder seals the rosters and stops there, starting
+    ///     neither a knife round nor the match.</description></item>
     /// </list>
     /// Off by default, and deliberately without a config key: a server running MixScrims with
-    /// no consumer loaded would never leave warmup. Every phase still runs and every other
-    /// member still works.
+    /// no consumer loaded would never leave warmup.
     /// <para>
-    /// <b>While held the consumer owns every transition, and failing to clear the flag strands
-    /// the match.</b> Clear it in <c>Unload</c>.
+    /// <b>Clear it in <c>Unload</c></b> - while held the consumer owns every transition.
+    /// Releasing does not re-run the decision it blocked, because the ready check is
+    /// edge-triggered by <c>!ready</c>, <c>!unready</c> and disconnects; drive the next phase
+    /// explicitly with <see cref="StartMapVoting"/> or <see cref="StartTeamPicking"/>.
+    /// <see cref="ForceAllPlayersToReady"/> is not a usable nudge - it only adds players who are
+    /// not already ready.
     /// </para>
     /// <para>
     /// Safe to call from any thread and <b>must not</b> be marshalled; see the
@@ -753,20 +665,13 @@ public interface IMixScrims : IDisposable
     /// <summary>
     /// Overrides the coin toss that decides which captain picks first, for the next team-picking
     /// phase only. Pass <see cref="Team.CT"/> or <see cref="Team.T"/> to force a pick order, or
-    /// <c>null</c> to restore the toss. Any other value - including <see cref="Team.None"/> - is
-    /// rejected as a no-op and logged, leaving whatever was already set in place.
+    /// <c>null</c> to restore the toss. Any other value is rejected as a no-op and logged.
     /// <para>
-    /// <b>One-shot.</b> The value is consumed and cleared by the next phase that actually reaches
-    /// the toss, so it has to be set again before every phase it should apply to. A phase that
-    /// aborts before the toss - no captains could be drawn, or <c>SkipTeamPicking</c> /
-    /// <c>DisableCaptains</c> sends it down the auto-assign path - leaves the value pending for
-    /// the next real pick ladder. Cancelling or resetting the match clears it.
-    /// </para>
-    /// <para>
-    /// This covers every entry into the phase, not just <see cref="StartTeamPicking"/>: the ready
-    /// check that opens picking and the captain disconnect that restarts it both run the same
-    /// toss, and a captain leaving mid-ladder would otherwise re-roll a pick order the consumer
-    /// had already announced.
+    /// <b>One-shot.</b> Consumed and cleared by the next phase that reaches the toss, so it has to
+    /// be set again before every phase it should apply to. A phase that aborts before the toss
+    /// leaves the value pending; cancelling or resetting the match clears it. This covers every
+    /// entry into the phase, including the ready check that opens picking and the captain
+    /// disconnect that restarts it.
     /// </para>
     /// <para>
     /// Safe to call from any thread and <b>must not</b> be marshalled; see the interface remarks.
@@ -781,7 +686,7 @@ public interface IMixScrims : IDisposable
     Team? GetNextPickingTeam();
 
     // =========================================================================
-    // Original v1.x surface (preserved verbatim for backward compatibility)
+    // Match control and roster access
     // =========================================================================
 
     /// <summary>
@@ -847,6 +752,11 @@ public interface IMixScrims : IDisposable
     /// <summary>
     /// Starts a knife round phase in the game, typically used to determine which team selects a side.
     /// </summary>
+    /// <remarks>
+    /// Seals the pick rosters when it follows the pick phase, and leaves them untouched from any
+    /// other state. For a knife round with no plugin-side flow, call
+    /// <see cref="SetMatchState(MatchState)"/> with <see cref="MatchState.KnifeRound"/> instead.
+    /// </remarks>
     void StartKnifeRound();
     /// <summary>
     /// Cancels the current match, terminating any ongoing gameplay or matchmaking process.
@@ -855,6 +765,11 @@ public interface IMixScrims : IDisposable
     /// <summary>
     /// Changes the current map to the specified map or workshop map.
     /// </summary>
+    /// <remarks>
+    /// After a match, call <see cref="CancelMatch"/> first: only the reset clears the playing
+    /// rosters, captains and ready list. A map change out of <see cref="MatchState.Ended"/> comes
+    /// up in <see cref="MatchState.Warmup"/>.
+    /// </remarks>
     void ChangeMap(string mapName = "", string workshopId = "");
     /// <summary>
     /// Sets all players in the game to a ready state, regardless of their current status.
@@ -874,28 +789,22 @@ public interface IMixScrims : IDisposable
     List<ulong> GetPickedTPlayers();
     /// <summary>
     /// Adds a player to the collection of picked players using the specified Steam ID.
-    /// <para><b>Roster list manipulation only</b> — does not move the player or
-    /// advance the picking phase. To drive team picking from a custom menu, use
-    /// <see cref="PickPlayerForTeam"/>.</para>
+    /// <para>Roster list only - use <see cref="PickPlayerForTeam"/> to drive the picking phase.</para>
     /// </summary>
     void AddPlayerToPickedCtPlayers(ulong steamId);
     /// <summary>
     /// Adds a player to the collection of picked players using the specified Steam ID.
-    /// <para><b>Roster list manipulation only</b> — does not move the player or
-    /// advance the picking phase. To drive team picking from a custom menu, use
-    /// <see cref="PickPlayerForTeam"/>.</para>
+    /// <para>Roster list only - use <see cref="PickPlayerForTeam"/> to drive the picking phase.</para>
     /// </summary>
     void AddPlayerToPickedTPlayers(ulong steamId);
     /// <summary>
     /// Removes the player with the specified Steam ID from the collection of picked players.
-    /// <para><b>Roster list manipulation only</b> — does not move the player or
-    /// rewind the picking phase.</para>
+    /// <para>Roster list only - does not move the player or rewind the picking phase.</para>
     /// </summary>
     void RemovePlayerFromPickedCtPlayers(ulong steamId);
     /// <summary>
     /// Removes the player with the specified Steam ID from the collection of picked players.
-    /// <para><b>Roster list manipulation only</b> — does not move the player or
-    /// rewind the picking phase.</para>
+    /// <para>Roster list only - does not move the player or rewind the picking phase.</para>
     /// </summary>
     void RemovePlayerFromPickedTPlayers(ulong steamId);
     /// <summary>
@@ -908,28 +817,22 @@ public interface IMixScrims : IDisposable
     List<ulong> GetPlayingTPlayers();
     /// <summary>
     /// Adds a player to the collection of currently playing players using the specified Steam ID.
-    /// <para><b>Roster list manipulation only</b> — does not move the player or
-    /// advance the picking phase. To drive team picking from a custom menu, use
-    /// <see cref="PickPlayerForTeam"/>.</para>
+    /// <para>Roster list only - use <see cref="PickPlayerForTeam"/> to drive the picking phase.</para>
     /// </summary>
     void AddPlayerToPlayingCtPlayers(ulong steamId);
     /// <summary>
     /// Adds a player to the collection of currently playing players using the specified Steam ID.
-    /// <para><b>Roster list manipulation only</b> — does not move the player or
-    /// advance the picking phase. To drive team picking from a custom menu, use
-    /// <see cref="PickPlayerForTeam"/>.</para>
+    /// <para>Roster list only - use <see cref="PickPlayerForTeam"/> to drive the picking phase.</para>
     /// </summary>
     void AddPlayerToPlayingTPlayers(ulong steamId);
     /// <summary>
     /// Removes the player with the specified Steam ID from the collection of currently playing players.
-    /// <para><b>Roster list manipulation only</b> — does not move the player or
-    /// alter the match phase.</para>
+    /// <para>Roster list only - does not move the player or alter the match phase.</para>
     /// </summary>
     void RemovePlayerFromPlayingCtPlayers(ulong steamId);
     /// <summary>
     /// Removes the player with the specified Steam ID from the collection of currently playing players.
-    /// <para><b>Roster list manipulation only</b> — does not move the player or
-    /// alter the match phase.</para>
+    /// <para>Roster list only - does not move the player or alter the match phase.</para>
     /// </summary>
     void RemovePlayerFromPlayingTPlayers(ulong steamId);
     /// <summary>
