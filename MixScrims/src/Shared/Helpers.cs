@@ -557,9 +557,10 @@ public sealed partial class MixScrims
         if (player is null) return "<null>";
         try
         {
-            // IPlayer.Name is a slot-indexed engine lookup. Controller.PlayerName instead walks
-            // the controller's schema memory, which SIGSEGVs the host (uncatchable) once the
-            // controller is torn down - try/catch here would not save us.
+            // IPlayer.Name is a slot-indexed lookup of a ServerSideClient POINTER followed by two
+            // unguarded derefs, so it SIGSEGVs the host (uncatchable) once that client is torn
+            // down - the same AV class as Controller.PlayerName, not a safer alternative to it.
+            // Call this only below an IsPlayerValid guard, and only on the game thread.
             var name = player.Name;
             return string.IsNullOrEmpty(name) ? $"Slot {SafePlayerId(player)}" : name;
         }

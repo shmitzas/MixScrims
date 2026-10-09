@@ -211,6 +211,14 @@ public sealed partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation("CheckReadyPlayersToStart: readyPlayers={ReadyCount} (effective={Effective}) | Required={Required}", readyPlayers.Count, effectiveReady, required);
 
+        // Also reached from a disconnect, which is what lets a consumer hold Warmup open.
+        if (phaseProgressionHeld)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CheckReadyPlayersToStart: phase progression is held; not advancing.");
+            return;
+        }
+
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.Warmup && effectiveReady >= required)
@@ -296,7 +304,10 @@ public sealed partial class MixScrims
     /// </summary>
     internal void RemovePlayerFromReadyList(IPlayer player, bool announce = false)
     {
-        var name = player.Name ?? $"#{player.PlayerID}";
+        // Safe* reads, not raw: HandleDisconnectedPlayer calls this with the leaver, whose
+        // reference may already be disposed - a raw .Name/.SteamID throws and aborts every
+        // cleanup step queued after this one.
+        var name = SafePlayerName(player);
         if (cfg.DetailedLogging)
             logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
 
@@ -304,8 +315,10 @@ public sealed partial class MixScrims
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
-            var sid = player.SteamID;
-            var existing = readyPlayers.FirstOrDefault(p => SafeSteamId(p) == sid);
+            var sid = SafeSteamId(player);
+            var existing = sid != 0
+                ? readyPlayers.FirstOrDefault(p => SafeSteamId(p) == sid)
+                : readyPlayers.FirstOrDefault(p => IsSamePlayer(p, player));
 
             if (existing == null)
             {
@@ -489,17 +502,38 @@ public sealed partial class MixScrims
     /// </summary>
     internal void SetCtCaptain(IPlayer admin, string pickedPlayerName)
     {
+        if (admin is null)
+        {
+            logger.LogError("SetCtCaptain: admin is null");
+            return;
+        }
+
+        // SwiftlyS2 dispatches built-in menu clicks through Task.Run, so callers reach us on a
+        // thread-pool thread where every native read below is an uncatchable AV. PlayerID is a
+        // plain managed field, so it is the only thing safe to carry across the hop.
+        var slot = admin.PlayerID;
+        Core.Scheduler.NextTick(() => SetCtCaptainOnGameThread(slot, pickedPlayerName));
+    }
+
+    private void SetCtCaptainOnGameThread(int adminSlot, string pickedPlayerName)
+    {
+        var admin = Core.PlayerManager.GetPlayer(adminSlot);
+        if (admin is null || !IsPlayerValid(admin))
+        {
+            logger.LogWarning("SetCtCaptain: slot {Slot} left before the pick could be applied.", adminSlot);
+            return;
+        }
+
         var player = GetPlayerByName(pickedPlayerName);
 
         if (player == null || !IsPlayerValid(player))
         {
             logger.LogError("SetCtCaptain: picked player is invalid");
-            var localizer = Core.Translation.GetPlayerLocalizer(admin);
             admin.SendChat(GetServerPrefix() + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             return;
         }
 
-        PrintMessageToAllPlayers(Core.Localizer["command.captain.ct", admin.Name ?? $"#{admin.PlayerID}", player.Name ?? $"#{player.PlayerID}"]);
+        PrintMessageToAllPlayers(Core.Localizer["command.captain.ct", SafePlayerName(admin), SafePlayerName(player)]);
         PickCtCaptain(player);
 
         CloseMenuForPlayer(admin);
@@ -510,17 +544,36 @@ public sealed partial class MixScrims
     /// </summary>
     internal void SetTCaptain(IPlayer admin, string pickedPlayerName)
     {
+        if (admin is null)
+        {
+            logger.LogError("SetTCaptain: admin is null");
+            return;
+        }
+
+        // Same thread-pool dispatch as SetCtCaptain above.
+        var slot = admin.PlayerID;
+        Core.Scheduler.NextTick(() => SetTCaptainOnGameThread(slot, pickedPlayerName));
+    }
+
+    private void SetTCaptainOnGameThread(int adminSlot, string pickedPlayerName)
+    {
+        var admin = Core.PlayerManager.GetPlayer(adminSlot);
+        if (admin is null || !IsPlayerValid(admin))
+        {
+            logger.LogWarning("SetTCaptain: slot {Slot} left before the pick could be applied.", adminSlot);
+            return;
+        }
+
         var player = GetPlayerByName(pickedPlayerName);
 
         if (player == null || !IsPlayerValid(player))
         {
             logger.LogError("SetTCaptain: picked player is invalid");
-            var localizer = Core.Translation.GetPlayerLocalizer(admin);
             admin.SendChat(GetServerPrefix() + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             return;
         }
 
-        PrintMessageToAllPlayers(Core.Localizer["command.captain.t", admin.Name ?? $"#{admin.PlayerID}", player.Name ?? $"#{player.PlayerID}"]);
+        PrintMessageToAllPlayers(Core.Localizer["command.captain.t", SafePlayerName(admin), SafePlayerName(player)]);
         PickTCaptain(player);
 
         CloseMenuForPlayer(admin);
@@ -544,7 +597,13 @@ public sealed partial class MixScrims
             return;
         }
 
-        var steamId = player.SteamID;
+        var steamId = SafeSteamId(player);
+        if (steamId == 0)
+        {
+            // Disposed reference or a bot - neither is punishable, and a raw read would have
+            // thrown here and skipped the rest of the disconnect cleanup.
+            return;
+        }
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (cfg.PlayerLeavePunishment.Sensitivity == 0)

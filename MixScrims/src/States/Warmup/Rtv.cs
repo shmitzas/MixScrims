@@ -100,7 +100,7 @@ public partial class MixScrims
         }
 
         int threshold = ComputeRtvThreshold(humanCount);
-        var voterName = voter.Name ?? $"#{voter.PlayerID}";
+        var voterName = SafePlayerName(voter);
 
         if (cfg.DetailedLogging)
             logger.LogInformation("TryRegisterRtvVote: {Player} voted ({Voters}/{Threshold}, humans={Humans}).",

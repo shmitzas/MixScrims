@@ -31,6 +31,16 @@ public partial class MixScrims
                 return HookResult.Continue;
             }
 
+            // The restart this round_end arms is deliberately left armed: parking it with no
+            // MixScrims phase to release it is a permanent stall, so the knife round replays
+            // until the consumer moves the match on.
+            if (phaseProgressionHeld)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("HandleRoundEndOnKnifeRound: phase progression is held; leaving the result to the consumer.");
+                return HookResult.Continue;
+            }
+
             var reason = (RoundEndReason)@event.Reason;
             var eventWinner = (Team)@event.Winner;
             // No C4 here: these mean the clock ran out, or (RoundDraw) both teams died at once.

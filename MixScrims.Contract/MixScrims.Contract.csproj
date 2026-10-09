@@ -25,11 +25,14 @@
 		     v2.6.0 adds the starting-side picker snapshot.
 		     v2.7.0 fires PlayerPickedForTeam for bot picks too (steamId 0); it was
 		            previously suppressed, so consumer pick menus never refreshed.
+		     v2.8.0 documents the game-thread affinity every member already required,
+		            and makes the roster + map-vote reads return snapshots instead of
+		            throwing on a stale player reference.
 		     All existing v1.x methods are preserved for backward compatibility. -->
 		<GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-		<Version>2.7.0</Version>
-		<AssemblyVersion>2.7.0.0</AssemblyVersion>
-		<FileVersion>2.7.0.0</FileVersion>
+		<Version>2.8.0</Version>
+		<AssemblyVersion>2.8.0.0</AssemblyVersion>
+		<FileVersion>2.8.0.0</FileVersion>
 		<GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
 	</PropertyGroup>
 

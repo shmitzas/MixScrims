@@ -5,13 +5,15 @@
 MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches with in-game management. It's a **state machine-driven plugin** that progresses through match phases: Warmup → MapVoting → MapChosen → PickingTeam → KnifeRound → PickingStartingSide → Match.
 
 - **Plugin Framework**: [SwiftlyS2](https://swiftlys2.net) - CS2 server modification framework for .NET 10.0
-- **Plugin Version**: 1.11.7 (Contract API: 2.7.0)
+ - **Plugin Version**: 1.11.8 (Contract API: 2.8.0)
 - **Architecture**: State-based partial classes with shared service layer
 - **Key Components**: Main plugin (`MixScrims`), Contract API (`MixScrims.Contract`), state handlers, shared services, announcement system
 
 **Contract v2.0.0 additions (2026-09):** Events, snapshot queries, presentation suppression toggles, and config value getters — see wiki [Events](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/Events) + [API Integration](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Integration). All v1.x methods preserved verbatim; the shared interface key stays `"MixScrims.API"` so existing consumers keep working.
 
 **Contract v2.1.0 additions (2026-09):** Six **match flow drivers** (`CastMapVote`, `CastTimeoutVote`, `CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `VolunteerAsCaptain`) that close the input hole left by menu suppression, plus two **menu request events** (`CaptainMenuRequested`, `VolunteerCaptainMenuRequested`). Still purely additive.
+
+**Contract v2.8.0 flow-control additions (2026-10):** `SetPhaseProgressionHeld(bool)` / `IsPhaseProgressionHeld()` — see wiki [Flow control](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Reference#flow-control). These are **not** suppression: suppression moves presentation, these move authority. Keep the two families apart in docs and naming.
 
 **Documentation:**
 - [Project Wiki](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki) - Comprehensive guides for installation, configuration, features, and contributing
@@ -212,6 +214,16 @@ Any change that lands in the plugin **must** do both of these in the same change
 2. **Add a matching `## [x.y.z] - YYYY-MM-DD` section** to `CHANGELOG.md`, newest
    first. Feature releases open with a one-line "what this is / who should
    update" summary; fix-only releases go straight to the bullets.
+3. **If consumer plugins must change their `IMixScrims` usage, say so on its own line
+   above the bullets**, leading with **`API consumers must update (contract x.y.z):`**
+   and naming the action they have to take. Anything that alters how the API behaves
+   qualifies, not just a changed signature — a member that starts applying a tick later,
+   a new thread rule, or a changed return contract all break a consumer silently. Other
+   plugin developers read the release body, and a bullet buried at the bottom is how a
+   breaking change reaches them only after it breaks.
+   - Name the affected members, and show a **short before/after C# snippet**. Four lines
+     of code land a behavioural change far better than a sentence describing it.
+   - A fenced code block is safe here: `release.yml`'s awk stops only at `^## [`.
 
 `PluginMetadata.Version` is the single source of truth. `.github/workflows/release.yml`
 reads it out of `Main.cs`, tags `v{version}`, and extracts the CHANGELOG section whose
@@ -285,6 +297,40 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 > `ResetVariables()`. Vote handlers get this for free via their per-voter
 > `HashSet.Add` dedupe; map voting is intentionally re-entrant (re-voting removes
 > the previous vote first) — do not latch it.
+
+> **Invariant: a built-in menu click does NOT arrive on the game thread.**
+> SwiftlyS2's `MenuManagerAPI.OnClientKeyStateChanged` dispatches every
+> `ButtonMenuOption.Click` through `_ = Task.Run(() => option.OnClickAsync(player))`
+> (both the `button` and `wasd` input-mode branches). Reading `IPlayer.Name`,
+> `.SteamID`, `.IsValid`, `.Controller` or `.PlayerPawn` there is an uncatchable
+> access violation that kills the host, and a managed `try/catch` cannot save it.
+>
+> Every handler a menu button invokes therefore re-enters the game thread itself:
+> capture `IPlayer.PlayerID` (a plain managed field — the *only* member with no
+> `ThrowIfDisposed` and no native deref), `Core.Scheduler.NextTick(...)`, then
+> re-resolve with `Core.PlayerManager.GetPlayer(slot)` and re-validate before
+> touching anything native. A failed re-resolve drops the input and logs — the
+> player left between the click and the tick. See `RegisterMapVoteOnGameThread`
+> in `States/MapVoting/Main.cs` for the shape; `HandleCaptainSideChoice`,
+> `HandleVoteKickVote`, `HandleSurrenderVote`, `HandleTimeoutVote`,
+> `SetCtCaptain` / `SetTCaptain` and `AssignPickedPlayerToTeamCt` / `...T` all
+> follow it. **Do not "simplify" the `NextTick` away** — the reason is invisible
+> from the call site.
+>
+> The marshal sits in the handler, not the click lambda, so the `IMixScrims`
+> drivers that share those handlers are covered too: a consumer may legitimately
+> call `CastMapVote` from its own `Task`. Cost is that a driver lands one tick
+> after the call — see the wiki's Match flow drivers "Universal rules".
+>
+> **The rest of `IMixScrims` is game-thread-only, and v2.8.0 says so on the
+> interface.** The drivers are the exception, not the rule: every read that
+> resolves a player (`GetReadyPlayers`, `GetCtCaptain`, `GetPickedCtPlayers`,
+> `GetMatchScore`, `GetLocalizedString`, …) goes through a native call and is an
+> access violation off-thread. Only `GetMapVoteTallies`,
+> `GetVoteableMapDisplayNames` and `GetMapVoteSecondsRemaining` are safe from any
+> thread — the first two snapshot by index rather than `foreach` precisely so a
+> consumer reading mid-count gets a stale tally instead of "collection was
+> modified". **Do not add a `foreach` or a LINQ projection to those three.**
 
 ### Logging Strategy
 - `cfg.DetailedLogging` flag enables verbose logs
@@ -377,7 +423,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - [MixScrims.Contract/VoteKickCastEventArgs.cs](MixScrims.Contract/VoteKickCastEventArgs.cs) - Payload record for the `VoteKickCast` event (only event with >3 payload fields)
 - [MixScrims.Contract/MatchState.cs](MixScrims.Contract/MatchState.cs) - Match state enum (`Ended`, `KnifeRound`, `MapChosen`, `MapLoading`, `MapVoting`, `Match`, `PickingStartingSide`, `PickingTeam`, `Timeout`, `Reset`, `Warmup`)
 - [MixScrims.Contract/PluginState.cs](MixScrims.Contract/PluginState.cs) - Plugin state enum (Staging/Production)
-- [MixScrims.Contract/MixScrims.Contract.csproj](MixScrims.Contract/MixScrims.Contract.csproj) - Now references `SwiftlyS2.CS2` (`ExcludeAssets="runtime" PrivateAssets="all"`) so the contract can expose `SwiftlyS2.Shared.Players.Team` directly. Assembly version pinned at `2.1.0`.
+- [MixScrims.Contract/MixScrims.Contract.csproj](MixScrims.Contract/MixScrims.Contract.csproj) - Now references `SwiftlyS2.CS2` (`ExcludeAssets="runtime" PrivateAssets="all"`) so the contract can expose `SwiftlyS2.Shared.Players.Team` directly. Assembly version pinned at `2.8.0`.
 
 **Commands:**
 - [MixScrims/src/Commands/Admin/](MixScrims/src/Commands/Admin/) - Admin command handlers (one file per command: Captain, ForceReady, ForceUnready, Map, MaplistAll, Maps, MixReset, MixStart)
@@ -440,6 +486,7 @@ mixScrims.KickNotPlayingPlayers("Not participating");
 - **v2 config value getters** — `GetCaptainsEnabled`, `GetSkipTeamPickingEnabled`, `GetSkipMapVotingEnabled`, `GetAllowVolunteerCaptainsEnabled`, `GetTimeoutDurationSeconds`, `GetTotalTimeoutsPerTeam`, `GetDefaultVoteTimeSeconds`.
 - **v2.1 match flow drivers** — `CastMapVote`, `CastTimeoutVote`, `CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `VolunteerAsCaptain`. Guarded pass-throughs in `MixScrimsService` to `RegisterMapVoteByName` / `HandleTimeoutVote` / `HandleSurrenderVote` / `HandleVoteKickVote` / `AssignPickedPlayerToTeamCt|T` / `TryVolunteerCaptain`. Every rejection logs Warning and no-ops — never throw back into a consumer callback, never re-implement handler logic in the service layer.
 - **v2.1 menu request events** — `CaptainMenuRequested` / `VolunteerCaptainMenuRequested` (payload: requester SteamID64, `Team?` side). Fired from `Commands/Admin/Captain.cs` and `Commands/Player/VolunteerCaptain.cs` **only when `suppressBuiltInMenus` is true**, after all permission / state / arg validation. Under suppression both commands also accept a bare arg-less form (`side = null`) and stop acting themselves; with suppression off behaviour is byte-for-byte unchanged.
+- **v2.8 flow control** — `SetPhaseProgressionHeld` / `IsPhaseProgressionHeld`. The flag gates three sites only: the early return in `CheckReadyPlayersToStart`, the early return in `HandleRoundEndOnKnifeRound`, and the branch in `CompleteTeamPicking`. It has no config key on purpose — a server with no consumer loaded would never leave warmup.
 - **State Management**: `GetCurrentMatchState()`, `SetMatchState()`, `GetCurrentPluginState()`, `SetPluginState()`
 - **Team Names**: `SetCounterTerroristsTeamName()`, `SetTerroristsTeamName()`
 - **Phase Control**: `StartWarmup()`, `StartMapVoting()`, `StartTeamPicking()`, `StartKnifeRound()`, `StartMatch()`, `CancelMatch()`
@@ -458,20 +505,22 @@ mixScrims.KickNotPlayingPlayers("Not participating");
 - `MixScrimsService.SetPluginState` — fires `PluginStateChanged` on non-no-op transitions.
 - `AddPlayerToReadyList` / `RemovePlayerFromReadyList` (`StateAgnostic/Main.cs`) — fires `PlayerReadyChanged`. Mass helpers (`ForceReadyAllPlayers` / `ForceUnreadyAllPlayers`) delegate here, so the event fires once per affected player without extra plumbing.
 - `AssignCaptain(Team, IPlayer?)` (`Shared/Helpers.cs`) — the single field-write chokepoint for `captainCt` / `captainT`. Fires `CaptainRemoved` for the outgoing captain, then `CaptainAssigned` for the incoming one. Every `captainCt = ...` / `captainT = ...` assignment across the plugin routes through this helper.
-- `StartTeamPickingPhase` (`PickingTeam/Main.cs`) — fires `TeamPickingStarted` after the random-team coin toss. Captains' implicit self-picks fire `PlayerPickedForTeam` with `pickIndex = 1` and `pickIndex = 2`.
+- `StartTeamPickingPhase` (`PickingTeam/Main.cs`) — fires `TeamPickingStarted` after the coin toss. Captains' implicit self-picks fire `PlayerPickedForTeam` with `pickIndex = 1` and `pickIndex = 2`. Every exit from picking goes through `CompleteTeamPicking` — including `SkipTeamPickingPhase` — which seals the rosters via `FinalizeTeamPicking` and then starts the knife round, unless phase progression is held, in which case it seals and stops. It is the one place that decides whether a knife round runs; calling `StartKnifeRound` from a new site bypasses that. **The held branch still seals** — `StartMatch` kicks every human outside the *playing* rosters, so a consumer calling it against unsealed ones would empty the server.
 - `AssignPickedPlayerToTeamCt` / `AssignPickedPlayerToTeamT` — fires `PlayerPickedForTeam` and increments `currentPickIndex`. Both resolve the pick through `ResolvePickTarget`, which keys on the **slot** when the caller supplies one and only falls back to the display name otherwise: two players can share a name, and name lookup handed both of their buttons to whichever one `GetPlayerByName` listed first.
-- `StartMapVotingPhase`, `RegisterMapVoteByName`, `AnnouncePickedMap` (`MapVoting/Main.cs`) — fires the three map vote events. Ballot + deadline are cached in `currentBallotDisplayNames` + `mapVoteDeadline` for snapshot reads.
+- `StartMapVotingPhase`, `RegisterMapVoteByName`, `AnnouncePickedMap` (`MapVoting/Main.cs`) — fires the three map vote events. The votable map list + deadline are cached in `currentVoteMapNames` + `mapVoteDeadline` for snapshot reads.
+  - **A mid-vote joiner is enfranchised by `ScheduleMapVoteForJoiner`, called from `HandleClientPutInServer`** — `StartMapVotingPhase` only opens the vote for players connected at the time, and nothing else reopens it. It is scheduled rather than opened inline because the connect hook is the call stack that crashed the host, and it retries at 2 / 5 / 10 s because `IsPlayerValid` (which `OpenMenuForPlayer` hard-requires) demands a pawn the joiner does not have yet. `mapVotePendingJoiners` is what stops a later retry reopening a vote the player already answered — cleared at both voting boundaries. It routes through `DisplayMapVotingMenu`, so the suppressed path raises `MapVoteMenuRequested` and both backends are covered by one call site. The late vote needs no other change: `CastMapVote`'s guard is on the **map name** being up for vote, never on the voter being in an electorate, and the vote has no quorum.
 - `StartKnifeRound`, `PromptWinnerTCaptainoChoseStartingSide`, `SwitchStartingSides` / `StayStartingSides` (`KnifeRound/Main.cs`) — fires `KnifeRoundStarted` / `KnifeRoundWon` / `PickingStartingSideStarted` / `StartingSideChosen`. `PickingStartingSideStarted` is intentionally suppressed when `DisableCaptains` is true.
 - `StartTimeout`, `EndTimeout`, `BroadcastRemainingTimeoutTime` (`Timeout/Main.cs`) — fires `TimeoutStarted` / `TimeoutTick` / `TimeoutEnded`. Snapshot fields `activeTimeoutTeam` + `activeTimeoutRemainingSeconds` mirror the per-tick counter for consumers.
 - Timeout / Surrender / VoteKick vote flows fire `*VoteStarted`, `*VoteCast` (including the caller's implicit YES seed), and `*VoteResult`.
-- `ReconcileVotesAfterDisconnect` (`StateAgnostic/VoteReconcile.cs`) — last call in `HandleDisconnectedPlayer`, and the only place any ballot or roster-driven menu is re-pointed at the roster a disconnect leaves behind. Seven branches, each individually try/caught so one throwing surface can't strand the rest; it runs last because resolving a vote can end the round, queue a timeout or kick someone.
-  - **Surrender / timeout / vote kick** — the electorate is re-sized as "ballots already cast + team members who can still answer", **recomputed, never decremented**: `SafeSteamId` reads 0 off a disposed reference, so a decrement keyed on the leaver's SteamID no-ops exactly when it is needed, and recomputing is also what keeps the count right when the *caller* is the one leaving. It then re-runs `TryResolve*VoteEarly` / the vote-kick pass check, so a vote the disconnect just settled closes now rather than at timer expiry. A vote kick whose target leaves exits through `VoteKickResult(team, false)` — never inline, every exit must raise its `*VoteResult`.
-  - **Map vote** (`HandlePlayerDisconnectMapVote`) — withdraws the leaver's ballot (`Votes` and `VotedBy` together, matching the revote path). `VotedBy` holds player **slots**, so a ballot left behind makes the next connection into that slot read as a revote in `RegisterMapVoteByName` and silently decrement a map it never chose. The map vote itself cannot hang — it closes on a fixed `DefaultVoteTimeSeconds` timer with no quorum.
-  - **Starting-side vote** (`HandlePlayerDisconnectSideVote`, `DisableCaptains` only) — delegates to `TryCloseTeamSideVote` in `KnifeRound/Main.cs`, which is also what `HandleCaptainSideChoice` calls, so the purge and the quorum rule exist once. It drops `sideVotes` entries whose slot is no longer a live human on the winning team and closes the vote when the remainder have all answered. Ghost ballots count toward both the quorum **and** the Switch/Stay tally, so leaving one in lets a departed player decide the side.
-  - **Team pick menu** (`HandlePlayerDisconnectTeamPickMenu`) — rebuilds the open menu via `PromptCaptainToPickPlayer(captain, team, excludeSlot)` when the leaver was one of its options, tracked in `openPickMenuPoolSlots`. The leaver is excluded explicitly because the disconnect event can still read them as valid. This is also the only thing that reaches the empty-pool `StartKnifeRound()` escape without a captain click — there is **no timeout on the pick menu**, so an AFK captain still stalls the phase indefinitely.
+- `ReconcileVotesAfterDisconnect` (`StateAgnostic/VoteReconcile.cs`) — last call in `HandleDisconnectedPlayer`, and the only place any vote or roster-driven menu is re-pointed at the roster a disconnect leaves behind. Seven branches, each individually try/caught so one throwing surface can't strand the rest; it runs last because resolving a vote can end the round, queue a timeout or kick someone.
+  - **`HandleDisconnectedPlayer` itself runs every step through `RunDisconnectCleanupStep`, for the same reason.** The steps clean up independent state, so one throw must not abort the rest — an abort leaves the leaver in rosters, votes and menus for the remainder of the match. The historical aborts were `RemovePlayerFromReadyList` and `PunishOnLeave`, which read `player.Name` / `player.SteamID` raw; both now use the `Safe*` helpers. **`player.Slot` / `.PlayerID` were never part of this** — they are plain auto-properties on SwiftlyS2's `Player` with no `ThrowIfDisposed` and no native call, so they cannot throw on a disposed reference. Any note claiming otherwise is stale.
+  - **Surrender / timeout / vote kick** — the electorate is re-sized as "votes already cast + team members who can still answer", **recomputed, never decremented**: `SafeSteamId` reads 0 off a disposed reference, so a decrement keyed on the leaver's SteamID no-ops exactly when it is needed, and recomputing is also what keeps the count right when the *caller* is the one leaving. It then re-runs `TryResolve*VoteEarly` / the vote-kick pass check, so a vote the disconnect just settled closes now rather than at timer expiry. A vote kick whose target leaves exits through `VoteKickResult(team, false)` — never inline, every exit must raise its `*VoteResult`.
+  - **Map vote** (`HandlePlayerDisconnectMapVote`) — withdraws the leaver's vote (`Votes` and `VotedBy` together, matching the revote path). `VotedBy` holds player **slots**, so a vote left behind makes the next connection into that slot read as a revote in `RegisterMapVoteByName` and silently decrement a map it never chose. The map vote itself cannot hang — it closes on a fixed `DefaultVoteTimeSeconds` timer with no quorum.
+  - **Starting-side vote** (`HandlePlayerDisconnectSideVote`, `DisableCaptains` only) — delegates to `TryCloseTeamSideVote` in `KnifeRound/Main.cs`, which is also what `HandleCaptainSideChoice` calls, so the purge and the quorum rule exist once. It drops `sideVotes` entries whose slot is no longer a live human on the winning team and closes the vote when the remainder have all answered. Ghost votes count toward both the quorum **and** the Switch/Stay tally, so leaving one in lets a departed player decide the side.
+  - **Team pick menu** (`HandlePlayerDisconnectTeamPickMenu`) — rebuilds the open menu via `PromptCaptainToPickPlayer(captain, team, excludeSlot)` when the leaver was one of its options, tracked in `openPickMenuPoolSlots`. The leaver is excluded explicitly because the disconnect event can still read them as valid. This is also the only thing that reaches the empty-pool `CompleteTeamPicking()` escape without a captain click — there is **no timeout on the pick menu**, so an AFK captain still stalls the phase indefinitely.
   - **The three vote electorate conventions differ on purpose — do not unify them.** Surrender and timeout store the team *minus the caller*, whose implicit yes is already in the tally (`SurrenderRequiredVotes()` adds the 1 back; `TimeoutRequiredVotes()` deliberately sits one below it). Vote kick stores the team *minus the target*, caller included, and compares the yes count straight against it.
 - `GetSurrenderVoteTally().Eligible` returns `SurrenderRequiredVotes()`, **not** the stored `surrenderTotalEligibleVotes`. That field excludes the caller while `Yes` / `Cast` both carry their implicit yes, so a consumer using it as a denominator reached 100% a whole vote early (MixScrimsManager's HUD read `3/3 · 100%` on a 4-man team still needing one more). `GetVoteKickTallyCt/T().Eligible` already includes its caller and needs no adjustment.
-- `HandleMatchEnd` (`Match/Events.cs`) — fires `MatchEnded(winner, ctScore, tScore)` synchronously (BEFORE the 10s post-match delayed callback) using `Core.Game.MatchData.CTScoreTotal` / `TerroristScoreTotal`. Winner is derived from the higher score; equal scores yield `Team.None`.
+- `HandleMatchEnd` (`Match/Events.cs`) — fires `MatchEnded(winner, ctScore, tScore)` synchronously (BEFORE the 10s post-match delayed callback) using `Core.Game.MatchData.CTScoreTotal` / `TerroristScoreTotal`. Winner is derived from the higher score; equal scores yield `Team.None`. Then sets `MatchState.Ended` — the only site that assigns it. `Ended` must stay out of that callback's `MapLoading` / `MapChosen` bail list, which is what lets the reset it schedules still run.
 
 **Built-in presentation suppression gates** (never remove — consumers set `suppressBuiltInMenus` / `suppressBuiltInCenterHtml` to render their own UI):
 

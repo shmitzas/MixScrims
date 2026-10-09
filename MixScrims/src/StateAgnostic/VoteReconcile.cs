@@ -7,7 +7,7 @@ namespace MixScrims;
 public partial class MixScrims
 {
     /// <summary>
-    /// Re-points every open ballot and roster-driven menu at the roster a disconnect leaves
+    /// Re-points every open vote and roster-driven menu at the roster a disconnect leaves
     /// behind, and resolves whatever that roster already settles. Branches are isolated so one
     /// throwing surface cannot strand the rest.
     /// </summary>
@@ -62,7 +62,7 @@ public partial class MixScrims
     /// roster already settles it - including a collapse down to the caller alone.
     /// </summary>
     /// <remarks>
-    /// Recomputed as "ballots cast + voters who can still answer", never decremented:
+    /// Recomputed as "votes cast + voters who can still answer", never decremented:
     /// <see cref="SafeSteamId"/> reads 0 off a disposed reference, so a decrement keyed on the
     /// leaver would no-op exactly when it is needed - and would lose the caller's counted yes
     /// when the caller is the one leaving.
@@ -167,12 +167,12 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Withdraws the leaver's map-vote ballot.
+    /// Withdraws the leaver's map vote.
     /// </summary>
     /// <remarks>
-    /// The vote picks the map the players who are still here will load, so a departed ballot has
+    /// The vote picks the map the players who are still here will load, so a departed voter has
     /// no stake in it. The slot key is the forcing reason: <c>VotedBy</c> holds player ids, and a
-    /// ballot left behind makes the next connection into that slot read as a revote in
+    /// vote left behind makes the next connection into that slot read as a revote in
     /// <see cref="RegisterMapVoteByName"/> - their first vote would silently decrement a map they
     /// never chose. Votes and VotedBy are decremented together, matching the revote path.
     /// </remarks>
@@ -184,15 +184,15 @@ public partial class MixScrims
         var slot = SafePlayerId(leaver);
         if (slot < 0) return;
 
-        var ballot = votedMaps.FirstOrDefault(m => m.VotedBy.Contains(slot));
-        if (ballot == null) return;
+        var castVote = votedMaps.FirstOrDefault(m => m.VotedBy.Contains(slot));
+        if (castVote == null) return;
 
-        ballot.VotedBy.Remove(slot);
-        ballot.Votes = Math.Max(0, ballot.Votes - 1);
+        castVote.VotedBy.Remove(slot);
+        castVote.Votes = Math.Max(0, castVote.Votes - 1);
 
         if (cfg.DetailedLogging)
             logger.LogInformation("HandlePlayerDisconnectMapVote: withdrew a vote for {Map} ({Votes} left).",
-                ballot.Map?.DisplayName ?? "<unknown>", ballot.Votes);
+                castVote.Map?.DisplayName ?? "<unknown>", castVote.Votes);
     }
 
     /// <summary>

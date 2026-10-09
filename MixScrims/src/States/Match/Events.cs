@@ -21,6 +21,12 @@ public partial class MixScrims
         if (matchState != MatchState.Match)
             return HookResult.Continue;
 
+        // Set before MatchEnded is raised so a subscriber re-reading GetCurrentMatchState()
+        // sees Ended, and before the delayed reset so a second cs_win_panel_match hits the
+        // guard above. Ended must stay OUT of the map-change bail list below — it is the
+        // state this very callback runs in.
+        mixScrimsService.SetMatchState(MatchState.Ended);
+
         // Fire MatchEnded synchronously here rather than inside the 10s delayed callback:
         // scores are still readable, and IMixScrims consumers get the transition signal
         // before the plugin starts tearing state down.

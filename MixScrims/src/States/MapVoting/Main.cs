@@ -10,10 +10,17 @@ public partial class MixScrims
 {
     internal List<VotedMap> votedMaps { get; set; } = [];
     internal IMenuAPI? mapVotingMenu { get; set; } = null;
-    // Ballot + deadline snapshot for IMixScrims consumers (v2.0.0+). Rebuilt every
+    // Votable map list + deadline snapshot for IMixScrims consumers (v2.0.0+). Rebuilt every
     // StartMapVotingPhase and cleared when the vote closes.
-    internal List<string> currentBallotDisplayNames = new();
+    internal List<string> currentVoteMapNames = new();
     internal DateTime? mapVoteDeadline = null;
+
+    // Slots still owed a mid-vote menu. Membership is what stops a later retry reopening a
+    // vote the player has already answered.
+    private readonly HashSet<int> mapVotePendingJoiners = [];
+
+    // Retried because IsPlayerValid demands a pawn, which a joiner lacks for a second or two.
+    private static readonly float[] MapVoteJoinerRetryDelays = [2f, 5f, 10f];
 
     /// <summary>
     /// Presents map voting options to players and starts the map voting phase
@@ -26,6 +33,7 @@ public partial class MixScrims
             logger.LogInformation("StartMapVotingPhase");
         mixScrimsService.SetMatchState(MatchState.MapVoting);
         votedMaps.Clear();
+        mapVotePendingJoiners.Clear();
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.map_voting"]);
 
         var mapsToVote = GetMapsToVote();
@@ -40,10 +48,10 @@ public partial class MixScrims
         // shuffle maps order
         mapsToVote = mapsToVote.OrderBy(_ => Guid.NewGuid()).ToList();
 
-        // Snapshot the ballot + deadline for IMixScrims consumers before we build the menu.
-        currentBallotDisplayNames = mapsToVote.Select(m => m.DisplayName).ToList();
+        // Snapshot the votable maps + deadline for IMixScrims consumers before we build the menu.
+        currentVoteMapNames = mapsToVote.Select(m => m.DisplayName).ToList();
         mapVoteDeadline = DateTime.UtcNow.AddSeconds(cfg.DefaultVoteTimeSeconds);
-        mixScrimsService.RaiseMapVotingStarted(currentBallotDisplayNames.AsReadOnly(), cfg.DefaultVoteTimeSeconds);
+        mixScrimsService.RaiseMapVotingStarted(currentVoteMapNames.AsReadOnly(), cfg.DefaultVoteTimeSeconds);
 
         var builder = Core.MenusAPI
             .CreateBuilder()
@@ -91,7 +99,29 @@ public partial class MixScrims
     /// </summary>
     internal void RegisterMapVoteByName(IPlayer player, string mapDisplayName)
     {
-        var playerName = player.Name ?? $"#{player.PlayerID}";
+        if (player is null)
+        {
+            logger.LogError("RegisterMapVoteByName: player is null");
+            return;
+        }
+
+        // SwiftlyS2 dispatches built-in menu clicks through Task.Run, so callers reach us on a
+        // thread-pool thread where every native read below is an uncatchable AV. PlayerID is a
+        // plain managed field, so it is the only thing safe to carry across the hop.
+        var slot = player.PlayerID;
+        Core.Scheduler.NextTick(() => RegisterMapVoteOnGameThread(slot, mapDisplayName));
+    }
+
+    private void RegisterMapVoteOnGameThread(int slot, string mapDisplayName)
+    {
+        var player = Core.PlayerManager.GetPlayer(slot);
+        if (player is null || !IsPlayerValid(player))
+        {
+            logger.LogWarning("RegisterMapVoteByName: slot {Slot} left before its {Map} vote could be counted.", slot, mapDisplayName);
+            return;
+        }
+
+        var playerName = SafePlayerName(player);
 
         if (cfg.DetailedLogging)
             logger.LogInformation("Player {Player} voted for map {Map}", playerName, mapDisplayName);
@@ -146,20 +176,20 @@ public partial class MixScrims
     /// </summary>
     internal void DisplayMapVotingMenu(IPlayer player)
     {
-        if (mapVotingMenu == null)
-        {
-            logger.LogError("DisplayMapVotingMenu: mapVotingMenu is null");
-            return;
-        }
-
         if (player == null || !IsPlayerValid(player) || IsBot(player))
             return;
 
         if (suppressBuiltInMenus)
         {
-            // A consumer owns the ballot UI — announce the request instead of
+            // A consumer owns the vote UI — announce the request instead of
             // opening ours, so !revote keeps working under suppression.
             mixScrimsService.RaiseMapVoteMenuRequested(player.SteamID);
+            return;
+        }
+
+        if (mapVotingMenu == null)
+        {
+            logger.LogError("DisplayMapVotingMenu: mapVotingMenu is null");
             return;
         }
 
@@ -169,7 +199,43 @@ public partial class MixScrims
         }
         catch (Exception ex)
         {
-            logger.LogError("Error displaying map voting menu to {Player}: {Error}", player.Name, ex);
+            logger.LogError("Error displaying map voting menu to {Player}: {Error}", SafePlayerName(player), ex);
+        }
+    }
+
+    /// <summary>
+    /// Opens the vote for a player who connected after <see cref="StartMapVotingPhase"/> ran,
+    /// covering both the built-in menu and the suppressed consumer-rendered path. Deferred,
+    /// never opened inline: the connect hook is the call stack where opening a menu crashed the host.
+    /// </summary>
+    internal void ScheduleMapVoteForJoiner(int playerSlot)
+    {
+        if (!mapVotePendingJoiners.Add(playerSlot))
+            return;
+
+        foreach (var delaySeconds in MapVoteJoinerRetryDelays)
+        {
+            var token = Core.Scheduler.DelayBySeconds(delaySeconds, () =>
+            {
+                try
+                {
+                    if (MatchState != MatchState.MapVoting) return;
+                    if (!mapVotePendingJoiners.Contains(playerSlot)) return;
+
+                    var player = Core.PlayerManager.GetPlayer(playerSlot);
+                    if (player == null || !IsPlayerValid(player) || IsBot(player)) return;
+
+                    mapVotePendingJoiners.Remove(playerSlot);
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("ScheduleMapVoteForJoiner: opening the vote for slot {Slot} after {Delay}s.", playerSlot, delaySeconds);
+                    DisplayMapVotingMenu(player);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "ScheduleMapVoteForJoiner: failed to open the vote for slot {Slot}.", playerSlot);
+                }
+            });
+            Core.Scheduler.StopOnMapChange(token);
         }
     }
 
@@ -178,6 +244,15 @@ public partial class MixScrims
     /// </summary>
     internal void AnnouncePickedMap()
     {
+        // The vote timer is only StopOnMapChange, so a phase abandoned before it elapses
+        // leaves it armed — it would otherwise fire in Warmup and force-load a map.
+        if (MatchState != MatchState.MapVoting)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("AnnouncePickedMap: ignored, map voting is no longer running (state={State}).", MatchState);
+            return;
+        }
+
         var players = GetPlayers();
 
         foreach (var player in players)
@@ -212,9 +287,10 @@ public partial class MixScrims
         VotedMap pickedMap = GetMostVotedMap();
         PrintMessageToAllPlayers(Core.Localizer["announcement.map.chosen", pickedMap.Map.DisplayName, pickedMap.Votes]);
         mixScrimsService.RaiseMapVotingEnded(pickedMap.Map.DisplayName, pickedMap.Votes);
-        // Ballot is closed — clear the snapshot state so consumers get an empty ballot
+        // Voting is closed — clear the snapshot state so consumers get an empty map list
         // between votes rather than the stale one.
-        currentBallotDisplayNames.Clear();
+        currentVoteMapNames.Clear();
+        mapVotePendingJoiners.Clear();
         mapVoteDeadline = null;
         LoadSelectedMap(pickedMap.Map);
     }

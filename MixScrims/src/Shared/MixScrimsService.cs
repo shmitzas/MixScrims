@@ -175,12 +175,17 @@ public class MixScrimsService : IMixScrims
 
     public IReadOnlyDictionary<string, int> GetMapVoteTallies()
     {
-        // votedMaps carries the ballot tallies; empty outside MapVoting because
+        // votedMaps carries the running tallies; empty outside MapVoting because
         // StartMapVotingPhase clears it and the flow only rebuilds when voting reopens.
+        // Indexed, not foreach: a consumer reading mid-count gets a stale tally, not a throw.
         var result = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var v in _mixScrims.votedMaps)
+        var votedMaps = _mixScrims.votedMaps;
+        for (var i = 0; i < votedMaps.Count; i++)
         {
-            if (v.Map == null || string.IsNullOrEmpty(v.Map.DisplayName)) continue;
+            VotedMap v;
+            try { v = votedMaps[i]; }
+            catch (ArgumentOutOfRangeException) { break; }
+            if (v?.Map == null || string.IsNullOrEmpty(v.Map.DisplayName)) continue;
             result[v.Map.DisplayName] = v.Votes;
         }
         return result;
@@ -188,9 +193,16 @@ public class MixScrimsService : IMixScrims
 
     public IReadOnlyList<string> GetVoteableMapDisplayNames()
     {
-        var names = _mixScrims.currentBallotDisplayNames;
+        var names = _mixScrims.currentVoteMapNames;
         if (names == null || names.Count == 0) return Array.Empty<string>();
-        return names.ToList();
+
+        var result = new List<string>(names.Count);
+        for (var i = 0; i < names.Count; i++)
+        {
+            try { result.Add(names[i]); }
+            catch (ArgumentOutOfRangeException) { break; }
+        }
+        return result;
     }
 
     public int GetMapVoteSecondsRemaining()
@@ -342,6 +354,20 @@ public class MixScrimsService : IMixScrims
     public bool IsBuiltInCenterHtmlSuppressed() => _mixScrims.suppressBuiltInCenterHtml;
 
     // =========================================================================
+    // Flow control (v2.8.0+)
+    // =========================================================================
+
+    public void SetPhaseProgressionHeld(bool held)
+    {
+        _mixScrims.phaseProgressionHeld = held;
+        // Logged unconditionally: this silences every phase transition, so an operator
+        // debugging "the match never starts" needs it without DetailedLogging.
+        _mixScrims.logger?.LogInformation("SetPhaseProgressionHeld: {Held}", held);
+    }
+
+    public bool IsPhaseProgressionHeld() => _mixScrims.phaseProgressionHeld;
+
+    // =========================================================================
     // Config value getters (v2.0.0+)
     // =========================================================================
 
@@ -389,13 +415,13 @@ public class MixScrimsService : IMixScrims
         var player = ResolveConnectedPlayer(steamId, nameof(CastMapVote));
         if (player == null) return;
 
-        // Only the current ballot is votable — RegisterMapVoteByName would otherwise accept
+        // Only the maps currently up for vote are votable — RegisterMapVoteByName would otherwise accept
         // any map in maps.jsonc, including ones excluded by DisallowVotePreviousMaps.
-        var onBallot = _mixScrims.currentBallotDisplayNames
+        var isVotable = _mixScrims.currentVoteMapNames
             .Any(n => string.Equals(n, mapDisplayName, StringComparison.OrdinalIgnoreCase));
-        if (!onBallot)
+        if (!isVotable)
         {
-            _mixScrims.logger?.LogWarning("CastMapVote: ignored, {Map} is not on the current ballot.", mapDisplayName);
+            _mixScrims.logger?.LogWarning("CastMapVote: ignored, {Map} is not up for vote.", mapDisplayName);
             return;
         }
 
@@ -819,12 +845,13 @@ public class MixScrimsService : IMixScrims
 
     public List<ulong> GetPickedCtPlayers()
     {
-        return _mixScrims.pickedCtPlayers.Select(player => player.SteamID).ToList();
+        // Raw .SteamID on a roster entry whose player already left throws, failing the whole call.
+        return SafeSteamIds(_mixScrims.pickedCtPlayers);
     }
 
     public List<ulong> GetPickedTPlayers()
     {
-        return _mixScrims.pickedTPlayers.Select(player => player.SteamID).ToList();
+        return SafeSteamIds(_mixScrims.pickedTPlayers);
     }
 
     public void AddPlayerToPickedCtPlayers(ulong steamId)
@@ -863,12 +890,27 @@ public class MixScrimsService : IMixScrims
 
     public List<ulong> GetPlayingCtPlayers()
     {
-        return _mixScrims.playingCtPlayers.Select(player => player.SteamID).ToList();
+        return SafeSteamIds(_mixScrims.playingCtPlayers);
     }
 
     public List<ulong> GetPlayingTPlayers()
     {
-        return _mixScrims.playingTPlayers.Select(player => player.SteamID).ToList();
+        return SafeSteamIds(_mixScrims.playingTPlayers);
+    }
+
+    /// <summary>Snapshot of a roster's live SteamIDs, skipping disposed entries and bots.</summary>
+    private List<ulong> SafeSteamIds(List<IPlayer> roster)
+    {
+        var result = new List<ulong>(roster.Count);
+        for (var i = 0; i < roster.Count; i++)
+        {
+            IPlayer entry;
+            try { entry = roster[i]; }
+            catch (ArgumentOutOfRangeException) { break; }
+            var sid = _mixScrims.SafeSteamId(entry);
+            if (sid != 0) result.Add(sid);
+        }
+        return result;
     }
 
     public void AddPlayerToPlayingCtPlayers(ulong steamId)
@@ -954,23 +996,26 @@ public class MixScrimsService : IMixScrims
 
     public void KickNotPlayingPlayers(string? reason = "")
     {
-        var players = _mixScrims.GetPlayers();
-        var playingPlayers = _mixScrims.playingCtPlayers.Concat(_mixScrims.playingTPlayers).Select(p => p.SteamID).ToHashSet();
-        var notPlayingPlayers = players.Where(p => !playingPlayers.Contains(p.SteamID)).ToList();
-        foreach(var player in notPlayingPlayers)
-        {
-            _mixScrims.KickPlayer(player.SteamID, reason);
-        }
+        KickPlayersOutside(SafeSteamIds(_mixScrims.playingCtPlayers).Concat(SafeSteamIds(_mixScrims.playingTPlayers)).ToHashSet(), reason);
     }
 
     public void KickNotPickedPlayers(string? reason = "")
     {
-        var players = _mixScrims.GetPlayers();
-        var pickedPlayers = _mixScrims.pickedCtPlayers.Concat(_mixScrims.pickedTPlayers).Select(p => p.SteamID).ToHashSet();
-        var notPickedPlayers = players.Where(p => !pickedPlayers.Contains(p.SteamID)).ToList();
-        foreach(var player in notPickedPlayers)
+        KickPlayersOutside(SafeSteamIds(_mixScrims.pickedCtPlayers).Concat(SafeSteamIds(_mixScrims.pickedTPlayers)).ToHashSet(), reason);
+    }
+
+    /// <summary>Kicks every connected human whose SteamID is absent from <paramref name="keep"/>.</summary>
+    private void KickPlayersOutside(HashSet<ulong> keep, string? reason)
+    {
+        // Bots are skipped, not kept: they all read SteamID 0, so neither the keep set nor
+        // KickPlayer's lookup can tell one from another.
+        foreach (var player in _mixScrims.GetPlayers())
         {
-            _mixScrims.KickPlayer(player.SteamID, reason);
+            ulong sid;
+            try { sid = player.SteamID; }
+            catch { continue; }
+            if (sid == 0 || keep.Contains(sid)) continue;
+            _mixScrims.KickPlayer(sid, reason);
         }
     }
 

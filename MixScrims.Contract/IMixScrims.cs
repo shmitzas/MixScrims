@@ -2,6 +2,46 @@
 
 namespace MixScrims.Contract;
 
+/// <summary>
+/// MixScrims' shared API surface.
+/// </summary>
+/// <remarks>
+/// <b>Thread affinity (v2.8.0+): call every member on the game thread.</b> Most reads resolve a
+/// player through CS2 natives, which are not thread-safe — off the game thread they are an
+/// access violation no <c>try</c>/<c>catch</c> can contain, taking the whole server down rather
+/// than failing the call. Marshal with <c>Core.Scheduler.NextTick</c> before calling from a
+/// <c>Task</c>, an HTTP continuation or a <c>System.Threading.Timer</c>.
+/// <para>
+/// Note that a <b>built-in SwiftlyS2 menu click is already off the game thread</b> —
+/// <c>Core.MenusAPI</c> dispatches it through <c>Task.Run</c> — so marshal before calling
+/// back in from one. A CustomHUD menu click is the opposite: it runs inline on the game
+/// thread, so a consumer rendering its UI through CustomHUD needs no marshal there.
+/// </para>
+/// <para>
+/// The three exceptions, which cannot crash the host from any thread because they read no
+/// native state: <see cref="GetMapVoteTallies"/> and <see cref="GetVoteableMapDisplayNames"/>
+/// (both snapshot before returning) and <see cref="GetMapVoteSecondsRemaining"/> (a timestamp
+/// subtraction, so a concurrent read can be stale but never invalid).
+/// </para>
+/// <para>
+/// The four suppression members — <see cref="SetBuiltInMenusSuppressed(bool)"/>,
+/// <see cref="SetBuiltInCenterHtmlSuppressed(bool)"/>, <see cref="AreBuiltInMenusSuppressed()"/>
+/// and <see cref="IsBuiltInCenterHtmlSuppressed()"/> — are also safe from any thread, and must
+/// be: a consumer can only call them from <c>Load</c>, <c>Unload</c> or a config-reload
+/// callback, none of which is guaranteed to be the game thread. They read and write plain
+/// managed fields. Do not marshal them — deferring a suppression <i>enable</i> leaves a tick in
+/// which MixScrims can still open a built-in menu, and deferring the <i>disable</i> in
+/// <c>Unload</c> risks the scheduler dropping it and leaving the built-ins suppressed with no
+/// consumer left to render them.
+/// </para>
+/// <para>
+/// <see cref="SetPhaseProgressionHeld(bool)"/> and <see cref="IsPhaseProgressionHeld()"/>
+/// carry the same exemption, for the same reason and with the same obligation not to marshal:
+/// they are a plain managed bool, a consumer sets them from <c>Load</c> / <c>Unload</c>, and a
+/// deferred enable leaves a window in which MixScrims can still advance a phase the consumer
+/// has taken over.
+/// </para>
+/// </remarks>
 public interface IMixScrims : IDisposable
 {
     // =========================================================================
@@ -235,10 +275,10 @@ public interface IMixScrims : IDisposable
     event Action<ulong, Team?>? VolunteerCaptainMenuRequested;
 
     /// <summary>
-    /// Raised when a player asks to (re)open the map-vote ballot via
+    /// Raised when a player asks to (re)open the map vote via
     /// <c>!revote</c> <b>and</b> built-in menus are suppressed. Fires only after
     /// the command's own state validation passes (match state must be
-    /// <see cref="MatchState.MapVoting"/>), so a consumer can reopen its ballot
+    /// <see cref="MatchState.MapVoting"/>), so a consumer can reopen its vote menu
     /// without re-implementing those checks. Terminate the flow at
     /// <see cref="CastMapVote"/>.
     /// </summary>
@@ -344,13 +384,13 @@ public interface IMixScrims : IDisposable
 
     /// <summary>
     /// Current map vote tallies keyed by map display name. Empty outside the
-    /// MapVoting state.
+    /// MapVoting state. Returns a snapshot, so it is safe from any thread.
     /// </summary>
     IReadOnlyDictionary<string, int> GetMapVoteTallies();
 
     /// <summary>
-    /// Map display names on the current ballot (in menu order). Empty outside
-    /// the MapVoting state.
+    /// Map display names currently up for vote (in menu order). Empty outside
+    /// the MapVoting state. Returns a snapshot, so it is safe from any thread.
     /// </summary>
     IReadOnlyList<string> GetVoteableMapDisplayNames();
 
@@ -444,7 +484,7 @@ public interface IMixScrims : IDisposable
     /// implicit yes is already inside <c>Yes</c> and <c>Cast</c> - so it is also the
     /// unanimity threshold and a safe denominator. It shrinks when a voter disconnects
     /// mid-vote. Timeout exposes no tally getter; its threshold is one below its electorate,
-    /// so a passing timeout legitimately closes before every ballot is in.
+    /// so a passing timeout legitimately closes before every vote is in.
     /// </remarks>
     (int Yes, int Cast, int Eligible) GetSurrenderVoteTally();
 
@@ -532,7 +572,7 @@ public interface IMixScrims : IDisposable
     /// <summary>
     /// Casts or changes <paramref name="steamId"/>'s map vote. No-op unless the
     /// match state is <see cref="MatchState.MapVoting"/>, the player is
-    /// connected, and <paramref name="mapDisplayName"/> is on the current ballot
+    /// connected, and <paramref name="mapDisplayName"/> is currently up for vote
     /// (see <see cref="GetVoteableMapDisplayNames"/>). Raises
     /// <see cref="MapVoteCast"/> on success.
     /// </summary>
@@ -626,8 +666,9 @@ public interface IMixScrims : IDisposable
     /// </list>
     /// No-op unless the match state is
     /// <see cref="MatchState.PickingStartingSide"/> and the caller is eligible
-    /// to choose (winning captain, or a member of the winning team when
-    /// captains are disabled).
+    /// to choose: the winning captain (see <see cref="GetStartingSidePicker"/>),
+    /// or a member of the winning team when captains are disabled. An ineligible
+    /// caller is told so and logged as a warning.
     /// <para>
     /// The decision is one-shot per phase: once a side has been committed, later
     /// calls are ignored (logged as a warning) even though
@@ -641,6 +682,47 @@ public interface IMixScrims : IDisposable
     /// <param name="steamId">The player making the choice.</param>
     /// <param name="stay"><c>true</c> to keep the current sides, <c>false</c> to swap.</param>
     void ChooseStartingSide(ulong steamId, bool stay);
+
+    // =========================================================================
+    // Flow control (v2.8.0+)
+    // =========================================================================
+    //
+    // Suppression changes who PRESENTS a phase. This changes who OWNS it:
+    // MixScrims keeps running each phase but stops making the decision that ends
+    // it, and the consumer is responsible for driving what comes next.
+
+    /// <summary>
+    /// Stops MixScrims advancing the match on its own. While held:
+    /// <list type="bullet">
+    ///   <item><description>A ready check does not leave <see cref="MatchState.Warmup"/> or
+    ///     <see cref="MatchState.MapChosen"/>. This covers the check a disconnect runs too,
+    ///     so the match stays put whether the last player readies up or leaves.</description></item>
+    ///   <item><description>The <c>round_end</c> that ends a knife round resolves no winner
+    ///     and does not enter <see cref="MatchState.PickingStartingSide"/>;
+    ///     <see cref="KnifeRoundWon"/> never fires. CS2's own round restart is left armed, so
+    ///     the knife round replays until the consumer moves the match on — parking that
+    ///     restart with no MixScrims phase left to release it would freeze the
+    ///     server.</description></item>
+    ///   <item><description>A completed pick ladder seals the rosters — picked players
+    ///     promoted to playing, both captains guaranteed, pick menus closed — and stops
+    ///     there, starting neither a knife round nor the match.</description></item>
+    /// </list>
+    /// Off by default, and deliberately without a config key: a server running MixScrims with
+    /// no consumer loaded would never leave warmup. Every phase still runs and every other
+    /// member still works.
+    /// <para>
+    /// <b>While held the consumer owns every transition, and failing to clear the flag strands
+    /// the match.</b> Clear it in <c>Unload</c>.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread and <b>must not</b> be marshalled; see the
+    /// interface remarks.
+    /// </para>
+    /// </summary>
+    void SetPhaseProgressionHeld(bool held);
+
+    /// <summary>Current value of the phase-progression hold.</summary>
+    bool IsPhaseProgressionHeld();
 
     // =========================================================================
     // Original v1.x surface (preserved verbatim for backward compatibility)

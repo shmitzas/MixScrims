@@ -112,6 +112,11 @@ partial class MixScrims
             LoadWarmupConfig();
         }
 
+        // StartMapVotingPhase only opened the vote for players connected at the time, so a
+        // mid-vote joiner is otherwise disenfranchised. Scheduled, never opened from this hook.
+        if (MatchState == MatchState.MapVoting)
+            ScheduleMapVoteForJoiner(playerSlot);
+
         try
         {
             var player = Core.PlayerManager.GetPlayer(playerSlot);
@@ -359,6 +364,11 @@ partial class MixScrims
     /// <summary>
     /// Handles the removal and cleanup of a player who has disconnected from the match.
     /// </summary>
+    /// <remarks>
+    /// Every step runs under <see cref="RunDisconnectCleanupStep"/>. The steps are independent
+    /// cleanups of separate state, so one throwing surface must not strand the rest - a single
+    /// abort here leaves the leaver in rosters, votes and menus for the remainder of the match.
+    /// </remarks>
     internal void HandleDisconnectedPlayer(IPlayer? player)
     {
         if (player == null)
@@ -380,11 +390,14 @@ partial class MixScrims
         // that make later reads throw ObjectDisposedException from LINQ predicates - the exact
         // crash class the log showed at ForceReady.cs:69. SafeSteamId returns 0 on disposed
         // refs so the RemoveAll itself never throws on the entries it's removing.
-        readyPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-        pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-        pickedTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-        playingCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-        playingTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+        RunDisconnectCleanupStep("roster sweep", () =>
+        {
+            readyPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            pickedTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            playingCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            playingTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+        });
 
         // Cache the disconnecting player's SteamID once. If the IPlayer is already disposed
         // by the time this handler runs, steamId will be 0 and the targeted per-player
@@ -395,46 +408,39 @@ partial class MixScrims
         // Cache player name for logging since Controller might become invalid during disconnect
         var playerName = SafePlayerName(player);
 
-        freshlyJoinedPlayers.Remove(player.Slot);
-        HandlePlayerDisconnectRtv(steamId);
-        forcedToSpectator.Remove(steamId);
-
-        if (steamId != 0 && pickedCtPlayers.Any(p => SafeSteamId(p) == steamId))
+        RunDisconnectCleanupStep("join + rtv state", () =>
         {
-            pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-            if (cfg.DetailedLogging)
+            freshlyJoinedPlayers.Remove(disconnectingPlayerSlot);
+            HandlePlayerDisconnectRtv(steamId);
+            forcedToSpectator.Remove(steamId);
+            playerColors.Remove(disconnectingPlayerSlot);
+        });
+
+        RunDisconnectCleanupStep("roster removal", () =>
+        {
+            if (steamId == 0) return;
+
+            if (pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedCtPlayers.", playerName);
-        }
 
-        if (steamId != 0 && pickedTPlayers.Any(p => SafeSteamId(p) == steamId))
-        {
-            pickedTPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-            if (cfg.DetailedLogging)
+            if (pickedTPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedTPlayers.", playerName);
-        }
 
-        if (steamId != 0 && playingCtPlayers.Any(p => SafeSteamId(p) == steamId))
-        {
-            playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-            if (cfg.DetailedLogging)
+            if (playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingCtPlayers.", playerName);
-        }
 
-        if (steamId != 0 && playingTPlayers.Any(p => SafeSteamId(p) == steamId))
-        {
-            playingTPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-            if (cfg.DetailedLogging)
+            if (playingTPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingTPlayers.", playerName);
-        }
-
-        playerColors.Remove(player.PlayerID);
+        });
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.PickingTeam)
         {
-            if (!cfg.DisableCaptains)
+            RunDisconnectCleanupStep("picking-team captain", () =>
             {
+                if (cfg.DisableCaptains) return;
+
                 // IsSamePlayer, not a raw SteamID compare: a disposed reference would throw here
                 // and abort every cleanup step below, and every bot shares SteamID 0.
                 if (IsSamePlayer(player, captainCt))
@@ -447,15 +453,17 @@ partial class MixScrims
                     AssignCaptain(Team.T, null);
                     StartTeamPickingPhase();
                 }
-            }
+            });
         }
 
         if (matchState == MatchState.KnifeRound
             || matchState == MatchState.MapChosen
             || matchState == MatchState.Timeout)
         {
-            if (!cfg.DisableCaptains)
+            RunDisconnectCleanupStep("match captain succession", () =>
             {
+                if (cfg.DisableCaptains) return;
+
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandleDisconnectedPlayer: MatchState is {MatchState}", matchState);
                 if (IsSamePlayer(player, captainCt))
@@ -469,12 +477,7 @@ partial class MixScrims
                     var newCaptain = playingCtPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
-                    {
-                        var newCaptainName = newCaptain != null && IsPlayerValid(newCaptain) 
-                            ? newCaptain.Name 
-                            : "None";
-                        logger.LogInformation("HandleDisconnectedPlayer: New CT captain is {NewCaptain}", newCaptainName);
-                    }
+                        logger.LogInformation("HandleDisconnectedPlayer: New CT captain is {NewCaptain}", SafePlayerName(newCaptain));
 
                     PickCtCaptain(newCaptain);
                 }
@@ -487,58 +490,60 @@ partial class MixScrims
                     var newCaptain = playingTPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
-                    {
-                        var newCaptainName = newCaptain != null && IsPlayerValid(newCaptain) 
-                            ? newCaptain.Name 
-                            : "None";
-                        logger.LogInformation("HandleDisconnectedPlayer: New T captain is {NewCaptain}", newCaptainName);
-                    }
+                        logger.LogInformation("HandleDisconnectedPlayer: New T captain is {NewCaptain}", SafePlayerName(newCaptain));
+
                     PickTCaptain(newCaptain);
                 }
-            }
+            });
         }
 
         if (matchState == MatchState.PickingStartingSide)
         {
-            if (!cfg.DisableCaptains && IsSamePlayer(player, winnerCaptain))
+            RunDisconnectCleanupStep("starting-side captain", () =>
             {
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is winner captain");
-                StayStartingSides(winnerCaptain);
-            }
+                if (!cfg.DisableCaptains && IsSamePlayer(player, winnerCaptain))
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is winner captain");
+                    StayStartingSides(winnerCaptain);
+                }
+            });
         }
 
-        if (steamId != 0 && readyPlayers.Any(p => SafeSteamId(p) == steamId))
+        RunDisconnectCleanupStep("ready list", () =>
         {
+            if (steamId == 0 || !readyPlayers.Any(p => SafeSteamId(p) == steamId)) return;
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removing {PlayerName} from readyPlayers.", playerName);
             RemovePlayerFromReadyList(player, true);
-        }
+        });
 
-        PunishOnLeave(player);
+        RunDisconnectCleanupStep("leave punishment", () => PunishOnLeave(player));
 
-        try
+        RunDisconnectCleanupStep("close active menu", () =>
         {
             if (IsPlayerValid(player))
-            {
                 Core.MenusAPI.CloseActiveMenu(player);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "HandleDisconnectedPlayer: Error closing active menu for player {PlayerName}", playerName);
-        }
+        });
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
-        {
-            CheckReadyPlayersToStart();
-        }
+            RunDisconnectCleanupStep("ready check", CheckReadyPlayersToStart);
 
-        CheckAutoResetOnLeave();
+        RunDisconnectCleanupStep("auto reset on leave", CheckAutoResetOnLeave);
 
         // Last, and self-guarded: resolving a vote here can end the round, queue a timeout or
         // kick someone, so every cleanup above must already have run against the leaver.
-        ReconcileVotesAfterDisconnect(player);
+        RunDisconnectCleanupStep("vote reconcile", () => ReconcileVotesAfterDisconnect(player));
+    }
+
+    /// <summary>Runs one disconnect-cleanup step, logging and swallowing anything it throws.</summary>
+    private void RunDisconnectCleanupStep(string step, Action body)
+    {
+        try { body(); }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "HandleDisconnectedPlayer: {Step} step failed; continuing with the remaining cleanup.", step);
+        }
     }
 
     /// <summary>

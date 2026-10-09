@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.11.7",
+    Version = "1.11.8",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -48,6 +48,12 @@ public partial class MixScrims : BasePlugin
     // until plugin unload.
     internal bool suppressBuiltInMenus = false;
     internal bool suppressBuiltInCenterHtml = false;
+
+    // Phase-progression hold (v2.8.0 contract). Not a suppression flag: it moves the
+    // decision, not the presentation. Set only through SetPhaseProgressionHeld —
+    // deliberately has no config key, because a server with no consumer loaded would
+    // never leave warmup.
+    internal bool phaseProgressionHeld = false;
 
     public MixScrims(ISwiftlyCore core) : base(core)
     {

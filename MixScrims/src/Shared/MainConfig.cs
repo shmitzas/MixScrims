@@ -29,6 +29,8 @@ public class MainConfig
     public bool PreventNotPickedPlayersFromJoiningOngoingMatch { get; set; } = false;
     public bool KickPlayersNotInMatch { get; set; } = false;
     public bool SkipTeamPicking { get; set; } = false;
+    // Also forfeits the whole-team starting-side vote: sides stay as team picking assigned them.
+    public bool SkipKnifeRoundWhenPickingAndCaptainsDisabled { get; set; } = false;
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
