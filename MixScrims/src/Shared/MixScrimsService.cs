@@ -367,6 +367,30 @@ public class MixScrimsService : IMixScrims
 
     public bool IsPhaseProgressionHeld() => _mixScrims.phaseProgressionHeld;
 
+    public void SetNextPickingTeam(Team? team)
+    {
+        if (team is { } t && t != Team.CT && t != Team.T)
+        {
+            // No-op rather than treating it as a clear: null already spells that, and a consumer
+            // that computed None by accident should see it in the log instead of a silent toss.
+            _mixScrims.logger?.LogWarning("SetNextPickingTeam: ignored, {Team} is not a picking team.", t);
+            return;
+        }
+
+        Volatile.Write(
+            ref _mixScrims.nextPickingTeamOverride,
+            team is { } picked ? (int)picked : MixScrims.NoPickingTeamOverride);
+
+        if (_mixScrims.cfg.DetailedLogging)
+            _mixScrims.logger?.LogInformation("SetNextPickingTeam: {Team}", team?.ToString() ?? "cleared");
+    }
+
+    public Team? GetNextPickingTeam()
+    {
+        var raw = Volatile.Read(ref _mixScrims.nextPickingTeamOverride);
+        return raw == MixScrims.NoPickingTeamOverride ? null : (Team)raw;
+    }
+
     // =========================================================================
     // Config value getters (v2.0.0+)
     // =========================================================================

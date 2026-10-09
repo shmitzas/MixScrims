@@ -43,6 +43,7 @@ public partial class MixScrims
         activePickingTeam = null;
         currentPickIndex = 0;
         teamPickingFinalized = false;
+        nextPickingTeamOverride = NoPickingTeamOverride;
         openPickMenuPoolSlots.Clear();
         votedMaps.Clear();
         currentVoteMapNames.Clear();

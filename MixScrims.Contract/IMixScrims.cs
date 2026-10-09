@@ -35,11 +35,12 @@ namespace MixScrims.Contract;
 /// consumer left to render them.
 /// </para>
 /// <para>
-/// <see cref="SetPhaseProgressionHeld(bool)"/> and <see cref="IsPhaseProgressionHeld()"/>
+/// <see cref="SetPhaseProgressionHeld(bool)"/>, <see cref="IsPhaseProgressionHeld()"/>,
+/// <see cref="SetNextPickingTeam(Team?)"/> and <see cref="GetNextPickingTeam()"/>
 /// carry the same exemption, for the same reason and with the same obligation not to marshal:
-/// they are a plain managed bool, a consumer sets them from <c>Load</c> / <c>Unload</c>, and a
-/// deferred enable leaves a window in which MixScrims can still advance a phase the consumer
-/// has taken over.
+/// they are a plain managed field, a consumer sets them from <c>Load</c> / <c>Unload</c> or an
+/// event handler, and a deferred write loses the race against the decision it is meant to
+/// change - a phase MixScrims has already advanced, or a coin toss already rolled.
 /// </para>
 /// </remarks>
 public interface IMixScrims : IDisposable
@@ -723,6 +724,36 @@ public interface IMixScrims : IDisposable
 
     /// <summary>Current value of the phase-progression hold.</summary>
     bool IsPhaseProgressionHeld();
+
+    /// <summary>
+    /// Overrides the coin toss that decides which captain picks first, for the next team-picking
+    /// phase only. Pass <see cref="Team.CT"/> or <see cref="Team.T"/> to force a pick order, or
+    /// <c>null</c> to restore the toss. Any other value - including <see cref="Team.None"/> - is
+    /// rejected as a no-op and logged, leaving whatever was already set in place.
+    /// <para>
+    /// <b>One-shot.</b> The value is consumed and cleared by the next phase that actually reaches
+    /// the toss, so it has to be set again before every phase it should apply to. A phase that
+    /// aborts before the toss - no captains could be drawn, or <c>SkipTeamPicking</c> /
+    /// <c>DisableCaptains</c> sends it down the auto-assign path - leaves the value pending for
+    /// the next real pick ladder. Cancelling or resetting the match clears it.
+    /// </para>
+    /// <para>
+    /// This covers every entry into the phase, not just <see cref="StartTeamPicking"/>: the ready
+    /// check that opens picking and the captain disconnect that restarts it both run the same
+    /// toss, and a captain leaving mid-ladder would otherwise re-roll a pick order the consumer
+    /// had already announced.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread and <b>must not</b> be marshalled; see the interface remarks.
+    /// </para>
+    /// </summary>
+    void SetNextPickingTeam(Team? team);
+
+    /// <summary>
+    /// The pending pick-order override, or <c>null</c> when the next phase will toss for it.
+    /// Reads <c>null</c> once the override has been consumed.
+    /// </summary>
+    Team? GetNextPickingTeam();
 
     // =========================================================================
     // Original v1.x surface (preserved verbatim for backward compatibility)

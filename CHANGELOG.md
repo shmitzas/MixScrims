@@ -5,7 +5,7 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
-## [1.11.8] - 2026-10-09
+## [1.12.0] - 2026-10-09
 
 Must update to this version in order to avoid random crashes.
 
@@ -17,12 +17,18 @@ from the matching event instead. Call the API from the game thread too: a built-
 SwiftlyS2 menu click (`Core.MenusAPI`) arrives on a thread-pool thread.
 See [Thread affinity](https://github.com/shmitzas/MixScrims/wiki/API-Integration#thread-affinity)
 for the pattern and a code example. Contract 2.8.0 also adds flow-control members that let a
-consumer hold the match at its current phase and drive the transitions itself — see
+consumer hold the match at its current phase and drive the transitions itself, and set which
+captain picks first instead of leaving it to the coin toss — see
 [Flow control](https://github.com/shmitzas/MixScrims/wiki/API-Reference#flow-control).
 
 - Fixed a server crash when clicking any in-game menu button — map voting was the
   common one, but side pick, team pick, surrender, timeout, vote kick and admin
   captain menus could all trigger it.
+- Fixed two team picks made in the same instant both being applied. The draft could put a
+  player on the wrong side, skip a captain's turn, or end with lopsided teams. The second
+  pick is now dropped and logged.
+- A consumer plugin can set which captain picks first for the next draft, instead of
+  leaving it to the coin toss.
 - Fixed any player being able to decide the starting side for everyone. The knife round's
   winning captain is now the only one whose `!stay` / `!switch` counts, matching what the
   chat commands already enforced.

@@ -22,6 +22,13 @@ public partial class MixScrims
     // sealed rosters with live team membership.
     internal bool teamPickingFinalized = false;
 
+    internal const int NoPickingTeamOverride = -1;
+
+    // Coin-toss override from IMixScrims.SetNextPickingTeam, held as an int so a set from a
+    // consumer's worker thread cannot tear a Team? and the consume is one atomic swap. One-shot:
+    // a consumer that dies without clearing it costs one biased toss, not every toss.
+    internal int nextPickingTeamOverride = NoPickingTeamOverride;
+
     // Slots the currently-open pick menu offers. A disconnect only has to rebuild the menu
     // when it removes one of these; see HandlePlayerDisconnectTeamPickMenu.
     internal readonly HashSet<int> openPickMenuPoolSlots = [];
@@ -185,7 +192,10 @@ public partial class MixScrims
             mixScrimsService.RaisePlayerPickedForTeam(Team.T, SafeSteamId(captainT), currentPickIndex);
         }
 
-        var pickFirst = Random.Shared.Next(2, 4) == 3 ? Team.CT : Team.T;
+        // Consumed here and not at phase entry: every abort above returns before a toss happens,
+        // so a pending override survives them rather than being silently burned.
+        var pickFirst = ConsumeNextPickingTeamOverride()
+            ?? (Random.Shared.Next(2, 4) == 3 ? Team.CT : Team.T);
         activePickingTeam = pickFirst;
         mixScrimsService.RaiseTeamPickingStarted(pickFirst);
         if (pickFirst == Team.CT)
@@ -194,6 +204,18 @@ public partial class MixScrims
             return;
         }
         PromptCaptainToPickPlayer(captainT, Team.T);
+    }
+
+    private Team? ConsumeNextPickingTeamOverride()
+    {
+        var raw = Interlocked.Exchange(ref nextPickingTeamOverride, NoPickingTeamOverride);
+        if (raw == NoPickingTeamOverride)
+            return null;
+
+        var team = (Team)raw;
+        if (cfg.DetailedLogging)
+            logger.LogInformation("StartTeamPickingPhase: {Team} picks first, set through SetNextPickingTeam.", team);
+        return team;
     }
 
     /// <summary>
@@ -823,6 +845,43 @@ public partial class MixScrims
     }
 
     /// <summary>
+    /// Re-runs the picker-side guards on the game thread, immediately before the roster mutation.
+    /// Both entry points validate on the caller's thread and defer the mutation a tick, so two
+    /// picks landing in one tick both clear that check against a roster neither has touched yet.
+    /// </summary>
+    private bool CanApplyPickOnGameThread(Team team, IPlayer picked, string caller)
+    {
+        var state = mixScrimsService.GetCurrentMatchState();
+        if (state != MatchState.PickingTeam)
+        {
+            logger.LogWarning("{Caller}: dropped, match state is {State} (expected PickingTeam).", caller, state);
+            return false;
+        }
+
+        if (activePickingTeam != team)
+        {
+            logger.LogWarning("{Caller}: dropped, the active picking team is {Active}, not {Team}.", caller, activePickingTeam, team);
+            return false;
+        }
+
+        // Slot, not SteamID: every bot reports 0, so a SteamID compare reads the whole bot pool
+        // as one already-picked player.
+        var slot = SafePlayerId(picked);
+        if (slot < 0)
+        {
+            logger.LogWarning("{Caller}: dropped, the picked player's slot could not be read.", caller);
+            return false;
+        }
+        if (pickedCtPlayers.Concat(pickedTPlayers).Any(p => SafePlayerId(p) == slot))
+        {
+            logger.LogWarning("{Caller}: dropped, slot {Slot} is already on a picked roster.", caller, slot);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Assigns the player selected by the CT captain to the CT team.
     /// </summary>
     internal void AssignPickedPlayerToTeamCt(IPlayer captain, string pickedPlayerName, int pickedSlot = -1)
@@ -859,6 +918,10 @@ public partial class MixScrims
             PromptCaptainToPickPlayer(captain, Team.CT);
             return;
         }
+
+        // Rejected outright rather than re-prompted: re-prompting would hand CT the turn back.
+        if (!CanApplyPickOnGameThread(Team.CT, player, nameof(AssignPickedPlayerToTeamCt)))
+            return;
 
         pickedCtPlayers.Add(player);
         currentPickIndex++;
@@ -922,6 +985,10 @@ public partial class MixScrims
             PromptCaptainToPickPlayer(captain, Team.T);
             return;
         }
+
+        // See the CT twin above.
+        if (!CanApplyPickOnGameThread(Team.T, player, nameof(AssignPickedPlayerToTeamT)))
+            return;
 
         pickedTPlayers.Add(player);
         currentPickIndex++;
