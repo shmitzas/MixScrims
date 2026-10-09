@@ -51,6 +51,15 @@ public partial class MixScrims
         {
             try
             {
+                // A held consumer owns every transition, including what follows the match.
+                // Checked at fire time, not schedule time, so a hold taken during the window counts.
+                if (mixScrimsService.IsPhaseProgressionHeld())
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("HandleMatchEnd: phase progression held, skipping post-match reset.");
+                    return;
+                }
+
                 // Bail if another component has already initiated a map change in the
                 // meantime - stacking host_workshop_map / map commands across plugins is
                 // the classic CS2 map-transition crash window.

@@ -44,11 +44,20 @@ public partial class MixScrims
     /// </summary>
     internal void StartKnifeRound()
     {
+        // Captured before the state write below; by the decision point the state reads KnifeRound.
+        var previousState = mixScrimsService.GetCurrentMatchState();
+
         mixScrimsService.SetMatchState(MatchState.KnifeRound);
         mixScrimsService.RaiseKnifeRoundStarted();
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.knife_round"]);
 
-        FinalizeTeamPicking();
+        // Only the pick phase seals. A consumer running its own knife round earlier (captain
+        // election before picking) would otherwise seal empty picked lists and latch
+        // teamPickingFinalized, making the real CompleteTeamPicking a no-op that drops the picks.
+        if (previousState == MatchState.PickingTeam)
+            FinalizeTeamPicking();
+        else if (cfg.DetailedLogging)
+            logger.LogInformation("StartKnifeRound: entered from {State}, not the pick phase; leaving the pick rosters unsealed.", previousState);
 
         UnpauseMatch();
 

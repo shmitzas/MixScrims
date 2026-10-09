@@ -42,6 +42,31 @@ namespace MixScrims.Contract;
 /// event handler, and a deferred write loses the race against the decision it is meant to
 /// change - a phase MixScrims has already advanced, or a coin toss already rolled.
 /// </para>
+/// <para>
+/// <b><see cref="StartKnifeRound"/> seals the pick rosters</b> when it follows the pick phase:
+/// the picked lists are promoted to the playing ones and latched for the rest of the match.
+/// From any other state it runs the knife round and leaves the rosters untouched, so a consumer
+/// staging its own knife round elsewhere - a captain election before picking, say - gets the
+/// round without consuming the pick phase. To run one with no plugin-side flow at all, call
+/// <see cref="SetMatchState(MatchState)"/> with <see cref="MatchState.KnifeRound"/> and exec the
+/// knife cfg directly.
+/// </para>
+/// <para>
+/// <b>After a match, reset before changing map.</b> Call <see cref="CancelMatch"/> and then
+/// <see cref="ChangeMap(string, string)"/>: only the reset clears the playing rosters, captains
+/// and ready list, so a <see cref="ChangeMap(string, string)"/> on its own carries the finished
+/// match's rosters onto the new map. It is not a dead end either way - a map change out of
+/// <see cref="MatchState.Ended"/> comes up in <see cref="MatchState.Warmup"/> rather than
+/// carrying Ended across, where RTV and <c>!ready</c> are both inert.
+/// </para>
+/// <para>
+/// <b>Releasing <see cref="SetPhaseProgressionHeld(bool)"/> does not re-run the decision it
+/// blocked.</b> The ready check is edge-triggered by <c>!ready</c>, <c>!unready</c> and
+/// disconnects, so a lobby that readied up while held stays where it is after the release.
+/// <see cref="ForceAllPlayersToReady"/> is not a usable nudge - it only adds players who are not
+/// already ready, so against a fully-ready lobby it does nothing at all. Drive the next phase
+/// explicitly with <see cref="StartMapVoting"/> or <see cref="StartTeamPicking"/>.
+/// </para>
 /// </remarks>
 public interface IMixScrims : IDisposable
 {

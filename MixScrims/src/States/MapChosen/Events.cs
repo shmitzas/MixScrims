@@ -60,6 +60,12 @@ public partial class MixScrims
         if (targetState == MatchState.MapLoading)
             targetState = MatchState.MapChosen;
 
+        // Ended is a dead end - RTV and !ready are both Warmup-gated - and a consumer reaches
+        // here by calling ChangeMap after a match, since the post-match auto-reset is skipped
+        // while phase progression is held.
+        if (targetState == MatchState.Ended)
+            targetState = MatchState.Warmup;
+
         // If the map load was driven by the match flow (vote -> MapChosen -> LoadSelectedMap),
         // force MapChosen regardless of what was captured. This guarantees the next ready burst
         // advances to team picking instead of looping back into map voting.

@@ -47,6 +47,12 @@ captain picks first instead of leaving it to the coin toss — see
   `No players picked for CT team` after the teams were already locked in. The rosters
   are now sealed once per match, so a second attempt leaves them untouched instead of
   replacing them with whoever currently happens to be on each side.
+- A knife round started by a consumer plugin before teams are picked no longer throws the
+  picks away. Only a knife round coming out of the pick phase locks the rosters in; started
+  from anywhere else it runs the round and leaves them alone, so the real draft still counts.
+- Changing map after a match has finished no longer leaves the new map with no way forward.
+  The server comes up in warmup, where `!ready` and RTV work again, instead of carrying the
+  finished match's state across.
 - Players who connect while map voting is already running now get the vote menu and
   can vote.
 - A disconnect no longer abandons its own cleanup half-way, so players who leave
