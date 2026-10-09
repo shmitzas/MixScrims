@@ -137,18 +137,12 @@ public partial class MixScrims
         // Symmetric to StartMatch / StartKnifeRound.
         RelaxEngineTeamLimits("StartTeamPickingPhase");
 
-        // teampick.cfg no longer ends with `mp_restartgame 1` - the plugin drives the round
-        // transition itself, same as StartMatch (see repo memory
-        // `mixscrims-mp-restartgame-team-limits-segv.md`). The pause is lifted first so the
-        // queued restart isn't held by it, and HandleRoundPrestartPreKnifeRound re-applies
-        // the pause on the round that lands.
-        //   T+1.5s  UnpauseMatch  (also lets teampick.cfg's mp_warmup_end settle first -
-        //                          TerminateRound is a no-op while WarmupPeriod is set)
-        //   T+2.0s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+3.0s
-        // Both callbacks bail if the phase already ended (bot captains auto-pick, so the
-        // whole ladder can complete and hand off to StartKnifeRound within a tick).
-        // If the restart does not dispatch, the pause is re-applied immediately - otherwise
-        // the unpause above is never compensated and the pick phase runs live.
+        // teampick.cfg must not issue mp_restartgame - the plugin owns this round transition.
+        // The unpause has to land first because TerminateRound is a no-op while WarmupPeriod is
+        // set and the cfg's own mp_warmup_end needs a beat to settle;
+        // HandleRoundPrestartPreKnifeRound re-applies the pause on the round that lands. Both
+        // callbacks bail if the phase already ended - bot captains auto-pick, so the whole ladder
+        // can complete within a tick.
         var pickUnpauseToken = Core.Scheduler.DelayBySeconds(1.5f, () =>
         {
             if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam)

@@ -1,0 +1,881 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>MixScrims.Contract</name>
+    </assembly>
+    <members>
+        <member name="T:MixScrims.Contract.IMixScrims">
+            <summary>
+            MixScrims' shared API surface.
+            </summary>
+            <remarks>
+            <b>Call every member on the game thread.</b> Most reads resolve a player through CS2 natives;
+            off the game thread that is an access violation no <c>try</c>/<c>catch</c> can contain, and it
+            takes the server down rather than failing the call. Marshal with <c>Core.Scheduler.NextTick</c>
+            from a <c>Task</c>, an HTTP continuation, a <c>System.Threading.Timer</c> - or a built-in
+            SwiftlyS2 menu click, which <c>Core.MenusAPI</c> already dispatches through <c>Task.Run</c>.
+            A CustomHUD menu click runs inline on the game thread and needs no marshal.
+            <para>
+            Exempt because they read no native state: <see cref="M:MixScrims.Contract.IMixScrims.GetMapVoteTallies"/>,
+            <see cref="M:MixScrims.Contract.IMixScrims.GetVoteableMapDisplayNames"/> and <see cref="M:MixScrims.Contract.IMixScrims.GetMapVoteSecondsRemaining"/>.
+            </para>
+            <para>
+            The suppression and flow-control members - <see cref="M:MixScrims.Contract.IMixScrims.SetBuiltInMenusSuppressed(System.Boolean)"/>,
+            <see cref="M:MixScrims.Contract.IMixScrims.SetBuiltInCenterHtmlSuppressed(System.Boolean)"/>, <see cref="M:MixScrims.Contract.IMixScrims.AreBuiltInMenusSuppressed"/>,
+            <see cref="M:MixScrims.Contract.IMixScrims.IsBuiltInCenterHtmlSuppressed"/>, <see cref="M:MixScrims.Contract.IMixScrims.SetPhaseProgressionHeld(System.Boolean)"/>,
+            <see cref="M:MixScrims.Contract.IMixScrims.IsPhaseProgressionHeld"/>, <see cref="M:MixScrims.Contract.IMixScrims.SetNextPickingTeam(System.Nullable{SwiftlyS2.Shared.Players.Team})"/> and
+            <see cref="M:MixScrims.Contract.IMixScrims.GetNextPickingTeam"/> - are plain managed fields and <b>must not</b> be
+            marshalled: a deferred write loses the race against the decision it is meant to change.
+            </para>
+            </remarks>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.MatchStateChanged">
+            <summary>
+            Fires whenever the match state transitions between two distinct
+            <see cref="T:MixScrims.Contract.MatchState"/> values via <see cref="M:MixScrims.Contract.IMixScrims.SetMatchState(MixScrims.Contract.MatchState)"/>.
+            Not fired for no-op transitions (state == new state).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.PluginStateChanged">
+            <summary>
+            Fires whenever the plugin operational mode changes between
+            <see cref="F:MixScrims.Contract.PluginState.Production"/> and <see cref="F:MixScrims.Contract.PluginState.Staging"/>.
+            Not fired for no-op transitions.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.PlayerReadyChanged">
+            <summary>
+            Fires when a player's ready status changes during Warmup or MapChosen
+            (payload: SteamID64, isReady). Bots in TestMode are implicitly ready
+            and never trigger this event.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.CaptainAssigned">
+            <summary>
+            Fires when a captain slot is filled (payload: team, newCaptainSteamId).
+            If a captain is replaced, <see cref="E:MixScrims.Contract.IMixScrims.CaptainRemoved"/> fires FIRST for
+            the outgoing captain, then this fires for the incoming one.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.CaptainRemoved">
+            <summary>
+            Fires when a captain slot is vacated (payload: team, oldCaptainSteamId).
+            See <see cref="E:MixScrims.Contract.IMixScrims.CaptainAssigned"/> for reassignment ordering.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.TeamPickingStarted">
+            <summary>
+            Fires once at the start of the PickingTeam phase after the starting
+            team is randomly chosen (payload: starting team, CT or T).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.PlayerPickedForTeam">
+            <summary>
+            Fires whenever a player is added to a picked-team roster during team
+            picking (payload: team, pickedSteamId, pickIndex). <c>pickIndex</c> is
+            the 1-based sequence within the whole picking phase; captains' implicit
+            self-picks occupy indices 1 and 2.
+            <para>
+            <c>pickedSteamId</c> is <c>0</c> for a bot - resolve identity through
+            <see cref="M:MixScrims.Contract.IMixScrims.GetUnpickedPlayerSlots"/>, which is slot-keyed.
+            </para>
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.MapVotingStarted">
+            <summary>
+            Fires once when the map voting phase opens (payload: voteable map
+            display names in the order they were presented, deadline in seconds
+            from now). Deadline mirrors <c>DefaultVoteTimeSeconds</c>.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.MapVoteCast">
+            <summary>
+            Fires whenever a player casts (or changes) a map vote (payload:
+            voter SteamID64, chosen map display name, previous map display name
+            or null on first vote).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.MapVotingEnded">
+            <summary>
+            Fires once when the map voting phase ends (payload: winning map
+            display name, winning vote count). Vote count is 0 when the winner
+            was picked at random due to zero votes.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.KnifeRoundStarted">
+            <summary>
+            Fires once when the plugin transitions into <see cref="F:MixScrims.Contract.MatchState.KnifeRound"/>.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.KnifeRoundWon">
+            <summary>
+            Fires when the knife round is decided (payload: winning team). Fires
+            once regardless of whether the side pick is captain-driven or team-vote.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.PickingStartingSideStarted">
+            <summary>
+            Fires when the winning captain's side-selection menu opens (payload:
+            captain SteamID64). Does not fire when <c>DisableCaptains</c> is true
+            (see <see cref="E:MixScrims.Contract.IMixScrims.StartingSideChosen"/> instead).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.StartingSideChosen">
+            <summary>
+            Fires when the winning team's starting side is decided (payload: the
+            side the winning team KEPT, either <see cref="F:SwiftlyS2.Shared.Players.Team.CT"/> or
+            <see cref="F:SwiftlyS2.Shared.Players.Team.T"/>). Fires for both captain choice and team vote paths.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.TimeoutStarted">
+            <summary>
+            Fires when a team timeout starts (payload: team, duration in seconds).
+            Only fires when a timeout actually goes live — queued timeouts fire
+            this event when they eventually run, not when they get queued.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.TimeoutTick">
+            <summary>
+            Fires once per second while a timeout is active (payload: remaining
+            seconds, counting down from the timeout duration to 1). Does not fire
+            at 0 — the <see cref="E:MixScrims.Contract.IMixScrims.TimeoutEnded"/> event handles the transition.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.TimeoutEnded">
+            <summary>
+            Fires when the active timeout ends (payload: team that was on timeout).
+            Fires regardless of whether the plugin proceeds directly to another
+            queued timeout or resumes the match.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.TimeoutVoteStarted">
+            <summary>
+            Fires when a timeout vote opens (payload: team the vote is running for).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.TimeoutVoteCast">
+            <summary>
+            Fires whenever a timeout vote is cast (payload: voter SteamID64,
+            voteYes, team the vote is running for).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.TimeoutVoteResult">
+            <summary>
+            Fires when a timeout vote resolves (payload: team, passed).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.SurrenderVoteStarted">
+            <summary>
+            Fires when a surrender vote opens (payload: team the vote is running for).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.SurrenderVoteCast">
+            <summary>
+            Fires whenever a surrender vote is cast (payload: voter SteamID64,
+            voteYes, team the vote is running for).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.SurrenderVoteResult">
+            <summary>
+            Fires when a surrender vote resolves (payload: team, passed). A passing
+            vote is followed by the natural match reset flow — no separate
+            "surrendered" event is fired.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.VoteKickStarted">
+            <summary>
+            Fires when a vote kick opens (payload: team, target SteamID64,
+            initiator SteamID64).
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.VoteKickCast">
+            <summary>
+            Fires whenever a vote kick vote is cast. Payload is a dedicated record
+            (see <see cref="T:MixScrims.Contract.VoteKickCastEventArgs"/>) because the natural argument
+            list is over the plain-Action threshold.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.VoteKickResult">
+            <summary>
+            Fires when a vote kick resolves (payload: team, passed). A passing
+            vote is followed by the target player getting kicked.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.MatchEnded">
+            <summary>
+            Fires once when the competitive match ends via <c>EventCsWinPanelMatch</c>
+            (payload: winning team, CT score, T score). Winning team is derived from
+            <c>CTScoreTotal</c> vs <c>TerroristScoreTotal</c>; a draw (equal scores)
+            yields <see cref="F:SwiftlyS2.Shared.Players.Team.None"/>.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.CaptainMenuRequested">
+            <summary>
+            Fires when <c>!captain</c> passes its permission, state and argument
+            checks AND built-in menus are suppressed (payload: requesting admin
+            SteamID64, requested side). <c>side</c> is the parsed team when the admin
+            supplied an argument (<c>!captain ct</c>), or <c>null</c> when they typed
+            the bare command. Render your own picker and terminate the flow at
+            <see cref="M:MixScrims.Contract.IMixScrims.SetCtCaptain(System.UInt64)"/> / <see cref="M:MixScrims.Contract.IMixScrims.SetTCaptain(System.UInt64)"/>.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.VolunteerCaptainMenuRequested">
+            <summary>
+            Fires when <c>!volunteer_captain</c> passes its state and argument checks
+            AND built-in menus are suppressed (payload: requesting player SteamID64,
+            requested side or <c>null</c> for the bare command). Render your own
+            picker and terminate the flow at <see cref="M:MixScrims.Contract.IMixScrims.VolunteerAsCaptain(System.UInt64,SwiftlyS2.Shared.Players.Team)"/>, which
+            performs the same eligibility checks the chat command would have.
+            </summary>
+        </member>
+        <member name="E:MixScrims.Contract.IMixScrims.MapVoteMenuRequested">
+            <summary>
+            Raised when a player asks to (re)open the map vote via
+            <c>!revote</c> <b>and</b> built-in menus are suppressed. Fires only after
+            the command's own state validation passes (match state must be
+            <see cref="F:MixScrims.Contract.MatchState.MapVoting"/>), so a consumer can reopen its vote menu
+            without re-implementing those checks. Terminate the flow at
+            <see cref="M:MixScrims.Contract.IMixScrims.CastMapVote(System.UInt64,System.String)"/>.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetReadyPlayers">
+            <summary>Returns the list of currently-ready human players (SteamID64).</summary>
+            <remarks>
+            Bots are <b>never</b> present - they all share SteamID 0. For a ready <i>counter</i> use
+            <see cref="M:MixScrims.Contract.IMixScrims.GetEffectiveReadyCount"/>.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetEffectiveReadyCount">
+            <summary>
+            Ready count as the plugin itself counts it, including bots as implicitly ready while
+            <c>TestMode</c> is on.
+            </summary>
+            <remarks>
+            This is the numerator MixScrims uses for state transitions; <c>GetReadyPlayers().Count</c>
+            reads 0 in a bot lobby.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.IsPlayerReady(System.UInt64)">
+            <summary>Returns whether the given SteamID64 is currently marked ready.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetMinimumReadyPlayers">
+            <summary>
+            Minimum players required to advance out of Warmup / MapChosen (from
+            <c>MinimumReadyPlayers</c> config).
+            </summary>
+            <remarks>
+            Raw config value: it ignores <c>RequireAllConnectedPlayersToBeReady</c>, so a ready
+            counter's denominator is <see cref="M:MixScrims.Contract.IMixScrims.GetPlayersRequiredToStart"/>.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetPlayersRequiredToStart">
+            <summary>
+            Denominator the plugin resolves for the current lobby: honours
+            <c>RequireAllConnectedPlayersToBeReady</c> and counts bots, so it pairs
+            exactly with <see cref="M:MixScrims.Contract.IMixScrims.GetEffectiveReadyCount"/>.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetRequireAllConnectedPlayersToBeReady">
+            <summary>
+            Whether the plugin requires every connected player to be ready before
+            advancing (<c>RequireAllConnectedPlayersToBeReady</c> config).
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetCtCaptain">
+            <summary>Current CT captain SteamID64 or null if unset / invalid.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetTCaptain">
+            <summary>Current T captain SteamID64 or null if unset / invalid.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetStartingSidePicker">
+            <summary>
+            SteamID64 of the captain entitled to choose the starting side, or null when
+            nobody is: captains are disabled (the winning team votes instead), the picker
+            is a bot (MixScrims resolves those automatically), or the phase isn't active.
+            </summary>
+            <remarks>
+            <see cref="E:MixScrims.Contract.IMixScrims.PickingStartingSideStarted"/> is raised once and skipped entirely if the
+            captain's player ref went stale, so drive the prompt off this read on entering
+            <see cref="F:MixScrims.Contract.MatchState.PickingStartingSide"/>.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetCtTeamName">
+            <summary>
+            Current CT team display name (last value written via
+            <see cref="M:MixScrims.Contract.IMixScrims.SetCounterTerroristsTeamName(System.String)"/>), or the CS2 default if unset.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetTTeamName">
+            <summary>
+            Current T team display name (last value written via
+            <see cref="M:MixScrims.Contract.IMixScrims.SetTerroristsTeamName(System.String)"/>), or the CS2 default if unset.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetMatchScore">
+            <summary>
+            Reads live team scores from CS2's <c>MatchData</c> (<c>CTScoreTotal</c>,
+            <c>TerroristScoreTotal</c>). Returns <c>(0, 0)</c> when game rules are
+            unavailable (early load, map transition).
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetMapVoteTallies">
+            <summary>
+            Current map vote tallies keyed by map display name. Empty outside the
+            MapVoting state. Returns a snapshot, so it is safe from any thread.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetVoteableMapDisplayNames">
+            <summary>
+            Map display names currently up for vote (in menu order). Empty outside
+            the MapVoting state. Returns a snapshot, so it is safe from any thread.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetMapVoteSecondsRemaining">
+            <summary>
+            Seconds remaining on the map vote deadline. Returns 0 outside the
+            MapVoting state or after the deadline has elapsed.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetPlayerMapVote(System.UInt64)">
+            <summary>
+            Returns the map display name the given player currently backs during
+            the map vote, or null if they haven't voted or aren't voting.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetActivePickingTeam">
+            <summary>
+            Team whose turn it is to pick during the PickingTeam phase, or null
+            when not in the phase / picking is complete.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetUnpickedPlayers">
+            <summary>
+            Currently-unpicked SteamID64s during the PickingTeam phase, or an
+            empty list outside the phase.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetCurrentPickIndex">
+            <summary>
+            1-based pick counter within the current PickingTeam phase (captains'
+            implicit self-picks occupy 1 and 2). Returns 0 outside the phase.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetActiveTimeoutRemainingSeconds">
+            <summary>
+            Seconds remaining on the active timeout. Returns 0 outside the Timeout
+            state or after the timeout has elapsed.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetActiveTimeoutTeam">
+            <summary>
+            Team on the active timeout, or null when no timeout is active.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetRemainingTimeoutsCt">
+            <summary>
+            Remaining timeouts for CT (starts at <c>Timeouts</c> config, decrements
+            each time a CT timeout runs).
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetRemainingTimeoutsT">
+            <summary>Remaining timeouts for T.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetVoteKickTargetCt">
+            <summary>Current CT vote-kick target SteamID64, or null when none active.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetVoteKickTargetT">
+            <summary>Current T vote-kick target SteamID64, or null when none active.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetVoteKickTallyCt">
+            <summary>
+            Current CT vote-kick tally (yes count, votes cast, eligible voters).
+            All three are 0 when no vote is active.
+            </summary>
+            <remarks>
+            <c>Eligible</c> is the whole electorate - the team minus the kick target, initiator
+            included - so it is also the pass threshold, and it shrinks when a voter disconnects.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetVoteKickTallyT">
+            <summary>Same shape as <see cref="M:MixScrims.Contract.IMixScrims.GetVoteKickTallyCt"/> for the T team.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetActiveSurrenderVoteTeam">
+            <summary>Team whose surrender vote is in progress, or null when none active.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetSurrenderVoteTally">
+            <summary>
+            Current surrender vote tally (yes count, votes cast, eligible voters).
+            All three are 0 when no vote is active.
+            </summary>
+            <remarks>
+            <c>Eligible</c> is the whole team, caller included, so it is also the unanimity threshold,
+            and it shrinks when a voter disconnects. Timeout exposes no tally getter: its threshold is
+            one below its electorate, so a passing timeout closes before every vote is in.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetLocalizedString(System.UInt64,System.String,System.Object[])">
+            <summary>
+            Resolves a localization string via MixScrims' translation files, using
+            <paramref name="steamId"/>'s locale when they are connected and the server default
+            otherwise.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetBuiltInMenusSuppressed(System.Boolean)">
+            <summary>
+            Runtime override of the <c>SuppressBuiltInMenus</c> config flag. When
+            suppressed, MixScrims skips every <c>Core.MenusAPI.OpenMenuForPlayer</c>
+            site (captain admin menu, side pick, map vote, team pick, surrender
+            vote, timeout vote, vote kick). Overrides config until the plugin unloads.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetBuiltInCenterHtmlSuppressed(System.Boolean)">
+            <summary>
+            Runtime override of the <c>SuppressBuiltInCenterHtml</c> config flag.
+            When suppressed, MixScrims skips every <c>SendCenterHTML</c> broadcast
+            (ready counter, timeout timer, vote kick progress, surrender result).
+            Overrides config until the plugin unloads.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.AreBuiltInMenusSuppressed">
+            <summary>Current effective value of the built-in menu suppression switch.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.IsBuiltInCenterHtmlSuppressed">
+            <summary>Current effective value of the built-in center-HTML suppression switch.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetCaptainsEnabled">
+            <summary>Whether captains are enabled (<c>!DisableCaptains</c>).</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetSkipTeamPickingEnabled">
+            <summary>Whether the team picking phase is skipped (<c>SkipTeamPicking</c>).</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetSkipMapVotingEnabled">
+            <summary>Whether the map voting phase is skipped (<c>SkipMapVoting</c>).</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetAllowVolunteerCaptainsEnabled">
+            <summary>Whether players may volunteer as captain (<c>AllowVolunteerCaptains</c>).</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetTimeoutDurationSeconds">
+            <summary>Timeout duration in seconds (<c>TimeoutDurationSeconds</c>).</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetTotalTimeoutsPerTeam">
+            <summary>Total timeouts allocated per team at the start of a match (<c>Timeouts</c>).</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetDefaultVoteTimeSeconds">
+            <summary>Default vote window in seconds (<c>DefaultVoteTimeSeconds</c>).</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.CastMapVote(System.UInt64,System.String)">
+            <summary>
+            Casts or changes <paramref name="steamId"/>'s map vote. No-op unless the
+            match state is <see cref="F:MixScrims.Contract.MatchState.MapVoting"/>, the player is
+            connected, and <paramref name="mapDisplayName"/> is currently up for vote
+            (see <see cref="M:MixScrims.Contract.IMixScrims.GetVoteableMapDisplayNames"/>). Raises
+            <see cref="E:MixScrims.Contract.IMixScrims.MapVoteCast"/> on success.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.CastTimeoutVote(System.UInt64,System.Boolean)">
+            <summary>
+            Casts a Yes/No vote on the in-flight timeout vote. No-op when no timeout
+            vote is open, the player is unknown / disconnected, the player isn't on
+            the team the vote is running for, or they already voted. Raises
+            <see cref="E:MixScrims.Contract.IMixScrims.TimeoutVoteCast"/> on success.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.CastSurrenderVote(System.UInt64,System.Boolean)">
+            <summary>
+            Casts a Yes/No vote on the in-flight surrender vote. Same guard set as
+            <see cref="M:MixScrims.Contract.IMixScrims.CastTimeoutVote(System.UInt64,System.Boolean)"/>. Raises <see cref="E:MixScrims.Contract.IMixScrims.SurrenderVoteCast"/> on
+            success.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.CastVoteKickVote(System.UInt64,SwiftlyS2.Shared.Players.Team,System.Boolean)">
+            <summary>
+            Casts a Yes/No vote on a vote kick. <paramref name="team"/> disambiguates
+            which side's vote is being answered — CT and T can run vote kicks
+            simultaneously. No-op when that team has no vote open, the player is
+            unknown / disconnected, the player isn't on <paramref name="team"/>, or
+            they already voted. Raises <see cref="E:MixScrims.Contract.IMixScrims.VoteKickCast"/> on success.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.PickPlayerForTeam(System.UInt64,System.UInt64)">
+            <summary>
+            Drives the full team-pick pipeline: the index advances,
+            <see cref="E:MixScrims.Contract.IMixScrims.PlayerPickedForTeam"/> fires, the player is moved onto the team, and the phase
+            progresses once picking completes.
+            </summary>
+            <remarks>
+            This is what a consumer-built pick menu must call - <c>AddPlayerToPicked*Players</c> only
+            touches the roster list. No-op unless the state is <see cref="F:MixScrims.Contract.MatchState.PickingTeam"/> and
+            <paramref name="captainSteamId"/> captains the active picking team.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetUnpickedPlayerSlots">
+            <summary>
+            Slot-keyed companion to <see cref="M:MixScrims.Contract.IMixScrims.GetUnpickedPlayers"/>, returning every valid,
+            not-yet-picked player including bots. Empty outside
+            <see cref="F:MixScrims.Contract.MatchState.PickingTeam"/>.
+            </summary>
+            <remarks>
+            Bots have a SteamID of <c>0</c> and so are not addressable by the SteamID overloads, but
+            MixScrims' own picking flow does allow picking them - which matters in <c>TestMode</c>.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.PickPlayerForTeamBySlot(System.UInt64,System.Int32)">
+            <summary>
+            Slot-keyed companion to <see cref="M:MixScrims.Contract.IMixScrims.PickPlayerForTeam(System.UInt64,System.UInt64)"/>, so bots (SteamID <c>0</c>) can be
+            picked. Same guards and same full pipeline.
+            </summary>
+            <param name="captainSteamId">The captain making the pick. Captains are always human, so a SteamID is safe here.</param>
+            <param name="pickedSlot">Player slot (<c>IPlayer.PlayerID</c>) of the pick target.</param>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.VolunteerAsCaptain(System.UInt64,SwiftlyS2.Shared.Players.Team)">
+            <summary>
+            Volunteers <paramref name="steamId"/> as captain of <paramref name="team"/>, honouring the
+            same checks the <c>!volunteer_captain</c> chat command performs.
+            </summary>
+            <remarks>
+            Distinct from <see cref="M:MixScrims.Contract.IMixScrims.SetCtCaptain(System.UInt64)"/> / <see cref="M:MixScrims.Contract.IMixScrims.SetTCaptain(System.UInt64)"/>, which are admin-force
+            setters that bypass those checks.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.ChooseStartingSide(System.UInt64,System.Boolean)">
+            <summary>
+            Records a starting-side choice after the knife round, routing to the same handler the
+            <c>!stay</c> / <c>!switch</c> commands and the built-in side-pick menu use.
+            </summary>
+            <remarks>
+            With captains enabled the winning captain's choice applies immediately; under
+            <c>DisableCaptains</c> it is recorded as one vote and the majority applies once every valid
+            winning-team player has voted. Either way <see cref="E:MixScrims.Contract.IMixScrims.StartingSideChosen"/> fires.
+            <para>
+            No-op unless the state is <see cref="F:MixScrims.Contract.MatchState.PickingStartingSide"/> and the caller is
+            eligible: the winning captain (see <see cref="M:MixScrims.Contract.IMixScrims.GetStartingSidePicker"/>), or a member of the
+            winning team when captains are disabled.
+            </para>
+            <para>
+            One-shot per phase - once a side is committed later calls are ignored, even though
+            <see cref="T:MixScrims.Contract.MatchState"/> briefly still reads
+            <see cref="F:MixScrims.Contract.MatchState.PickingStartingSide"/> while the match start is dispatched.
+            </para>
+            </remarks>
+            <param name="steamId">The player making the choice.</param>
+            <param name="stay"><c>true</c> to keep the current sides, <c>false</c> to swap.</param>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetPhaseProgressionHeld(System.Boolean)">
+            <summary>
+            Stops MixScrims advancing the match on its own. While held:
+            <list type="bullet">
+              <item><description>A ready check does not leave <see cref="F:MixScrims.Contract.MatchState.Warmup"/> or
+                <see cref="F:MixScrims.Contract.MatchState.MapChosen"/>, whether the last player readies up or
+                leaves.</description></item>
+              <item><description>The <c>round_end</c> that ends a knife round resolves no winner and
+                <see cref="E:MixScrims.Contract.IMixScrims.KnifeRoundWon"/> never fires. CS2's own round restart is left armed, so the
+                knife round replays until the consumer moves the match on - parking that restart with
+                no MixScrims phase left to release it would freeze the server.</description></item>
+              <item><description>A completed pick ladder seals the rosters and stops there, starting
+                neither a knife round nor the match.</description></item>
+            </list>
+            Off by default, and deliberately without a config key: a server running MixScrims with
+            no consumer loaded would never leave warmup.
+            <para>
+            <b>Clear it in <c>Unload</c></b> - while held the consumer owns every transition.
+            Releasing does not re-run the decision it blocked, because the ready check is
+            edge-triggered by <c>!ready</c>, <c>!unready</c> and disconnects; drive the next phase
+            explicitly with <see cref="M:MixScrims.Contract.IMixScrims.StartMapVoting"/> or <see cref="M:MixScrims.Contract.IMixScrims.StartTeamPicking"/>.
+            <see cref="M:MixScrims.Contract.IMixScrims.ForceAllPlayersToReady"/> is not a usable nudge - it only adds players who are
+            not already ready.
+            </para>
+            <para>
+            Safe to call from any thread and <b>must not</b> be marshalled; see the
+            interface remarks.
+            </para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.IsPhaseProgressionHeld">
+            <summary>Current value of the phase-progression hold.</summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetNextPickingTeam(System.Nullable{SwiftlyS2.Shared.Players.Team})">
+            <summary>
+            Overrides the coin toss that decides which captain picks first, for the next team-picking
+            phase only. Pass <see cref="F:SwiftlyS2.Shared.Players.Team.CT"/> or <see cref="F:SwiftlyS2.Shared.Players.Team.T"/> to force a pick order, or
+            <c>null</c> to restore the toss. Any other value is rejected as a no-op and logged.
+            <para>
+            <b>One-shot.</b> Consumed and cleared by the next phase that reaches the toss, so it has to
+            be set again before every phase it should apply to. A phase that aborts before the toss
+            leaves the value pending; cancelling or resetting the match clears it. This covers every
+            entry into the phase, including the ready check that opens picking and the captain
+            disconnect that restarts it.
+            </para>
+            <para>
+            Safe to call from any thread and <b>must not</b> be marshalled; see the interface remarks.
+            </para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetNextPickingTeam">
+            <summary>
+            The pending pick-order override, or <c>null</c> when the next phase will toss for it.
+            Reads <c>null</c> once the override has been consumed.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetCurrentMatchState">
+            <summary>
+            Retrieves the current state of the match.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetMatchState(MixScrims.Contract.MatchState)">
+            <summary>
+            Sets the current match state to the specified value.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetCurrentPluginState">
+            <summary>
+            Retrieves the current operational state of the plugin.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetPluginState(MixScrims.Contract.PluginState)">
+            <summary>
+            Sets the current state of the plugin.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetCounterTerroristsTeamName(System.String)">
+            <summary>
+            Sets the display name for the Counter-Terrorists team.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetTerroristsTeamName(System.String)">
+            <summary>
+            Sets the display name for the terrorists team.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.StartWarmup">
+            <summary>
+            Initiates the warmup process to prepare the component for operation.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.StartMapVoting">
+            <summary>
+            Initiates the map voting process, allowing participants to vote for the next map.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.StartTeamPicking">
+            <summary>
+            Initiates the process of selecting teams for the current session.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.StartTimeoutCt">
+            <summary>
+            Starts the timeout cancellation token, enabling timeout monitoring for the current operation.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.StartTimeoutT">
+            <summary>
+            
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.StopTimeout">
+            <summary>
+            Stops the timeout cancellation token, preventing any further timeout-triggered cancellation operations.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SurrenderCt">
+            <summary>
+            Initiates the surrender process for the current Counter-Terrorist team.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SurrenderT">
+            <summary>
+            Performs a surrender action for the current entity or operation.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.StartMatch">
+            <summary>
+            Begins a new match, initializing all necessary game state and resources.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.StartKnifeRound">
+            <summary>
+            Starts a knife round phase in the game, typically used to determine which team selects a side.
+            </summary>
+            <remarks>
+            Seals the pick rosters when it follows the pick phase, and leaves them untouched from any
+            other state. For a knife round with no plugin-side flow, call
+            <see cref="M:MixScrims.Contract.IMixScrims.SetMatchState(MixScrims.Contract.MatchState)"/> with <see cref="F:MixScrims.Contract.MatchState.KnifeRound"/> instead.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.CancelMatch">
+            <summary>
+            Cancels the current match, terminating any ongoing gameplay or matchmaking process.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.ChangeMap(System.String,System.String)">
+            <summary>
+            Changes the current map to the specified map or workshop map.
+            </summary>
+            <remarks>
+            After a match, call <see cref="M:MixScrims.Contract.IMixScrims.CancelMatch"/> first: only the reset clears the playing
+            rosters, captains and ready list. A map change out of <see cref="F:MixScrims.Contract.MatchState.Ended"/> comes
+            up in <see cref="F:MixScrims.Contract.MatchState.Warmup"/>.
+            </remarks>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.ForceAllPlayersToReady">
+            <summary>
+            Sets all players in the game to a ready state, regardless of their current status.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.ForceAllPlayersToUnready">
+            <summary>
+            Forces all players in the session to become unready, overriding their current ready status.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetPickedCtPlayers">
+            <summary>
+            Retrieves a list of player identifiers that have been selected for the Counter-Terrorist team.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetPickedTPlayers">
+            <summary>
+            Retrieves a list of player identifiers that have been selected.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.AddPlayerToPickedCtPlayers(System.UInt64)">
+            <summary>
+            Adds a player to the collection of picked players using the specified Steam ID.
+            <para>Roster list only - use <see cref="M:MixScrims.Contract.IMixScrims.PickPlayerForTeam(System.UInt64,System.UInt64)"/> to drive the picking phase.</para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.AddPlayerToPickedTPlayers(System.UInt64)">
+            <summary>
+            Adds a player to the collection of picked players using the specified Steam ID.
+            <para>Roster list only - use <see cref="M:MixScrims.Contract.IMixScrims.PickPlayerForTeam(System.UInt64,System.UInt64)"/> to drive the picking phase.</para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.RemovePlayerFromPickedCtPlayers(System.UInt64)">
+            <summary>
+            Removes the player with the specified Steam ID from the collection of picked players.
+            <para>Roster list only - does not move the player or rewind the picking phase.</para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.RemovePlayerFromPickedTPlayers(System.UInt64)">
+            <summary>
+            Removes the player with the specified Steam ID from the collection of picked players.
+            <para>Roster list only - does not move the player or rewind the picking phase.</para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetPlayingCtPlayers">
+            <summary>
+            Retrieves a list of player identifiers for all players currently in the playing state.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetPlayingTPlayers">
+            <summary>
+            Retrieves a list of player identifiers for all players currently in a playing state.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.AddPlayerToPlayingCtPlayers(System.UInt64)">
+            <summary>
+            Adds a player to the collection of currently playing players using the specified Steam ID.
+            <para>Roster list only - use <see cref="M:MixScrims.Contract.IMixScrims.PickPlayerForTeam(System.UInt64,System.UInt64)"/> to drive the picking phase.</para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.AddPlayerToPlayingTPlayers(System.UInt64)">
+            <summary>
+            Adds a player to the collection of currently playing players using the specified Steam ID.
+            <para>Roster list only - use <see cref="M:MixScrims.Contract.IMixScrims.PickPlayerForTeam(System.UInt64,System.UInt64)"/> to drive the picking phase.</para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.RemovePlayerFromPlayingCtPlayers(System.UInt64)">
+            <summary>
+            Removes the player with the specified Steam ID from the collection of currently playing players.
+            <para>Roster list only - does not move the player or alter the match phase.</para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.RemovePlayerFromPlayingTPlayers(System.UInt64)">
+            <summary>
+            Removes the player with the specified Steam ID from the collection of currently playing players.
+            <para>Roster list only - does not move the player or alter the match phase.</para>
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.GetPlayersWaitingForPunishment(System.UInt64)">
+            <summary>
+            Retrieves a list of player Steam IDs who are awaiting punishment actions associated with the specified user.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.AddPlayerToWaitingForPunishmentList(System.UInt64)">
+            <summary>
+            Adds a player, identified by their Steam ID, from the waiting-for-punishment list to the active player list or
+            system.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.RemovePlayerFromWaitingForPunishmentList(System.UInt64)">
+            <summary>
+            Removes the player with the specified Steam ID from the waiting-for-punishmentslist.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetCtCaptain(System.UInt64)">
+            <summary>
+            Assigns the captain role to the player identified by the specified Steam ID.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.SetTCaptain(System.UInt64)">
+            <summary>
+            Assigns the captain role to the player identified by the specified Steam ID.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.KickNotPlayingPlayers(System.String)">
+            <summary>
+            Kicks players who are not actively participating in the game.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.KickNotPickedPlayers(System.String)">
+            <summary>
+            Removes all players who have not been picked from the game session.
+            </summary>
+        </member>
+        <member name="M:MixScrims.Contract.IMixScrims.PreventNewPlayersJoining(System.Boolean)">
+            <summary>
+            Prevents additional players from joining the ongoing match. This is automatically disabled when the match ends.
+            </summary>
+        </member>
+        <member name="T:MixScrims.Contract.VoteKickCastEventArgs">
+            <summary>
+            Payload for the <see cref="E:MixScrims.Contract.IMixScrims.VoteKickCast"/> event. Uses a dedicated record because
+            the payload carries six fields (over the plain-Action threshold of three).
+            </summary>
+            <param name="Team">Team whose vote kick is in progress (CT or T).</param>
+            <param name="VoterSteamId">SteamID64 of the player whose vote was just cast.</param>
+            <param name="VoteYes">True for a YES vote, false for a NO vote.</param>
+            <param name="CurrentYesCount">Running YES-vote tally after this cast (includes caller auto-yes and any bot auto-yes).</param>
+            <param name="CurrentTotalCast">Running total of votes cast after this cast (yes + no).</param>
+            <param name="EligibleVotes">Total eligible voters for this vote kick (team size minus target).</param>
+        </member>
+        <member name="M:MixScrims.Contract.VoteKickCastEventArgs.#ctor(SwiftlyS2.Shared.Players.Team,System.UInt64,System.Boolean,System.Int32,System.Int32,System.Int32)">
+            <summary>
+            Payload for the <see cref="E:MixScrims.Contract.IMixScrims.VoteKickCast"/> event. Uses a dedicated record because
+            the payload carries six fields (over the plain-Action threshold of three).
+            </summary>
+            <param name="Team">Team whose vote kick is in progress (CT or T).</param>
+            <param name="VoterSteamId">SteamID64 of the player whose vote was just cast.</param>
+            <param name="VoteYes">True for a YES vote, false for a NO vote.</param>
+            <param name="CurrentYesCount">Running YES-vote tally after this cast (includes caller auto-yes and any bot auto-yes).</param>
+            <param name="CurrentTotalCast">Running total of votes cast after this cast (yes + no).</param>
+            <param name="EligibleVotes">Total eligible voters for this vote kick (team size minus target).</param>
+        </member>
+        <member name="P:MixScrims.Contract.VoteKickCastEventArgs.Team">
+            <summary>Team whose vote kick is in progress (CT or T).</summary>
+        </member>
+        <member name="P:MixScrims.Contract.VoteKickCastEventArgs.VoterSteamId">
+            <summary>SteamID64 of the player whose vote was just cast.</summary>
+        </member>
+        <member name="P:MixScrims.Contract.VoteKickCastEventArgs.VoteYes">
+            <summary>True for a YES vote, false for a NO vote.</summary>
+        </member>
+        <member name="P:MixScrims.Contract.VoteKickCastEventArgs.CurrentYesCount">
+            <summary>Running YES-vote tally after this cast (includes caller auto-yes and any bot auto-yes).</summary>
+        </member>
+        <member name="P:MixScrims.Contract.VoteKickCastEventArgs.CurrentTotalCast">
+            <summary>Running total of votes cast after this cast (yes + no).</summary>
+        </member>
+        <member name="P:MixScrims.Contract.VoteKickCastEventArgs.EligibleVotes">
+            <summary>Total eligible voters for this vote kick (team size minus target).</summary>
+        </member>
+    </members>
+</doc>

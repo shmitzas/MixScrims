@@ -463,19 +463,13 @@ public partial class MixScrims
             AssignCaptain(Team.CT, oldTCaptain);
             AssignCaptain(Team.T, oldCtCaptain);
 
-            // Team-name cvars only; the player moves themselves happen inside
-            // StartMatch → MovePlayersToDesignatedTeamsPreMatch below. The older code
-            // wrapped a second `ChangeTeamAsync` loop here inside NextWorldUpdate,
-            // which the engine no-op'd (log shows no paired `ChangeTeam() CTMDBG`),
-            // but the managed calls raced batch 1's still-in-flight pawn transitions
-            // and are the strongest remaining suspect for the 50/50 Switch-only
-            // crash (Stay path never fires this code, Stay never crashes). SetTeamName
-            // itself internally schedules NextTick for its cvar exec, so no wrapper is
-            // needed here.
-            // Fire StartingSideChosen with the WINNING team's post-swap side. For Switch,
-            // that's the opposite of the deciding captain's pre-swap side (captured before
-            // this delayed callback ran). captain?.PlayerPawn.TeamNum was 3 (CT) or 2 (T)
-            // pre-swap; the winning team ends up on the opposite side.
+            // Team-name cvars only - the player moves happen in StartMatch →
+            // MovePlayersToDesignatedTeamsPreMatch below, and a ChangeTeamAsync loop here would
+            // race those still-in-flight pawn transitions. SetTeamName schedules its own NextTick
+            // for the cvar exec, so no wrapper is needed.
+
+            // Only the lists were swapped above, so the pawn still reads its pre-swap team; a
+            // Switch puts the winning team on the opposite side.
             var preSwapTeam = captain?.PlayerPawn?.TeamNum;
             if (preSwapTeam == 3)
                 mixScrimsService.RaiseStartingSideChosen(Team.T);

@@ -99,14 +99,12 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Suppresses the round MVP for the knife round. CS2 still awards one and plays the winner's
-    /// music kit, which now bleeds into the match start because the pick phase holds the round
-    /// open. <see cref="ResetMatchStartState"/> zeroes the MVP counter afterwards either way;
-    /// this kills the announcement and the music at the source.
+    /// Suppresses the knife round's MVP announcement and music kit.
     /// </summary>
     /// <remarks>
-    /// Covers <c>PickingStartingSide</c> too: <c>round_mvp</c> and <c>round_end</c> fire in the
-    /// same win sequence, so the state may already have moved on by the time this runs.
+    /// The pick phase holds the round open, so CS2's award would otherwise carry into the match
+    /// start. Covers <c>PickingStartingSide</c> too - <c>round_mvp</c> and <c>round_end</c> fire
+    /// in the same win sequence, so the state may already have moved on.
     /// </remarks>
     [GameEventHandler(HookMode.Pre)]
     public HookResult HandleRoundMvpOnKnifeRound(EventRoundMvp @event)
