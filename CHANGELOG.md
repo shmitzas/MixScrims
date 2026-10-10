@@ -9,78 +9,35 @@ Notable changes to MixScrims, newest first.
 
 Must update to this version in order to avoid random crashes.
 
-**API consumers must update (contract 2.8.0).** `CastMapVote`, `CastTimeoutVote`,
-`CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `PickPlayerForTeamBySlot`
-and `ChooseStartingSide` now take effect on the next game tick instead of immediately, so
-a snapshot read on the line after one of these calls still returns the old state — read it
-from the matching event instead. Call the API from the game thread too: a built-in
-SwiftlyS2 menu click (`Core.MenusAPI`) arrives on a thread-pool thread.
-See [Thread affinity](https://github.com/shmitzas/MixScrims/wiki/API-Integration#thread-affinity)
-for the pattern and a code example. Contract 2.8.0 also adds flow-control members that let a
-consumer hold the match at its current phase and drive the transitions itself, and set which
-captain picks first instead of leaving it to the coin toss — see
-[Flow control](https://github.com/shmitzas/MixScrims/wiki/API-Reference#flow-control).
+**API consumers must update (contract 2.8.0).** Drivers now take effect on the next
+game tick rather than immediately, and every member taking a SteamID must be called
+on the game thread. New members let a consumer hold the match at its current phase
+and drive the transitions itself, set which captain picks first, and read the
+configured map pool at any time. See
+[API Reference](https://github.com/shmitzas/MixScrims/wiki/API-Reference).
 
 - Fixed a server crash when clicking any in-game menu button — map voting was the
-  common one, but side pick, team pick, surrender, timeout, vote kick and admin
-  captain menus could all trigger it.
-- Fixed two team picks made in the same instant both being applied. The draft could put a
-  player on the wrong side, skip a captain's turn, or end with lopsided teams. The second
-  pick is now dropped and logged.
-- A consumer plugin can set which captain picks first for the next draft, instead of
-  leaving it to the coin toss.
-- A consumer plugin can now read the configured map pool at any time, including during a
-  match, so one that runs its own map menu no longer has to parse `maps.jsonc` itself.
-  Edits to that file are picked up without a plugin reload.
-- Map changes no longer load the wrong map when another plugin has already picked a next
-  map. MixScrims now sets the next map itself as part of every change, so whatever was
-  queued beforehand — by a map-cycle plugin, an admin, or the game's own end-of-match vote
-  — can no longer override it.
-- Workshop maps are now identified by their `WorkshopId` alone. The `IsWorkshopMap` setting
-  is gone: a map with a workshop ID loads from the Workshop, one without it loads normally.
-  Existing `maps.jsonc` files keep working untouched — the old setting is simply ignored —
-  and the ID may be written either as `3070596702` or `ws:3070596702`. If you had an entry
-  with a workshop ID but `IsWorkshopMap: false`, that map now loads from the Workshop as its
-  ID always implied; clear the ID if you meant it to stay an official map.
-- Reloading the current map after a match no longer loses its workshop ID, so a workshop map
-  reloads as itself instead of falling back to a similarly named official map.
-- Fixed any player being able to decide the starting side for everyone. The knife round's
-  winning captain is now the only one whose `!stay` / `!switch` counts, matching what the
-  chat commands already enforced.
-- The match state now reports `Ended` when a match finishes, so a plugin can tell a
-  completed match from one still in progress.
-- A consumer plugin can hold MixScrims at its current phase and drive the transitions
-  itself.
+  common one, but every other menu could trigger it too.
+- Fixed two team picks landing in the same instant both being applied, which could
+  put a player on the wrong side or end the draft with lopsided teams.
+- Map changes no longer load the wrong map when another plugin, an admin or the
+  game's own end-of-match vote has already queued a next map.
+- Workshop maps are identified by `WorkshopId` alone and `IsWorkshopMap` is gone.
+  Existing `maps.jsonc` files keep working, and the ID may be written `3070596702`
+  or `ws:3070596702`. An entry with an ID but `IsWorkshopMap: false` now loads from
+  the Workshop as its ID always implied — clear the ID to keep it official.
+- Only the knife round's winning captain can decide the starting side, matching what
+  `!stay` / `!switch` already enforced.
 - `!mix_start` now starts the match itself instead of launching a knife round first.
-- New `SkipKnifeRoundWhenPickingAndCaptainsDisabled` option (off by default) starts the
-  match straight after teams are assigned, with no knife round. It only applies when
-  `DisableCaptains` and `SkipTeamPicking` are both on; any other setup still plays the
-  knife round. Turning it on also gives up the whole-team starting-side vote that
-  normally follows the knife round, so starting sides are whatever team assignment
-  produced and nothing re-decides them.
-- Servers running a consumer plugin that drives the match flow no longer log
-  `No players picked for CT team` after the teams were already locked in. The rosters
-  are now sealed once per match, so a second attempt leaves them untouched instead of
-  replacing them with whoever currently happens to be on each side.
-- A knife round started by a consumer plugin before teams are picked no longer throws the
-  picks away. Only a knife round coming out of the pick phase locks the rosters in; started
-  from anywhere else it runs the round and leaves them alone, so the real draft still counts.
-- Changing map after a match has finished no longer leaves the new map with no way forward.
-  The server comes up in warmup, where `!ready` and RTV work again, instead of carrying the
-  finished match's state across.
-- Players who connect while map voting is already running now get the vote menu and
-  can vote.
-- A disconnect no longer abandons its own cleanup half-way, so players who leave
-  are reliably removed from rosters, the ready list, open votes and pick menus.
-- Map vote reads now return a copy, so another plugin reading them while a vote is
-  being counted cannot fail.
-- A map vote abandoned before it finishes — because everyone left, an admin ran
-  `!mix_reset`, or the map was changed — no longer changes the map on its own once
-  the vote timer runs out.
-- Picking captains automatically no longer logs an error every time. That error is
-  now reserved for a captain who was actually named but turned out to be invalid.
-- Players who reconnect after an abandoned map vote are no longer offered a vote
-  slot that silently never opens.
+- New `SkipKnifeRoundWhenPickingAndCaptainsDisabled` (off by default) starts the
+  match straight after teams are assigned. Applies only with `DisableCaptains` and
+  `SkipTeamPicking` both on, and gives up the whole-team starting-side vote.
+- Changing map after a match now comes up in warmup, where `!ready` and RTV work
+  again, instead of carrying the finished match's state across.
+- Players who connect while map voting is running now get the vote menu.
+- A disconnect no longer abandons its own cleanup half-way, so leavers are reliably
+  removed from rosters, the ready list, open votes and pick menus.
+- A map vote abandoned before it finishes no longer changes the map on its own.
 
 ## [1.11.7] - 2026-10-08
 
