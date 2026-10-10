@@ -13,7 +13,7 @@ MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches wit
 
 **Contract v2.1.0 additions (2026-09):** Six **match flow drivers** (`CastMapVote`, `CastTimeoutVote`, `CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `VolunteerAsCaptain`) that close the input hole left by menu suppression, plus two **menu request events** (`CaptainMenuRequested`, `VolunteerCaptainMenuRequested`). Still purely additive.
 
-**Contract v2.8.0 flow-control additions (2026-10):** `SetPhaseProgressionHeld(bool)` / `IsPhaseProgressionHeld()` — see wiki [Flow control](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Reference#flow-control). These are **not** suppression: suppression moves presentation, these move authority. Keep the two families apart in docs and naming.
+**Contract v2.8.0 flow-control additions (2026-10):** `SetPhaseProgressionHeld(bool)` / `IsPhaseProgressionHeld()` — see wiki [Flow control](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Reference#flow-control). These are **not** suppression: suppression moves presentation, these move authority. Keep the two families apart in docs and naming. v2.8.0 also adds `GetConfiguredMapPool()` returning `MapPoolEntry` records — the `maps.jsonc` pool, state-independent and re-read per call, so it is readable during a match where `GetVoteableMapDisplayNames()` (vote-scoped) is empty.
 
 **Documentation:**
 - [Project Wiki](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki) - Comprehensive guides for installation, configuration, features, and contributing

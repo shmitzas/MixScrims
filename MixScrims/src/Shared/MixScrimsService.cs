@@ -203,6 +203,27 @@ public class MixScrimsService : IMixScrims
         return result;
     }
 
+    public IReadOnlyList<MapPoolEntry> GetConfiguredMapPool()
+    {
+        // Deliberately not GetMapsToVote(): that filters to CanBeVoted and drops already-played
+        // maps, where this is the whole pool with the filtering left to the caller.
+        var maps = _mixScrims.mapsConfig.Maps;
+        if (maps == null || maps.Count == 0) return Array.Empty<MapPoolEntry>();
+
+        var result = new List<MapPoolEntry>(maps.Count);
+        foreach (var m in maps)
+        {
+            if (m == null) continue;
+            var mapName = m.MapName ?? string.Empty;
+            var displayName = m.DisplayName ?? string.Empty;
+            var workshopId = m.WorkshopId ?? string.Empty;
+            // An entry carrying no identifier at all is one ChangeMap could never resolve.
+            if (mapName.Length == 0 && displayName.Length == 0 && workshopId.Length == 0) continue;
+            result.Add(new MapPoolEntry(mapName, displayName, workshopId, m.CanBeVoted));
+        }
+        return result;
+    }
+
     public int GetMapVoteSecondsRemaining()
     {
         var deadline = _mixScrims.mapVoteDeadline;

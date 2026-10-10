@@ -139,6 +139,9 @@ public interface IMixScrims : IDisposable
     /// <summary>Map display names currently up for vote in menu order, empty outside the MapVoting state.</summary>
     IReadOnlyList<string> GetVoteableMapDisplayNames();
 
+    /// <summary>Every map configured in <c>maps.jsonc</c> in file order, independent of match state and re-read per call so a config reload lands.</summary>
+    IReadOnlyList<MapPoolEntry> GetConfiguredMapPool();
+
     /// <summary>Seconds remaining on the map vote deadline, or 0 outside the MapVoting state.</summary>
     int GetMapVoteSecondsRemaining();
 

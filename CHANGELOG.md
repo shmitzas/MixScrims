@@ -29,6 +29,9 @@ captain picks first instead of leaving it to the coin toss — see
   pick is now dropped and logged.
 - A consumer plugin can set which captain picks first for the next draft, instead of
   leaving it to the coin toss.
+- A consumer plugin can now read the configured map pool at any time, including during a
+  match, so one that runs its own map menu no longer has to parse `maps.jsonc` itself.
+  Edits to that file are picked up without a plugin reload.
 - Fixed any player being able to decide the starting side for everyone. The knife round's
   winning captain is now the only one whose `!stay` / `!switch` counts, matching what the
   chat commands already enforced.
