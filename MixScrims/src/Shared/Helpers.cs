@@ -401,8 +401,13 @@ public sealed partial class MixScrims
     /// </summary>
 	internal MapDetails? GetMapByWorkshopId(string workshopId)
 	{
+		// Compare resolved ids so a `ws:`-prefixed entry and a bare numeric argument match.
+		var wanted = MapDetails.ResolveWorkshopId(workshopId);
+		if (wanted == null)
+			return null;
+
 		return mapsConfig.Maps.FirstOrDefault(m =>
-			string.Equals(m.WorkshopId, workshopId, StringComparison.OrdinalIgnoreCase));
+			string.Equals(m.ResolvedWorkshopId, wanted, StringComparison.OrdinalIgnoreCase));
 	}
 
 	/// <summary>
@@ -468,18 +473,13 @@ public sealed partial class MixScrims
     private readonly HashSet<int> _loggedDisposedPlayerHashes = new();
 
     /// <summary>
-    /// Safely reads <see cref="IPlayer.SteamID"/> from a possibly-null or possibly-disposed
-    /// player reference. Returns <c>0UL</c> on any failure (null, ObjectDisposedException,
-    /// or any other exception). Use this for LINQ predicates and projections over the plugin's
-    /// stored roster lists (<c>playingCtPlayers</c>, <c>playingTPlayers</c>, <c>pickedCtPlayers</c>,
-    /// <c>pickedTPlayers</c>, <c>readyPlayers</c>) — SwiftlyS2 may dispose the underlying Player
-    /// object between the time we added it and the time we read it, and every direct property
-    /// access throws <see cref="ObjectDisposedException"/> on a disposed object.
+    /// Reads <see cref="IPlayer.SteamID"/> from a possibly-null or possibly-disposed reference,
+    /// returning <c>0UL</c> on any failure.
     /// </summary>
     /// <remarks>
-    /// Real players always have a non-zero SteamID; only bots return <c>0UL</c> from a live
-    /// read. Rosters never contain bots (they are filtered upstream), so a returned <c>0UL</c>
-    /// from a roster entry unambiguously means "disposed".
+    /// SwiftlyS2 can dispose a Player between the time it was added to a roster list and the time
+    /// it is read, and every direct property access then throws, so roster LINQ must go through
+    /// this. Rosters never contain bots, so a returned <c>0UL</c> unambiguously means disposed.
     /// </remarks>
     internal ulong SafeSteamId(IPlayer? player)
     {
@@ -543,23 +543,19 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Safely reads the player's name from a possibly-null or possibly-disposed player
-    /// reference. Returns a sentinel string (<c>&lt;null&gt;</c>, <c>&lt;disposed&gt;</c>, or
-    /// <c>&lt;error&gt;</c>) on any failure, and a <c>Slot {id}</c> fallback (via
-    /// <see cref="SafePlayerId"/>) when the name is empty. Use this for structured-log
-    /// <c>{PlayerName}</c> placeholders over the plugin's stored roster lists so log formatting
-    /// never throws when SwiftlyS2 has disposed the underlying Player object between the time we
-    /// added it and the time we read it. Same disposal-safety rationale as
-    /// <see cref="SafeSteamId"/>.
+    /// Reads a player's name from a possibly-null or possibly-disposed reference, falling back to
+    /// <c>Slot {id}</c> or a sentinel (<c>&lt;null&gt;</c>, <c>&lt;disposed&gt;</c>, <c>&lt;error&gt;</c>).
     /// </summary>
+    /// <remarks>
+    /// <b>Call only below an <see cref="IsPlayerValid"/> guard, and only on the game thread.</b>
+    /// <c>IPlayer.Name</c> derefs a ServerSideClient pointer unguarded, so a torn-down client
+    /// SIGSEGVs the host - the catch below cannot contain that.
+    /// </remarks>
     internal string SafePlayerName(IPlayer? player)
     {
         if (player is null) return "<null>";
         try
         {
-            // IPlayer.Name is a slot-indexed engine lookup. Controller.PlayerName instead walks
-            // the controller's schema memory, which SIGSEGVs the host (uncatchable) once the
-            // controller is torn down - try/catch here would not save us.
             var name = player.Name;
             return string.IsNullOrEmpty(name) ? $"Slot {SafePlayerId(player)}" : name;
         }

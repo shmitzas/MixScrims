@@ -112,6 +112,9 @@ partial class MixScrims
             LoadWarmupConfig();
         }
 
+        if (MatchState == MatchState.MapVoting)
+            ScheduleMapVoteForJoiner(playerSlot);
+
         try
         {
             var player = Core.PlayerManager.GetPlayer(playerSlot);
@@ -359,6 +362,10 @@ partial class MixScrims
     /// <summary>
     /// Handles the removal and cleanup of a player who has disconnected from the match.
     /// </summary>
+    /// <remarks>
+    /// Steps run isolated under <see cref="RunDisconnectCleanupStep"/>: one aborting would leave
+    /// the leaver in rosters, votes and menus for the rest of the match.
+    /// </remarks>
     internal void HandleDisconnectedPlayer(IPlayer? player)
     {
         if (player == null)
@@ -380,11 +387,14 @@ partial class MixScrims
         // that make later reads throw ObjectDisposedException from LINQ predicates - the exact
         // crash class the log showed at ForceReady.cs:69. SafeSteamId returns 0 on disposed
         // refs so the RemoveAll itself never throws on the entries it's removing.
-        readyPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-        pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-        pickedTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-        playingCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-        playingTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+        RunDisconnectCleanupStep("roster sweep", () =>
+        {
+            readyPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            pickedTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            playingCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            playingTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+        });
 
         // Cache the disconnecting player's SteamID once. If the IPlayer is already disposed
         // by the time this handler runs, steamId will be 0 and the targeted per-player
@@ -395,46 +405,39 @@ partial class MixScrims
         // Cache player name for logging since Controller might become invalid during disconnect
         var playerName = SafePlayerName(player);
 
-        freshlyJoinedPlayers.Remove(player.Slot);
-        HandlePlayerDisconnectRtv(steamId);
-        forcedToSpectator.Remove(steamId);
-
-        if (steamId != 0 && pickedCtPlayers.Any(p => SafeSteamId(p) == steamId))
+        RunDisconnectCleanupStep("join + rtv state", () =>
         {
-            pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-            if (cfg.DetailedLogging)
+            freshlyJoinedPlayers.Remove(disconnectingPlayerSlot);
+            HandlePlayerDisconnectRtv(steamId);
+            forcedToSpectator.Remove(steamId);
+            playerColors.Remove(disconnectingPlayerSlot);
+        });
+
+        RunDisconnectCleanupStep("roster removal", () =>
+        {
+            if (steamId == 0) return;
+
+            if (pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedCtPlayers.", playerName);
-        }
 
-        if (steamId != 0 && pickedTPlayers.Any(p => SafeSteamId(p) == steamId))
-        {
-            pickedTPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-            if (cfg.DetailedLogging)
+            if (pickedTPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedTPlayers.", playerName);
-        }
 
-        if (steamId != 0 && playingCtPlayers.Any(p => SafeSteamId(p) == steamId))
-        {
-            playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-            if (cfg.DetailedLogging)
+            if (playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingCtPlayers.", playerName);
-        }
 
-        if (steamId != 0 && playingTPlayers.Any(p => SafeSteamId(p) == steamId))
-        {
-            playingTPlayers.RemoveAll(p => SafeSteamId(p) == steamId);
-            if (cfg.DetailedLogging)
+            if (playingTPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingTPlayers.", playerName);
-        }
-
-        playerColors.Remove(player.PlayerID);
+        });
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.PickingTeam)
         {
-            if (!cfg.DisableCaptains)
+            RunDisconnectCleanupStep("picking-team captain", () =>
             {
+                if (cfg.DisableCaptains) return;
+
                 // IsSamePlayer, not a raw SteamID compare: a disposed reference would throw here
                 // and abort every cleanup step below, and every bot shares SteamID 0.
                 if (IsSamePlayer(player, captainCt))
@@ -447,15 +450,17 @@ partial class MixScrims
                     AssignCaptain(Team.T, null);
                     StartTeamPickingPhase();
                 }
-            }
+            });
         }
 
         if (matchState == MatchState.KnifeRound
             || matchState == MatchState.MapChosen
             || matchState == MatchState.Timeout)
         {
-            if (!cfg.DisableCaptains)
+            RunDisconnectCleanupStep("match captain succession", () =>
             {
+                if (cfg.DisableCaptains) return;
+
                 if (cfg.DetailedLogging)
                     logger.LogInformation("HandleDisconnectedPlayer: MatchState is {MatchState}", matchState);
                 if (IsSamePlayer(player, captainCt))
@@ -469,12 +474,8 @@ partial class MixScrims
                     var newCaptain = playingCtPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
-                    {
-                        var newCaptainName = newCaptain != null && IsPlayerValid(newCaptain) 
-                            ? newCaptain.Name 
-                            : "None";
-                        logger.LogInformation("HandleDisconnectedPlayer: New CT captain is {NewCaptain}", newCaptainName);
-                    }
+                        logger.LogInformation("HandleDisconnectedPlayer: New CT captain is {NewCaptain}",
+                            newCaptain != null && IsPlayerValid(newCaptain) ? SafePlayerName(newCaptain) : "None");
 
                     PickCtCaptain(newCaptain);
                 }
@@ -487,58 +488,61 @@ partial class MixScrims
                     var newCaptain = playingTPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
 
                     if (cfg.DetailedLogging)
-                    {
-                        var newCaptainName = newCaptain != null && IsPlayerValid(newCaptain) 
-                            ? newCaptain.Name 
-                            : "None";
-                        logger.LogInformation("HandleDisconnectedPlayer: New T captain is {NewCaptain}", newCaptainName);
-                    }
+                        logger.LogInformation("HandleDisconnectedPlayer: New T captain is {NewCaptain}",
+                            newCaptain != null && IsPlayerValid(newCaptain) ? SafePlayerName(newCaptain) : "None");
+
                     PickTCaptain(newCaptain);
                 }
-            }
+            });
         }
 
         if (matchState == MatchState.PickingStartingSide)
         {
-            if (!cfg.DisableCaptains && IsSamePlayer(player, winnerCaptain))
+            RunDisconnectCleanupStep("starting-side captain", () =>
             {
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is winner captain");
-                StayStartingSides(winnerCaptain);
-            }
+                if (!cfg.DisableCaptains && IsSamePlayer(player, winnerCaptain))
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is winner captain");
+                    StayStartingSides(winnerCaptain);
+                }
+            });
         }
 
-        if (steamId != 0 && readyPlayers.Any(p => SafeSteamId(p) == steamId))
+        RunDisconnectCleanupStep("ready list", () =>
         {
+            if (steamId == 0 || !readyPlayers.Any(p => SafeSteamId(p) == steamId)) return;
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removing {PlayerName} from readyPlayers.", playerName);
             RemovePlayerFromReadyList(player, true);
-        }
+        });
 
-        PunishOnLeave(player);
+        RunDisconnectCleanupStep("leave punishment", () => PunishOnLeave(player));
 
-        try
+        RunDisconnectCleanupStep("close active menu", () =>
         {
             if (IsPlayerValid(player))
-            {
                 Core.MenusAPI.CloseActiveMenu(player);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "HandleDisconnectedPlayer: Error closing active menu for player {PlayerName}", playerName);
-        }
+        });
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
-        {
-            CheckReadyPlayersToStart();
-        }
+            RunDisconnectCleanupStep("ready check", CheckReadyPlayersToStart);
 
-        CheckAutoResetOnLeave();
+        RunDisconnectCleanupStep("auto reset on leave", CheckAutoResetOnLeave);
 
         // Last, and self-guarded: resolving a vote here can end the round, queue a timeout or
         // kick someone, so every cleanup above must already have run against the leaver.
-        ReconcileVotesAfterDisconnect(player);
+        RunDisconnectCleanupStep("vote reconcile", () => ReconcileVotesAfterDisconnect(player));
+    }
+
+    /// <summary>Runs one disconnect-cleanup step, logging and swallowing anything it throws.</summary>
+    private void RunDisconnectCleanupStep(string step, Action body)
+    {
+        try { body(); }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "HandleDisconnectedPlayer: {Step} step failed; continuing with the remaining cleanup.", step);
+        }
     }
 
     /// <summary>
@@ -571,27 +575,18 @@ partial class MixScrims
     }
 
     /// <summary>
-    /// Post-mode reconciler: after a team change has actually been committed by the engine, do
-    /// two things:
-    /// (1) Overflow demote - if the just-committed player is on CT or T but is NOT in that team's
-    ///     plugin roster, force them back to Spectator via <see cref="ScheduleForceToSpectator"/>.
-    ///     This catches CS2's silent restore-at-round-start where a specced player is auto-placed
-    ///     onto their old team without going through <see cref="HandlePlayerChangeTeam"/>. Fires
-    ///     regardless of <see cref="preventNotPickedPlayersFromJoiningOngoingMatch"/> as
-    ///     defense-in-depth against that bypass. The deferred-spec-then-fresh-join scenario is
-    ///     unaffected because the fresh joiner is added to the roster by
-    ///     <see cref="HandleActiveMatchJoin"/>'s Pre hook before this Post hook runs.
-    /// (2) Prune - if a tracked player has moved off their tracked team (e.g. voluntary
-    ///     Spectator move, or CT-&gt;T switch), remove them from the old team's roster. Only
-    ///     runs when prevention is off - with prevention on, reservations are intentionally held
-    ///     for the original occupant.
-    /// Both branches are skipped while <see cref="isMovingPlayersToTeams"/> is set (halftime
-    /// side-swap / knife-&gt;match / stay-or-switch), because those programmatic swaps commit
-    /// team changes for tracked players without going through <see cref="HandleActiveMatchJoin"/>.
-    /// The <see cref="ScheduleForceToSpectator"/> recursion is short-circuited because its own
-    /// <c>SwitchTeamAsync(Spectator)</c> commit hits this hook with <c>committedTeam=Spectator</c>,
-    /// which is neither CT nor T.
+    /// Reconciles the rosters against a team change the engine has already committed.
     /// </summary>
+    /// <remarks>
+    /// Demotes a player committed to CT or T who is not in that team's roster, which catches CS2's
+    /// silent restore-at-round-start placing a specced player back on their old team without going
+    /// through <see cref="HandlePlayerChangeTeam"/>; that bypass is why the demote fires regardless
+    /// of <see cref="preventNotPickedPlayersFromJoiningOngoingMatch"/>. Pruning a tracked player
+    /// off their old roster runs only when prevention is off, since reservations are otherwise
+    /// held for the original occupant. Both branches are skipped while
+    /// <see cref="isMovingPlayersToTeams"/> is set - programmatic swaps commit team changes for
+    /// tracked players without passing <see cref="HandleActiveMatchJoin"/>.
+    /// </remarks>
     [GameEventHandler(HookMode.Post)]
     public HookResult HandleEventPlayerTeamPost(EventPlayerTeam @event)
     {
@@ -676,13 +671,13 @@ partial class MixScrims
     }
 
     /// <summary>
-    /// Handles a player's request to change teams during a match, enforcing team selection rules based on the current
-    /// match state.
+    /// Validates a team-join request against the current match state and roster capacity.
     /// </summary>
+    /// <param name="player">The player requesting the move.</param>
+    /// <param name="teamTojoin">The team being joined.</param>
     /// <param name="preSwapTeam">
-    /// Authoritative pre-swap team from <c>EventPlayerTeam.OldTeam</c> when this call originates
-    /// from the game-event Pre hook. Pass -1 (default) when unavailable (jointeam console command,
-    /// deferred spec move); the silent-restore adopt block will then fall back to reading
+    /// Pre-swap team from <c>EventPlayerTeam.OldTeam</c>; -1 when unavailable (jointeam console
+    /// command, deferred spec move), which makes the adopt block fall back to
     /// <c>player.Controller.TeamNum</c>.
     /// </param>
     public HookResult HandlePlayerChangeTeam(IPlayer? player, int teamTojoin, int preSwapTeam = -1)
@@ -742,28 +737,18 @@ partial class MixScrims
                 return HookResult.Continue;
             }
 
-            // Silent-restore rescue: CS2 auto-restores a mid-match reconnecter's previous team
-            // without firing EventPlayerTeam through our validation path, so their SteamID never
-            // lands in playingCtPlayers/playingTPlayers. When the engine's halftime swap later
-            // fires EventPlayerTeam for them, this handler sees them as untracked and the
-            // untracked branch below rejects the swap + ScheduleForceToSpectator kicks in - the
-            // exact "halftime dumps late joiners to spec" symptom. Adopt them into the playing
-            // list of their pre-swap engine team so the swap goes through, then leave it to
-            // ResyncPlayingListsFromEngine (Match/Main.cs, called from HandleRoundStart+1s in
-            // Match/Events.cs) to move them to the correct post-swap side by SteamID reconciliation.
+            // Silent-restore rescue: CS2 returns a mid-match reconnecter to their previous team
+            // without firing EventPlayerTeam through validation, so their SteamID never reaches
+            // playingCtPlayers/playingTPlayers and the engine's later halftime swap reads them as
+            // untracked. Adopt them onto their pre-swap team here and let
+            // ResyncPlayingListsFromEngine move them to the correct post-swap side.
             //
-            // Only adopt for halftime / side-pick moves (teamTojoin is a playing team). When
-            // teamTojoin is Spec, this is a deliberate spec-force move (e.g. from
-            // ScheduleForceToSpectator's SwitchTeamAsync(Team.Spectator) call) - adopting would
-            // create a stale playing-list entry AND cause the ScheduleForceToSpectator retry to
-            // see the player as tracked (via IsPlayerTrackedForActiveMatch) and exit early,
-            // leaving the player on Spec while the plugin still lists them on a playing team.
-            // Let those moves fall through to the normal validation path, which correctly
-            // removes stale entries via the Spectator branch of HandlePlayerJoinTeam.
+            // Deliberately not adopted when teamTojoin is Spec: that is a forced spec move, and
+            // adopting would both leave a stale playing-list entry and make the
+            // ScheduleForceToSpectator retry see the player as tracked and exit early.
             //
-            // Prefer the payload's OldTeam (threaded from HandleEventPlayerTeam) over reading
-            // player.Controller.TeamNum, since the schema field's update timing relative to the
-            // Pre hook is engine-version dependent while the payload value is not.
+            // OldTeam from the payload beats player.Controller.TeamNum - the schema field's update
+            // timing relative to the Pre hook is engine-version dependent.
             int adoptTeam = preSwapTeam;
             if (adoptTeam < 0)
             {
@@ -960,22 +945,17 @@ partial class MixScrims
     }
 
     /// <summary>
-    /// Shared implementation for validating a team-join request during an active match state
-    /// (KnifeRound, Match, PickingStartingSide, Timeout) for either CT or T. Handles re-joins
-    /// (existing listed players) and caps capacity at
-    /// <c>min(listCount, actualCount) &lt; MinimumReadyPlayers/2</c> - the join is admitted
-    /// whenever EITHER the plugin roster OR the physical team has room. This lets an
-    /// untracked spec player fill a vacated slot as soon as the scoreboard shows the team
-    /// as understaffed (disconnected picked player, roster ghost that outlived cleanup,
-    /// picked player who self-spec'd), instead of stranding them behind a stale roster
-    /// count. The mismatched-source hazard this handles: silent-restore reconnects add a
-    /// physical player without hitting this method, so <c>actualCount</c> can exceed
-    /// <c>listCount</c>. Using <c>min</c> avoids blocking a legitimate replacement in that
-    /// window; <see cref="HandleEventPlayerTeamPost"/> still demotes the untracked physical
-    /// join. <c>actualCount</c> itself is controller-derived (see <see cref="GetPlayingPlayers"/>),
-    /// so a player who self-spec'd while alive releases their slot immediately rather than
-    /// holding it until their pawn is destroyed.
+    /// Validates a CT or T join during an active match state, admitting re-joins and capping the
+    /// team at <c>min(listCount, actualCount) &lt; MinimumReadyPlayers/2</c>.
     /// </summary>
+    /// <remarks>
+    /// Silent-restore reconnects add a physical player without passing through here, so
+    /// <c>actualCount</c> can exceed <c>listCount</c>; taking the minimum admits a replacement as
+    /// soon as either count reads under-cap instead of stranding them behind a stale roster, and
+    /// <see cref="HandleEventPlayerTeamPost"/> still demotes the untracked physical join.
+    /// <c>actualCount</c> is controller-derived (see <see cref="GetPlayingPlayers"/>), so a player
+    /// who self-spec'd while alive releases their slot immediately.
+    /// </remarks>
     private HookResult HandleActiveMatchJoin(IPlayer player, Team team, List<IPlayer> playingList, string fullErrorKey)
     {
         int maxTeamSize = cfg.MinimumReadyPlayers / 2;

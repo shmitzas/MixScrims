@@ -21,6 +21,10 @@ public partial class MixScrims
         if (matchState != MatchState.Match)
             return HookResult.Continue;
 
+        // Set before MatchEnded is raised so a subscriber re-reading the state sees Ended. Ended
+        // must stay out of the map-change bail list below - it is the state this callback runs in.
+        mixScrimsService.SetMatchState(MatchState.Ended);
+
         // Fire MatchEnded synchronously here rather than inside the 10s delayed callback:
         // scores are still readable, and IMixScrims consumers get the transition signal
         // before the plugin starts tearing state down.
@@ -45,6 +49,14 @@ public partial class MixScrims
         {
             try
             {
+                // Read at fire time, not schedule time, so a hold taken during the window counts.
+                if (mixScrimsService.IsPhaseProgressionHeld())
+                {
+                    if (cfg.DetailedLogging)
+                        logger.LogInformation("HandleMatchEnd: phase progression held, skipping post-match reset.");
+                    return;
+                }
+
                 // Bail if another component has already initiated a map change in the
                 // meantime - stacking host_workshop_map / map commands across plugins is
                 // the classic CS2 map-transition crash window.
@@ -69,11 +81,13 @@ public partial class MixScrims
                     logger.LogInformation("Match ended, transitioning to Fresh match state.");
                 ResetPluginState();
                 var mapNameStr = engine.GlobalVars.MapName.ToString() ?? string.Empty;
-                var map = new MapDetails
-                {
-                    MapName = mapNameStr,
-                    DisplayName = mapNameStr,
-                };
+                // Reload through the configured entry: a bare name drops the workshop id.
+                var map = (mapNameStr.Length > 0 ? GetMapByName(mapNameStr) : null)
+                    ?? new MapDetails
+                    {
+                        MapName = mapNameStr,
+                        DisplayName = mapNameStr,
+                    };
                 LoadMap(map);
             }
             catch (Exception ex)
@@ -172,30 +186,12 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Overrides the engine's per-team spawn/max-player counts to MaxClients to neutralize
-    /// CS2's built-in <c>mp_limitteams</c> / auto-balance behavior, which otherwise force-
-    /// moves players to Spectator at side switches (halftime + every OT halftime). Based
-    /// on the well-known TeamLimitFix pattern (OniquirAK/Fixes/TeamLimitFix.cs).
-    /// </summary>
-    /// <summary>
-    /// Overrides the engine's per-team spawn/max-player counts to MaxClients to neutralize
-    /// CS2's built-in <c>mp_limitteams</c> / auto-balance behavior, which otherwise force-
-    /// moves players to Spectator at side switches (halftime + every OT halftime). Based
-    /// on the well-known TeamLimitFix pattern (OniquirAK/Fixes/TeamLimitFix.cs).
+    /// Raises the engine's per-team spawn and max-player counts to MaxClients so CS2's
+    /// <c>mp_limitteams</c> auto-balance cannot force players to Spectator at a side switch.
     /// </summary>
     /// <remarks>
-    /// SAFETY: <c>CCSGameRules</c> is a native schema entity. Dereferencing a null or
-    /// invalid pointer, or writing to schema fields after the entity has been freed, will
-    /// segfault the CS2 server process (not a managed exception - the whole server dies).
-    /// Every access is therefore guarded by:
-    ///   1. A try/catch around the entire body (covers <c>InvalidOperationException</c>
-    ///      thrown by <c>Core.EntitySystem</c> when called too early, plus any native
-    ///      access violations the runtime can surface).
-    ///   2. An explicit null check on the returned reference.
-    ///   3. An <c>IsValid</c> check (point-in-time validity of the underlying entity).
-    ///   4. A sanity check that <c>MaxClients</c> is a positive value before writing.
-    /// Never call this method outside the main game thread (round/match event handlers
-    /// and <c>NextTick</c> callbacks are safe; arbitrary scheduler delays are too).
+    /// <c>CCSGameRules</c> is a native schema entity - a null, invalid or freed pointer segfaults
+    /// the CS2 server process instead of throwing, so this is main-game-thread only.
     /// </remarks>
     internal void RelaxEngineTeamLimits(string callSite)
     {
@@ -217,9 +213,6 @@ public partial class MixScrims
             int maxPlayers = Core.Engine.GlobalVars.MaxClients;
             if (maxPlayers <= 0)
             {
-                // Defensive: MaxClients should always be positive on a running server, but
-                // if it ever isn't, writing a zero/negative cap would make CS2 worse, not
-                // better. Bail rather than corrupt the schema.
                 logger.LogWarning("RelaxEngineTeamLimits[{Site}]: MaxClients={Max} is not positive - skipping override", callSite, maxPlayers);
                 return;
             }
@@ -234,35 +227,27 @@ public partial class MixScrims
         }
         catch (Exception ex)
         {
-            // Catch-all on purpose: GetGameRules can throw InvalidOperationException when
-            // the entity system is not yet initialized, and a stale/freed schema pointer
-            // could theoretically surface as a managed exception. We must never let an
-            // exception from this defense-in-depth helper crash the plugin's event flow.
+            // GetGameRules throws when the entity system is not yet initialized, and a stale
+            // schema pointer can surface as a managed exception; never let this helper break the
+            // event flow it defends.
             logger.LogError(ex, "RelaxEngineTeamLimits[{Site}]: failed to override engine team limits (exception swallowed)", callSite);
         }
     }
 
     /// <summary>
     /// Drives a round transition through <c>CCSGameRules::TerminateRound</c> instead of
-    /// <c>mp_restartgame</c>. Both reach <c>RestartRound()</c>, but only <c>mp_restartgame</c>
-    /// takes its complete-reset branch, which is the confirmed segfault site on the 3rd match
-    /// of a server process. Match-start callers must pair this with
-    /// <see cref="ResetMatchStartState"/> — TerminateRound does NOT zero scores, the round
-    /// counter, or player money the way <c>mp_restartgame</c> did.
+    /// <c>mp_restartgame</c>, whose complete-reset branch is the confirmed segfault site.
     /// </summary>
     /// <remarks>
-    /// Safe from <c>Match</c>, <c>PickingTeam</c> and <c>KnifeRound</c>. The knife round has to
-    /// arm <see cref="pendingKnifeRoundStart"/> first — the <c>round_end</c> this fires would
-    /// otherwise land in <c>HandleRoundEndOnKnifeRound</c> and be read as the knife round
-    /// having been won. Cannot be used from <c>Warmup</c>: <c>TerminateRound</c> is a no-op
-    /// while <c>WarmupPeriod</c> is set, so warmup resets through
-    /// <c>mp_warmup_start</c> + <see cref="ResetWarmupState"/> instead.
+    /// Does not zero scores, the round counter or player money, so match-start callers must pair
+    /// this with <see cref="ResetMatchStartState"/>; the knife round must arm
+    /// <see cref="pendingKnifeRoundStart"/> first or the <c>round_end</c> this fires reads as the
+    /// knife round having been won; and it is a no-op while <c>WarmupPeriod</c> is set, so warmup
+    /// resets through <c>mp_warmup_start</c> + <see cref="ResetWarmupState"/> instead. A caller
+    /// that lifted a pause must re-apply it when this returns false - no restart means no
+    /// <c>round_prestart</c>, which is what makes a phase pause stick.
     /// </remarks>
-    /// <returns>
-    /// <c>true</c> when <c>TerminateRound</c> was dispatched. Callers that lifted a pause in
-    /// anticipation of the restart must re-apply it on <c>false</c> — no restart means no
-    /// <c>round_prestart</c>, and the prestart hook is what makes a phase pause stick.
-    /// </returns>
+    /// <returns><c>true</c> when <c>TerminateRound</c> was dispatched.</returns>
     internal bool RestartRoundManually(string callSite, RoundEndReason reason, float delay)
     {
         try
@@ -274,8 +259,8 @@ public partial class MixScrims
                 return false;
             }
 
-            // TerminateRound is a no-op during warmup, so a stuck warmup would silently
-            // swallow the match start rather than surfacing here.
+            // TerminateRound is a no-op during warmup, so a stuck warmup would otherwise swallow
+            // the match start silently.
             if (gameRules.WarmupPeriod)
             {
                 logger.LogWarning("RestartRoundManually[{Site}]: still in warmup - skipping restart.", callSite);
@@ -298,36 +283,30 @@ public partial class MixScrims
     private const float RoundRestartHoldSeconds = 3600f;
 
     /// <summary>
-    /// Parks CS2's pending round restart so <c>CCSGameRules::Think</c> cannot fire it while a
-    /// pick phase is open. <c>TerminateRound</c> arms <c>m_flRestartRoundTime</c> with
-    /// <c>curtime + mp_round_restart_delay</c> (3s out of knife_round.cfg), which turns the
-    /// starting-side pick into a race against how long the captain takes to click: win it and the
-    /// phase sees a single round transition, lose it and the engine restarts the round underneath
-    /// the phase while <see cref="StartMatch"/> stacks a second one on top. See repo memory
-    /// <c>mixscrims-mp-restartgame-team-limits-segv.md</c> (seventh pass).
+    /// Parks CS2's pending round restart so <c>CCSGameRules::Think</c> cannot fire it while a pick
+    /// phase is open - <c>TerminateRound</c> arms <c>m_flRestartRoundTime</c> at
+    /// <c>curtime + mp_round_restart_delay</c>, which would otherwise land mid-pick.
     /// </summary>
     internal bool HoldPendingRoundRestart(string callSite)
         => SetPendingRoundRestart(callSite, RoundRestartHoldSeconds);
 
     /// <summary>
     /// Hands the parked restart back to the engine so it lands <paramref name="delay"/> seconds
-    /// from now. Reuses the restart the knife round's own <c>round_end</c> already armed, so the
-    /// match starts with exactly one <c>RestartRound</c> and — unlike
-    /// <see cref="RestartRoundManually"/> — no synthetic <c>GameCommencing</c> <c>round_end</c>
-    /// for K4-LevelRanks / MapChooser / stats trackers to misread.
+    /// from now, reusing the one the knife round's <c>round_end</c> already armed - unlike
+    /// <see cref="RestartRoundManually"/> this emits no synthetic <c>GameCommencing</c>
+    /// <c>round_end</c> for K4-LevelRanks / MapChooser / stats trackers to misread.
     /// </summary>
     /// <returns>
-    /// <c>false</c> when the engine had nothing armed to release; the caller must then create the
-    /// transition itself via <see cref="RestartRoundManually"/>.
+    /// <c>false</c> when nothing was armed to release; the caller must then create the transition
+    /// itself via <see cref="RestartRoundManually"/>.
     /// </returns>
     internal bool ReleasePendingRoundRestart(string callSite, float delay)
         => SetPendingRoundRestart(callSite, delay);
 
     /// <remarks>
-    /// Same native-safety contract as <see cref="RelaxEngineTeamLimits"/> — main game thread only.
-    /// A zero or already-elapsed timer means the engine has no restart left to fire, so there is
-    /// nothing to hold back and nothing to hand over; both directions report that as false rather
-    /// than fabricating a restart that was never scheduled.
+    /// Main game thread only, same native-safety contract as <see cref="RelaxEngineTeamLimits"/>.
+    /// A zero or already-elapsed timer means nothing is armed, which both directions report as
+    /// false rather than fabricating a restart that was never scheduled.
     /// </remarks>
     private bool SetPendingRoundRestart(string callSite, float seconds)
     {

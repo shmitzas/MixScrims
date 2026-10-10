@@ -6,10 +6,10 @@ namespace MixScrims;
 
 public partial class MixScrims
 {
-    [Command("ready", false, "", HelpText = "Marks you as ready for the match to start. Usage: !ready")]
     /// <summary>
-    /// Marks player as ready if they are not already ready. If they are ready, they get informed that they are already ready
+    /// Marks the sending player as ready, or tells them they already are.
     /// </summary>
+    [Command("ready", false, "", HelpText = "Marks you as ready for the match to start. Usage: !ready")]
     public void OnReady(ICommandContext context)
     {
         if (!context.IsSentByPlayer)

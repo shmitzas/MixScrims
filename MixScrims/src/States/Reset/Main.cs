@@ -42,10 +42,15 @@ public partial class MixScrims
         pickedTPlayers.Clear();
         activePickingTeam = null;
         currentPickIndex = 0;
+        teamPickingFinalized = false;
+        nextPickingTeamOverride = NoPickingTeamOverride;
         openPickMenuPoolSlots.Clear();
         votedMaps.Clear();
-        currentBallotDisplayNames.Clear();
+        currentVoteMapNames.Clear();
         mapVoteDeadline = null;
+        // A stale slot here makes ScheduleMapVoteForJoiner early-return for the rest of the session.
+        mapVotePendingJoiners.Clear();
+        mapVotingMenu = null;
         sideVotes.Clear();
         sideVoteWinnerTeam = Team.None;
         startingSideCommitted = false;

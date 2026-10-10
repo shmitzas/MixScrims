@@ -183,9 +183,23 @@ public partial class MixScrims
     /// </summary>
     internal void HandleVoteKickVote(IPlayer voter, Team team, bool voteYes)
     {
-        if (!IsPlayerValid(voter))
+        if (voter is null)
         {
-            logger.LogWarning("HandleVoteKickVote: ignoring vote from invalid/disconnected player {Slot}.", voter?.Slot);
+            logger.LogWarning("HandleVoteKickVote: ignoring vote from a null player reference.");
+            return;
+        }
+
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        var slot = voter.PlayerID;
+        Core.Scheduler.NextTick(() => HandleVoteKickVoteOnGameThread(slot, team, voteYes));
+    }
+
+    private void HandleVoteKickVoteOnGameThread(int slot, Team team, bool voteYes)
+    {
+        var voter = Core.PlayerManager.GetPlayer(slot);
+        if (voter is null || !IsPlayerValid(voter))
+        {
+            logger.LogWarning("HandleVoteKickVote: ignoring vote from invalid/disconnected player {Slot}.", slot);
             return;
         }
 

@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.11.7",
+    Version = "1.12.0",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -48,6 +48,8 @@ public partial class MixScrims : BasePlugin
     // until plugin unload.
     internal bool suppressBuiltInMenus = false;
     internal bool suppressBuiltInCenterHtml = false;
+
+    internal bool phaseProgressionHeld = false;
 
     public MixScrims(ISwiftlyCore core) : base(core)
     {

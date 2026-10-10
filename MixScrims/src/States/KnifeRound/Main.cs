@@ -44,109 +44,19 @@ public partial class MixScrims
     /// </summary>
     internal void StartKnifeRound()
     {
+        // Captured before the state write below; by the decision point the state reads KnifeRound.
+        var previousState = mixScrimsService.GetCurrentMatchState();
+
         mixScrimsService.SetMatchState(MatchState.KnifeRound);
         mixScrimsService.RaiseKnifeRoundStarted();
-        // Team picking is over — clear the per-phase snapshot fields so IMixScrims
-        // consumers reading GetActivePickingTeam / GetCurrentPickIndex don't see stale
-        // values during the knife round.
-        activePickingTeam = null;
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.knife_round"]);
 
-        // Drop any stale (disposed) captain references that survived a reconnect/map change
-        // before we use them below to seed playingCtPlayers/playingTPlayers.
-        EnsureCaptainsAlive();
-
-        if (pickedCtPlayers.Count == 0)
-        {
-            logger.LogWarning("StartKnifeRound: No players picked for CT team. Setting current CT players as playingCtPlayers");
-            var currentCtPlayers = GetPlayersInTeam(Team.CT);
-            playingCtPlayers = currentCtPlayers.ToList();
-        }
-        else
-        {
-            playingCtPlayers = pickedCtPlayers.ToList();
-            pickedCtPlayers.Clear();
-        }
-
-        if (pickedTPlayers.Count == 0)
-        {
-            logger.LogWarning("StartKnifeRound: No players picked for T team. Setting current T players as playingTPlayers");
-            var currentTPlayers = GetPlayersInTeam(Team.T);
-            playingTPlayers = currentTPlayers.ToList();
-        }
-        else
-        {
-            playingTPlayers = pickedTPlayers.ToList();
-            pickedTPlayers.Clear();
-        }
-
-        if (captainCt != null && IsPlayerValid(captainCt))
-        {
-            // Cache captain SteamID once; playingCtPlayers can carry disposed IPlayer refs so
-            // predicate reads use SafeSteamId to avoid ObjectDisposedException per iteration.
-            var captainCtId = captainCt.SteamID;
-            if (!playingCtPlayers.Any(p => SafeSteamId(p) == captainCtId))
-            {
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("StartKnifeRound: Adding manually-set CT Captain {PlayerName} to playingCtPlayers.", captainCt.Name);
-                playingCtPlayers.Add(captainCt);
-            }
-        }
-
-        if (captainT != null && IsPlayerValid(captainT))
-        {
-            var captainTId = captainT.SteamID;
-            if (!playingTPlayers.Any(p => SafeSteamId(p) == captainTId))
-            {
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("StartKnifeRound: Adding manually-set T Captain {PlayerName} to playingTPlayers.", captainT.Name);
-                playingTPlayers.Add(captainT);
-            }
-        }
-
-        if (captainCt == null && playingCtPlayers.Count > 0)
-        {
-            AssignCaptain(Team.CT, playingCtPlayers[0]);
-            if (cfg.DetailedLogging)
-                logger.LogInformation("StartKnifeRound: CT Captain not set, assigning {PlayerName} as CT Captain.", captainCt!.Name);
-        }
-
-        if (captainT == null && playingTPlayers.Count > 0)
-        {
-            AssignCaptain(Team.T, playingTPlayers[0]);
-            if (cfg.DetailedLogging)
-                logger.LogInformation("StartKnifeRound: T Captain not set, assigning {PlayerName} as T Captain.", captainT!.Name);
-        }
-
-        readyPlayers.Clear();
-
-        StopPreMatchAnnouncementTimers();
-
-        if (cfg.ShowReadyStatusInScoreboard)
-            RemoveReadyClanTagsFromAllPlayers();
-
-        // Close any open team picking menus for captains
-        if (captainCt != null && IsPlayerValid(captainCt))
-        {
-            var ctMenu = Core.MenusAPI.GetCurrentMenu(captainCt);
-            if (ctMenu != null)
-            {
-                Core.MenusAPI.CloseMenuForPlayer(captainCt, ctMenu);
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("StartKnifeRound: Closed open menu for CT captain {PlayerName}", captainCt.Name);
-            }
-        }
-
-        if (captainT != null && IsPlayerValid(captainT))
-        {
-            var tMenu = Core.MenusAPI.GetCurrentMenu(captainT);
-            if (tMenu != null)
-            {
-                Core.MenusAPI.CloseMenuForPlayer(captainT, tMenu);
-                if (cfg.DetailedLogging)
-                    logger.LogInformation("StartKnifeRound: Closed open menu for T captain {PlayerName}", captainT.Name);
-            }
-        }
+        // Only the pick phase seals: sealing from elsewhere latches teamPickingFinalized against
+        // empty picked lists, turning the real CompleteTeamPicking into a no-op.
+        if (previousState == MatchState.PickingTeam)
+            FinalizeTeamPicking();
+        else if (cfg.DetailedLogging)
+            logger.LogInformation("StartKnifeRound: entered from {State}, not the pick phase; leaving the pick rosters unsealed.", previousState);
 
         UnpauseMatch();
 
@@ -395,6 +305,20 @@ public partial class MixScrims
             return;
         }
 
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        var slot = captain.PlayerID;
+        Core.Scheduler.NextTick(() => HandleCaptainSideChoiceOnGameThread(slot, choice));
+    }
+
+    private void HandleCaptainSideChoiceOnGameThread(int slot, string choice)
+    {
+        var captain = Core.PlayerManager.GetPlayer(slot);
+        if (captain is null || !IsPlayerValid(captain))
+        {
+            logger.LogWarning("HandleCaptainSideChoice: slot {Slot} left before its {Choice} side pick could be applied.", slot, choice);
+            return;
+        }
+
         CloseMenuForPlayer(captain);
 
         if (cfg.DisableCaptains)
@@ -410,6 +334,13 @@ public partial class MixScrims
             PrintMessageToPlayer(captain, Core.Localizer["command.side_vote.recorded", choice]);
 
             TryCloseTeamSideVote(playerTeam);
+            return;
+        }
+
+        if (!IsSamePlayer(captain, winnerCaptain))
+        {
+            logger.LogWarning("HandleCaptainSideChoice: {Player} is not the winning captain; ignoring their {Choice}.", SafePlayerName(captain), choice);
+            PrintMessageToPlayer(captain, Core.Localizer["error.not_captain"]);
             return;
         }
 
@@ -439,8 +370,8 @@ public partial class MixScrims
         if (votingTeam is not (Team.CT or Team.T)) return;
 
         var roster = votingTeam == Team.CT ? playingCtPlayers : playingTPlayers;
-        // Two sets on purpose: membership decides whose ballot survives, validity decides who we
-        // are still waiting on. Purging on validity would discard a ballot from a team member
+        // Two sets on purpose: membership decides whose vote survives, validity decides who we
+        // are still waiting on. Purging on validity would discard a vote from a team member
         // whose pawn happens to read null at that instant.
         var onTeam = new HashSet<int>();
         var eligible = new HashSet<int>();
@@ -453,7 +384,7 @@ public partial class MixScrims
             if (!IsBot(player) && IsPlayerValid(player)) eligible.Add(slot);
         }
 
-        // A ballot from someone no longer on the team counts toward both the quorum below and
+        // A vote from someone no longer on the team counts toward both the quorum below and
         // the Switch/Stay tally, so leaving it in lets a departed player close and decide the vote.
         foreach (var slot in sideVotes.Keys.Where(k => !onTeam.Contains(k)).ToList())
             sideVotes.Remove(slot);
@@ -532,19 +463,13 @@ public partial class MixScrims
             AssignCaptain(Team.CT, oldTCaptain);
             AssignCaptain(Team.T, oldCtCaptain);
 
-            // Team-name cvars only; the player moves themselves happen inside
-            // StartMatch → MovePlayersToDesignatedTeamsPreMatch below. The older code
-            // wrapped a second `ChangeTeamAsync` loop here inside NextWorldUpdate,
-            // which the engine no-op'd (log shows no paired `ChangeTeam() CTMDBG`),
-            // but the managed calls raced batch 1's still-in-flight pawn transitions
-            // and are the strongest remaining suspect for the 50/50 Switch-only
-            // crash (Stay path never fires this code, Stay never crashes). SetTeamName
-            // itself internally schedules NextTick for its cvar exec, so no wrapper is
-            // needed here.
-            // Fire StartingSideChosen with the WINNING team's post-swap side. For Switch,
-            // that's the opposite of the deciding captain's pre-swap side (captured before
-            // this delayed callback ran). captain?.PlayerPawn.TeamNum was 3 (CT) or 2 (T)
-            // pre-swap; the winning team ends up on the opposite side.
+            // Team-name cvars only - the player moves happen in StartMatch →
+            // MovePlayersToDesignatedTeamsPreMatch below, and a ChangeTeamAsync loop here would
+            // race those still-in-flight pawn transitions. SetTeamName schedules its own NextTick
+            // for the cvar exec, so no wrapper is needed.
+
+            // Only the lists were swapped above, so the pawn still reads its pre-swap team; a
+            // Switch puts the winning team on the opposite side.
             var preSwapTeam = captain?.PlayerPawn?.TeamNum;
             if (preSwapTeam == 3)
                 mixScrimsService.RaiseStartingSideChosen(Team.T);
@@ -562,6 +487,10 @@ public partial class MixScrims
     /// <summary>
     /// Keeps the teams on their starting sides based on the captain's current team.
     /// </summary>
+    /// <remarks>
+    /// <c>StartingSideChosen</c> is read off <paramref name="captain"/>, so every caller must pass
+    /// a winning-side player.
+    /// </remarks>
     internal void StayStartingSides(IPlayer? captain)
     {
         if (!TryCommitStartingSide(nameof(StayStartingSides))) return;

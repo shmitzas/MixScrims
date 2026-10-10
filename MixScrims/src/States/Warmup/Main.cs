@@ -25,13 +25,10 @@ public partial class MixScrims
     /// Applies the ~90 match cvars that no phase cfg ever overrides, once per map.
     /// </summary>
     /// <remarks>
-    /// These used to live in match_start.cfg. Exec'ing all ~112 cvars there froze the server
-    /// for 2-4s at every single match start — the engine skipped 130-240 ticks and every
-    /// client reported <c>high frame misdelivery</c>. The three smaller phase cfgs (36-41
-    /// cvars) never did. Doing it during warmup keeps the cost where nobody is playing.
-    /// Safe to run only once per map because warmup.cfg / teampick.cfg / knife_round.cfg
-    /// never set any of these to a different value — anything they do change is restored by
-    /// match_start.cfg instead.
+    /// Exec'ing all ~112 match cvars in one phase cfg stalls the server for 2-4s and skips
+    /// 130-240 ticks, so the invariant ones are applied during warmup instead. Once per map is
+    /// enough because warmup.cfg / teampick.cfg / knife_round.cfg never set any of these to a
+    /// different value, and anything they do change is restored by match_start.cfg.
     /// </remarks>
     internal void LoadMatchBaseConfig()
     {
@@ -71,8 +68,8 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Loads the warmup configuration for the server and executes overrides based on the current plugin state
-    /// state.
+    /// Applies match_base.cfg and warmup.cfg, then the staging or production overrides for the current plugin state.
+    /// </summary>
     internal void LoadWarmupConfig()
     {
         if (cfg.DetailedLogging)

@@ -5,6 +5,40 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
+## [1.12.0] - 2026-10-09
+
+Must update to this version in order to avoid random crashes.
+
+**API consumers must update (contract 2.8.0).** Drivers now take effect on the next
+game tick rather than immediately, and every member taking a SteamID must be called
+on the game thread. New members let a consumer hold the match at its current phase
+and drive the transitions itself, set which captain picks first, and read the
+configured map pool at any time. See
+[API Reference](https://github.com/shmitzas/MixScrims/wiki/API-Reference).
+
+- Fixed a server crash when clicking any in-game menu button — map voting was the
+  common one, but every other menu could trigger it too.
+- Fixed two team picks landing in the same instant both being applied, which could
+  put a player on the wrong side or end the draft with lopsided teams.
+- Map changes no longer load the wrong map when another plugin, an admin or the
+  game's own end-of-match vote has already queued a next map.
+- Workshop maps are identified by `WorkshopId` alone and `IsWorkshopMap` is gone.
+  Existing `maps.jsonc` files keep working, and the ID may be written `3070596702`
+  or `ws:3070596702`. An entry with an ID but `IsWorkshopMap: false` now loads from
+  the Workshop as its ID always implied — clear the ID to keep it official.
+- Only the knife round's winning captain can decide the starting side, matching what
+  `!stay` / `!switch` already enforced.
+- `!mix_start` now starts the match itself instead of launching a knife round first.
+- New `SkipKnifeRoundWhenPickingAndCaptainsDisabled` (off by default) starts the
+  match straight after teams are assigned. Applies only with `DisableCaptains` and
+  `SkipTeamPicking` both on, and gives up the whole-team starting-side vote.
+- Changing map after a match now comes up in warmup, where `!ready` and RTV work
+  again, instead of carrying the finished match's state across.
+- Players who connect while map voting is running now get the vote menu.
+- A disconnect no longer abandons its own cleanup half-way, so leavers are reliably
+  removed from rosters, the ready list, open votes and pick menus.
+- A map vote abandoned before it finishes no longer changes the map on its own.
+
 ## [1.11.7] - 2026-10-08
 
 - Votes no longer hang when a player leaves mid-vote. Surrender, timeout and vote

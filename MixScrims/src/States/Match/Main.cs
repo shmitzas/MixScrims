@@ -33,15 +33,10 @@ public partial class MixScrims
 
         pendingMatchStartReset = true;
 
-        // Replaces the hand-rolled reset (see repo memory
-        // `mixscrims-mp-restartgame-team-limits-segv.md`). Only mp_restartgame's complete-reset
-        // branch clears the knife round out of CS2's OWN bookkeeping - the round-results strip,
-        // per-player match stats, and all three round counters. Reimplementing that kept missing
-        // fields one at a time. The pick phase still parks the engine's auto-restart, so this is
-        // the single round transition between knife round and match; mp_restartgame overwrites
-        // the parked m_flRestartRoundTime on its way through.
-        //   T+0.5s  exec cfg  (cvars only)
-        //   T+1.0s  mp_restartgame 3 -> RestartRound at T+4s
+        // Only mp_restartgame's complete-reset branch clears the knife round out of CS2's own
+        // bookkeeping - the round-results strip, per-player match stats and all three round
+        // counters. It also overwrites the m_flRestartRoundTime the pick phase parked, so this
+        // stays the single round transition between knife round and match.
         var cfgToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
         {
             if (mixScrimsService.GetCurrentMatchState() != MatchState.Match)
@@ -261,26 +256,12 @@ public partial class MixScrims
                 movedTToCt++;
         }
 
-        // Second reconciliation pass - the first pass only walks TRACKED SteamIDs and cannot
-        // detect a physical-on-team player that was never added to the playing list. This
-        // happens when a player connects mid-match and gets placed by the engine (via
-        // silent-restore reconnect, auto-fill, or a race with ScheduleForceToSpectator)
-        // without their team change hitting HandleActiveMatchJoin's add path. Without this
-        // pass, the tracked list under-counts vs the engine, HandleActiveMatchJoin blocks
-        // legitimate join attempts ("list 5/5, actual 5"), and the resync's own log detects
-        // the drift ("Round start resync complete ... CT:5 T:4, actual CT:5 T:5") but never
-        // corrects it. This pass adopts every authenticated engine player onto the plugin's
-        // tracked list - the correct semantic is "if you're physically on this team when the
-        // round starts, you're playing this round".
-        //
-        // Cap enforcement: the CS2 silent-restore reconnect places a returning player back on
-        // their previous team WITHOUT firing HandlePlayerChangeTeam, so HandleActiveMatchJoin's
-        // capacity check never runs. Without a cap check here, this pass would blindly adopt
-        // the returning player and push the team above MinimumReadyPlayers/2. When the target
-        // side is already at cap we evict the untracked player to Spectator via the same
-        // ScheduleForceToSpectator helper HandleActiveMatchJoin uses for its own "team full"
-        // reject path, and drop any stale SteamID reservation so a next-round rejoin can't
-        // re-admit them through the reservation door.
+        // Second pass: the first only walks tracked SteamIDs, so it cannot see a player the
+        // engine put on a team without the plugin ever adding them. CS2's silent-restore
+        // reconnect does exactly that - it returns a player to their previous team without
+        // firing HandlePlayerChangeTeam, so HandleActiveMatchJoin's capacity check never runs.
+        // Adopt anyone physically on the team, but re-check the cap here and evict past it,
+        // dropping the stale reservation so a next-round rejoin cannot re-admit them.
         int maxTeamSize = cfg.MinimumReadyPlayers / 2;
         int adoptedCt = 0;
         int adoptedT = 0;

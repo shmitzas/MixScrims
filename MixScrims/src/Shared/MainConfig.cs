@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MixScrims;
 
 public class MainConfig
@@ -29,6 +31,8 @@ public class MainConfig
     public bool PreventNotPickedPlayersFromJoiningOngoingMatch { get; set; } = false;
     public bool KickPlayersNotInMatch { get; set; } = false;
     public bool SkipTeamPicking { get; set; } = false;
+    // Also forfeits the whole-team starting-side vote: sides stay as team picking assigned them.
+    public bool SkipKnifeRoundWhenPickingAndCaptainsDisabled { get; set; } = false;
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
@@ -105,7 +109,31 @@ public class MapDetails
     public string DisplayName { get; set; } = string.Empty;
     public string WorkshopId { get; set; } = string.Empty;
     public bool CanBeVoted { get; set; } = true;
-    public bool IsWorkshopMap { get; set; } = false;
+
+    /// <summary>Accepts <c>ws:3070596702</c> or <c>3070596702</c>; null when the value names no workshop item.</summary>
+    public static string? ResolveWorkshopId(string? value)
+    {
+        var id = value?.Trim() ?? string.Empty;
+        if (id.StartsWith("ws:", StringComparison.OrdinalIgnoreCase))
+            id = id[3..].Trim();
+        else if (!long.TryParse(id, out _))
+            return null;
+
+        return id.Length > 0 ? id : null;
+    }
+
+    [JsonIgnore]
+    public string? ResolvedWorkshopId => ResolveWorkshopId(WorkshopId);
+
+    [JsonIgnore]
+    public bool IsWorkshop => ResolvedWorkshopId is not null;
+
+    /// <summary>
+    /// What every map-change command must be given — never <see cref="DisplayName"/>, which the
+    /// engine prefix-matches against installed maps and can resolve to a different map.
+    /// </summary>
+    [JsonIgnore]
+    public string CanonicalId => ResolvedWorkshopId ?? MapName.Trim();
 }
 
 public class VotedMap

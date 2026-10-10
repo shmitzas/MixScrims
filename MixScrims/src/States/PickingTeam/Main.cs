@@ -18,6 +18,15 @@ public partial class MixScrims
     internal Team? activePickingTeam = null;
     internal int currentPickIndex = 0;
 
+    // One-shot: a second pass finds the picked lists cleared and would overwrite the sealed
+    // rosters with live team membership.
+    internal bool teamPickingFinalized = false;
+
+    internal const int NoPickingTeamOverride = -1;
+
+    // int, not Team?: a consumer sets this from a worker thread, and an int cannot tear.
+    internal int nextPickingTeamOverride = NoPickingTeamOverride;
+
     // Slots the currently-open pick menu offers. A disconnect only has to rebuild the menu
     // when it removes one of these; see HandlePlayerDisconnectTeamPickMenu.
     internal readonly HashSet<int> openPickMenuPoolSlots = [];
@@ -28,6 +37,8 @@ public partial class MixScrims
     /// </summary>
     internal void StartTeamPickingPhase()
     {
+        teamPickingFinalized = false;
+
         StopPreMatchAnnouncementTimers();
 
         RemoveReadyClanTagsFromAllPlayers();
@@ -126,18 +137,12 @@ public partial class MixScrims
         // Symmetric to StartMatch / StartKnifeRound.
         RelaxEngineTeamLimits("StartTeamPickingPhase");
 
-        // teampick.cfg no longer ends with `mp_restartgame 1` - the plugin drives the round
-        // transition itself, same as StartMatch (see repo memory
-        // `mixscrims-mp-restartgame-team-limits-segv.md`). The pause is lifted first so the
-        // queued restart isn't held by it, and HandleRoundPrestartPreKnifeRound re-applies
-        // the pause on the round that lands.
-        //   T+1.5s  UnpauseMatch  (also lets teampick.cfg's mp_warmup_end settle first -
-        //                          TerminateRound is a no-op while WarmupPeriod is set)
-        //   T+2.0s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+3.0s
-        // Both callbacks bail if the phase already ended (bot captains auto-pick, so the
-        // whole ladder can complete and hand off to StartKnifeRound within a tick).
-        // If the restart does not dispatch, the pause is re-applied immediately - otherwise
-        // the unpause above is never compensated and the pick phase runs live.
+        // teampick.cfg must not issue mp_restartgame - the plugin owns this round transition.
+        // The unpause has to land first because TerminateRound is a no-op while WarmupPeriod is
+        // set and the cfg's own mp_warmup_end needs a beat to settle;
+        // HandleRoundPrestartPreKnifeRound re-applies the pause on the round that lands. Both
+        // callbacks bail if the phase already ended - bot captains auto-pick, so the whole ladder
+        // can complete within a tick.
         var pickUnpauseToken = Core.Scheduler.DelayBySeconds(1.5f, () =>
         {
             if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam)
@@ -179,20 +184,29 @@ public partial class MixScrims
             mixScrimsService.RaisePlayerPickedForTeam(Team.T, SafeSteamId(captainT), currentPickIndex);
         }
 
-        int teamStarting = Random.Shared.Next(2, 4);
-        var startingTeam = teamStarting == 3 ? Team.CT : Team.T;
-        activePickingTeam = startingTeam;
-        mixScrimsService.RaiseTeamPickingStarted(startingTeam);
-        if (teamStarting == 3)
+        // Consumed here, not at phase entry: every abort above returns before a toss happens.
+        var pickFirst = ConsumeNextPickingTeamOverride()
+            ?? (Random.Shared.Next(2, 4) == 3 ? Team.CT : Team.T);
+        activePickingTeam = pickFirst;
+        mixScrimsService.RaiseTeamPickingStarted(pickFirst);
+        if (pickFirst == Team.CT)
         {
             PromptCaptainToPickPlayer(captainCt, Team.CT);
             return;
         }
-        if (teamStarting == 2)
-        {
-            PromptCaptainToPickPlayer(captainT, Team.T);
-            return;
-        }
+        PromptCaptainToPickPlayer(captainT, Team.T);
+    }
+
+    private Team? ConsumeNextPickingTeamOverride()
+    {
+        var raw = Interlocked.Exchange(ref nextPickingTeamOverride, NoPickingTeamOverride);
+        if (raw == NoPickingTeamOverride)
+            return null;
+
+        var team = (Team)raw;
+        if (cfg.DetailedLogging)
+            logger.LogInformation("StartTeamPickingPhase: {Team} picks first, set through SetNextPickingTeam.", team);
+        return team;
     }
 
     /// <summary>
@@ -281,7 +295,152 @@ public partial class MixScrims
             SetTeamName(Team.CT, captainCt.Name);
             SetTeamName(Team.T, captainT.Name);
         }
+        CompleteTeamPicking();
+    }
+
+    /// <summary>
+    /// Promotes the picked rosters to the playing ones, guarantees both captains and tears down
+    /// the pick phase's presentation.
+    /// </summary>
+    internal void FinalizeTeamPicking()
+    {
+        if (teamPickingFinalized)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("FinalizeTeamPicking: rosters already sealed for this match; ignoring duplicate.");
+            return;
+        }
+        teamPickingFinalized = true;
+
+        activePickingTeam = null;
+
+        EnsureCaptainsAlive();
+
+        if (pickedCtPlayers.Count == 0)
+        {
+            logger.LogWarning("FinalizeTeamPicking: No players picked for CT team. Setting current CT players as playingCtPlayers");
+            var currentCtPlayers = GetPlayersInTeam(Team.CT);
+            playingCtPlayers = currentCtPlayers.ToList();
+        }
+        else
+        {
+            playingCtPlayers = pickedCtPlayers.ToList();
+            pickedCtPlayers.Clear();
+        }
+
+        if (pickedTPlayers.Count == 0)
+        {
+            logger.LogWarning("FinalizeTeamPicking: No players picked for T team. Setting current T players as playingTPlayers");
+            var currentTPlayers = GetPlayersInTeam(Team.T);
+            playingTPlayers = currentTPlayers.ToList();
+        }
+        else
+        {
+            playingTPlayers = pickedTPlayers.ToList();
+            pickedTPlayers.Clear();
+        }
+
+        if (captainCt != null && IsPlayerValid(captainCt))
+        {
+            var captainCtId = captainCt.SteamID;
+            if (!playingCtPlayers.Any(p => SafeSteamId(p) == captainCtId))
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("FinalizeTeamPicking: Adding manually-set CT Captain {PlayerName} to playingCtPlayers.", captainCt.Name);
+                playingCtPlayers.Add(captainCt);
+            }
+        }
+
+        if (captainT != null && IsPlayerValid(captainT))
+        {
+            var captainTId = captainT.SteamID;
+            if (!playingTPlayers.Any(p => SafeSteamId(p) == captainTId))
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("FinalizeTeamPicking: Adding manually-set T Captain {PlayerName} to playingTPlayers.", captainT.Name);
+                playingTPlayers.Add(captainT);
+            }
+        }
+
+        if (captainCt == null && playingCtPlayers.Count > 0)
+        {
+            AssignCaptain(Team.CT, playingCtPlayers[0]);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("FinalizeTeamPicking: CT Captain not set, assigning {PlayerName} as CT Captain.", captainCt!.Name);
+        }
+
+        if (captainT == null && playingTPlayers.Count > 0)
+        {
+            AssignCaptain(Team.T, playingTPlayers[0]);
+            if (cfg.DetailedLogging)
+                logger.LogInformation("FinalizeTeamPicking: T Captain not set, assigning {PlayerName} as T Captain.", captainT!.Name);
+        }
+
+        readyPlayers.Clear();
+
+        StopPreMatchAnnouncementTimers();
+
+        if (cfg.ShowReadyStatusInScoreboard)
+            RemoveReadyClanTagsFromAllPlayers();
+
+        if (captainCt != null && IsPlayerValid(captainCt))
+        {
+            var ctMenu = Core.MenusAPI.GetCurrentMenu(captainCt);
+            if (ctMenu != null)
+            {
+                Core.MenusAPI.CloseMenuForPlayer(captainCt, ctMenu);
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("FinalizeTeamPicking: Closed open menu for CT captain {PlayerName}", captainCt.Name);
+            }
+        }
+
+        if (captainT != null && IsPlayerValid(captainT))
+        {
+            var tMenu = Core.MenusAPI.GetCurrentMenu(captainT);
+            if (tMenu != null)
+            {
+                Core.MenusAPI.CloseMenuForPlayer(captainT, tMenu);
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("FinalizeTeamPicking: Closed open menu for T captain {PlayerName}", captainT.Name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The single exit from a completed pick ladder, and the one place deciding whether a knife
+    /// round runs.
+    /// </summary>
+    internal void CompleteTeamPicking()
+    {
+        if (phaseProgressionHeld)
+        {
+            // Sealed even when held: StartMatch kicks everyone outside the playing rosters.
+            FinalizeTeamPicking();
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CompleteTeamPicking: phase progression is held; rosters sealed, next phase left to the consumer.");
+            return;
+        }
+
+        // Skipping the knife round also drops the captainless whole-team side vote that follows it.
+        if (cfg.SkipKnifeRoundWhenPickingAndCaptainsDisabled && cfg.DisableCaptains && cfg.SkipTeamPicking)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CompleteTeamPicking: knife round skipped by config; starting the match on the sides team picking assigned.");
+            StartMatchWithoutKnifeRound();
+            return;
+        }
+
         StartKnifeRound();
+    }
+
+    /// <summary>
+    /// Seals the rosters and goes straight to the match, skipping the knife round.
+    /// </summary>
+    internal void StartMatchWithoutKnifeRound()
+    {
+        FinalizeTeamPicking();
+        // StartMatch honours KickPlayersNotInMatch on its own tail; kicking here double-fires it.
+        StartMatch();
     }
 
     /// <summary>
@@ -325,7 +484,7 @@ public partial class MixScrims
         {
             logger.LogWarning("PromptCaptainToPickPlayer: No players available to pick.");
             activePickingTeam = null;
-            Core.Scheduler.NextTick(() => StartKnifeRound());
+            Core.Scheduler.NextTick(() => CompleteTeamPicking());
             return;
         }
 
@@ -474,7 +633,16 @@ public partial class MixScrims
 
         if (captainCt == null || !IsPlayerValid(captainCt))
         {
-            logger.LogError("PickCtCaptain: player is invalid, picking random captain for CT team.");
+            if (player == null)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("PickCtCaptain: no captain supplied, picking at random for CT team.");
+            }
+            else
+            {
+                logger.LogError("PickCtCaptain: supplied player is invalid, picking random captain for CT team.");
+            }
+
             AssignCaptain(Team.CT, PickRandomCaptain(Team.CT));
         }
 
@@ -544,7 +712,16 @@ public partial class MixScrims
 
         if (captainT == null || !IsPlayerValid(captainT))
         {
-            logger.LogError("PickTCaptain: player is invalid, picking random captain for T team.");
+            if (player == null)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("PickTCaptain: no captain supplied, picking at random for T team.");
+            }
+            else
+            {
+                logger.LogError("PickTCaptain: supplied player is invalid, picking random captain for T team.");
+            }
+
             AssignCaptain(Team.T, PickRandomCaptain(Team.T));
         }
 
@@ -644,10 +821,68 @@ public partial class MixScrims
     }
 
     /// <summary>
+    /// Re-runs the picker-side guards on the game thread, immediately before the roster mutation.
+    /// </summary>
+    /// <remarks>
+    /// Both entry points validate on the caller's thread and defer the mutation a tick, so two
+    /// picks landing in one tick both clear that check against an untouched roster.
+    /// </remarks>
+    private bool CanApplyPickOnGameThread(Team team, IPlayer picked, string caller)
+    {
+        var state = mixScrimsService.GetCurrentMatchState();
+        if (state != MatchState.PickingTeam)
+        {
+            logger.LogWarning("{Caller}: dropped, match state is {State} (expected PickingTeam).", caller, state);
+            return false;
+        }
+
+        if (activePickingTeam != team)
+        {
+            logger.LogWarning("{Caller}: dropped, the active picking team is {Active}, not {Team}.", caller, activePickingTeam, team);
+            return false;
+        }
+
+        // Slot, not SteamID: every bot reads 0, which collapses the whole bot pool onto one entry.
+        var slot = SafePlayerId(picked);
+        if (slot < 0)
+        {
+            logger.LogWarning("{Caller}: dropped, the picked player's slot could not be read.", caller);
+            return false;
+        }
+        if (pickedCtPlayers.Concat(pickedTPlayers).Any(p => SafePlayerId(p) == slot))
+        {
+            logger.LogWarning("{Caller}: dropped, slot {Slot} is already on a picked roster.", caller, slot);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Assigns the player selected by the CT captain to the CT team.
     /// </summary>
     internal void AssignPickedPlayerToTeamCt(IPlayer captain, string pickedPlayerName, int pickedSlot = -1)
     {
+        if (captain is null)
+        {
+            logger.LogError("AssignPickedPlayerToTeamCt: captain is null");
+            return;
+        }
+
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        var captainSlot = captain.PlayerID;
+        Core.Scheduler.NextTick(() => AssignPickedPlayerToTeamCtOnGameThread(captainSlot, pickedPlayerName, pickedSlot));
+    }
+
+    private void AssignPickedPlayerToTeamCtOnGameThread(int captainSlot, string pickedPlayerName, int pickedSlot)
+    {
+        var captain = Core.PlayerManager.GetPlayer(captainSlot);
+        if (captain is null || !IsPlayerValid(captain))
+        {
+            logger.LogWarning("AssignPickedPlayerToTeamCt: slot {Slot} left before the pick could be applied.", captainSlot);
+            return;
+        }
+
         CloseMenuForPlayer(captain);
         var player = ResolvePickTarget(pickedPlayerName, pickedSlot);
 
@@ -658,6 +893,10 @@ public partial class MixScrims
             PromptCaptainToPickPlayer(captain, Team.CT);
             return;
         }
+
+        // Rejected outright rather than re-prompted: re-prompting would hand CT the turn back.
+        if (!CanApplyPickOnGameThread(Team.CT, player, nameof(AssignPickedPlayerToTeamCt)))
+            return;
 
         pickedCtPlayers.Add(player);
         currentPickIndex++;
@@ -679,7 +918,7 @@ public partial class MixScrims
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
         {
             activePickingTeam = null;
-            Core.Scheduler.NextTick(() => StartKnifeRound());
+            Core.Scheduler.NextTick(() => CompleteTeamPicking());
             return;
         }
 
@@ -691,6 +930,26 @@ public partial class MixScrims
     /// </summary>
     internal void AssignPickedPlayerToTeamT(IPlayer captain, string pickedPlayerName, int pickedSlot = -1)
     {
+        if (captain is null)
+        {
+            logger.LogError("AssignPickedPlayerToTeamT: captain is null");
+            return;
+        }
+
+        // Same thread-pool dispatch as the CT twin above.
+        var captainSlot = captain.PlayerID;
+        Core.Scheduler.NextTick(() => AssignPickedPlayerToTeamTOnGameThread(captainSlot, pickedPlayerName, pickedSlot));
+    }
+
+    private void AssignPickedPlayerToTeamTOnGameThread(int captainSlot, string pickedPlayerName, int pickedSlot)
+    {
+        var captain = Core.PlayerManager.GetPlayer(captainSlot);
+        if (captain is null || !IsPlayerValid(captain))
+        {
+            logger.LogWarning("AssignPickedPlayerToTeamT: slot {Slot} left before the pick could be applied.", captainSlot);
+            return;
+        }
+
         CloseMenuForPlayer(captain);
         var player = ResolvePickTarget(pickedPlayerName, pickedSlot);
 
@@ -701,6 +960,10 @@ public partial class MixScrims
             PromptCaptainToPickPlayer(captain, Team.T);
             return;
         }
+
+        // See the CT twin above.
+        if (!CanApplyPickOnGameThread(Team.T, player, nameof(AssignPickedPlayerToTeamT)))
+            return;
 
         pickedTPlayers.Add(player);
         currentPickIndex++;
@@ -725,7 +988,7 @@ public partial class MixScrims
         if (pickedCtPlayers.Count + pickedTPlayers.Count >= cfg.MinimumReadyPlayers)
         {
             activePickingTeam = null;
-            Core.Scheduler.NextTick(() => StartKnifeRound());
+            Core.Scheduler.NextTick(() => CompleteTeamPicking());
             return;
         }
 
