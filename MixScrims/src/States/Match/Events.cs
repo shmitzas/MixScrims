@@ -81,11 +81,13 @@ public partial class MixScrims
                     logger.LogInformation("Match ended, transitioning to Fresh match state.");
                 ResetPluginState();
                 var mapNameStr = engine.GlobalVars.MapName.ToString() ?? string.Empty;
-                var map = new MapDetails
-                {
-                    MapName = mapNameStr,
-                    DisplayName = mapNameStr,
-                };
+                // Reload through the configured entry: a bare name drops the workshop id.
+                var map = (mapNameStr.Length > 0 ? GetMapByName(mapNameStr) : null)
+                    ?? new MapDetails
+                    {
+                        MapName = mapNameStr,
+                        DisplayName = mapNameStr,
+                    };
                 LoadMap(map);
             }
             catch (Exception ex)

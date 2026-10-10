@@ -13,7 +13,7 @@ MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches wit
 
 **Contract v2.1.0 additions (2026-09):** Six **match flow drivers** (`CastMapVote`, `CastTimeoutVote`, `CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `VolunteerAsCaptain`) that close the input hole left by menu suppression, plus two **menu request events** (`CaptainMenuRequested`, `VolunteerCaptainMenuRequested`). Still purely additive.
 
-**Contract v2.8.0 flow-control additions (2026-10):** `SetPhaseProgressionHeld(bool)` / `IsPhaseProgressionHeld()` — see wiki [Flow control](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Reference#flow-control). These are **not** suppression: suppression moves presentation, these move authority. Keep the two families apart in docs and naming. v2.8.0 also adds `GetConfiguredMapPool()` returning `MapPoolEntry` records — the `maps.jsonc` pool, state-independent and re-read per call, so it is readable during a match where `GetVoteableMapDisplayNames()` (vote-scoped) is empty.
+**Contract v2.8.0 flow-control additions (2026-10):** `SetPhaseProgressionHeld(bool)` / `IsPhaseProgressionHeld()` — see wiki [Flow control](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Reference#flow-control). These are **not** suppression: suppression moves presentation, these move authority. Keep the two families apart in docs and naming. v2.8.0 also adds `GetConfiguredMapPool()` returning `MapPoolEntry` records — the `maps.jsonc` pool, state-independent and re-read per call, so it is readable during a match where `GetVoteableMapDisplayNames()` (vote-scoped) is empty. `MapPoolEntry.WorkshopId` is the resolved id with any `ws:` prefix stripped, and `IsWorkshop` is derived from it.
 
 **Documentation:**
 - [Project Wiki](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki) - Comprehensive guides for installation, configuration, features, and contributing
@@ -376,7 +376,9 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 
 **Map Pool** (`maps.jsonc` → `MapsConfig.Maps`):
 - Configured separately in `maps.jsonc` as a list of `MapDetails` objects
-- Each entry: `MapName`, `DisplayName`, `WorkshopId`, `CanBeVoted`, `IsWorkshopMap`
+- Each entry: `MapName`, `DisplayName`, `WorkshopId`, `CanBeVoted`
+- **Workshop-ness is derived from `WorkshopId`, never a separate flag.** `MapDetails.ResolveWorkshopId` is the one normaliser (accepts `ws:3070596702` and `3070596702`); `IsWorkshop` and `CanonicalId` hang off it, and `LoadMap` / `GetMapByWorkshopId` / `GetConfiguredMapPool` all read those rather than re-deriving. The removed `IsWorkshopMap` property is still ignored silently in an operator's existing file, so do not reintroduce a flag to "support" it.
+- `LoadMap` issues `nextlevel {canonical}` **before** `host_workshop_map` / `changelevel`. `nextlevel` is a server-wide convar any plugin or the built-in end-of-match vote can leave set, and a stale value overrides the change issued after it — see the comment at that call site.
 
 **Vote Kick** (`config.jsonc` → `VoteKick`):
 - `VoteKick.Enabled` - Enable/disable vote kick feature (default true)

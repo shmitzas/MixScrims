@@ -32,6 +32,18 @@ captain picks first instead of leaving it to the coin toss — see
 - A consumer plugin can now read the configured map pool at any time, including during a
   match, so one that runs its own map menu no longer has to parse `maps.jsonc` itself.
   Edits to that file are picked up without a plugin reload.
+- Map changes no longer load the wrong map when another plugin has already picked a next
+  map. MixScrims now sets the next map itself as part of every change, so whatever was
+  queued beforehand — by a map-cycle plugin, an admin, or the game's own end-of-match vote
+  — can no longer override it.
+- Workshop maps are now identified by their `WorkshopId` alone. The `IsWorkshopMap` setting
+  is gone: a map with a workshop ID loads from the Workshop, one without it loads normally.
+  Existing `maps.jsonc` files keep working untouched — the old setting is simply ignored —
+  and the ID may be written either as `3070596702` or `ws:3070596702`. If you had an entry
+  with a workshop ID but `IsWorkshopMap: false`, that map now loads from the Workshop as its
+  ID always implied; clear the ID if you meant it to stay an official map.
+- Reloading the current map after a match no longer loses its workshop ID, so a workshop map
+  reloads as itself instead of falling back to a similarly named official map.
 - Fixed any player being able to decide the starting side for everyone. The knife round's
   winning captain is now the only one whose `!stay` / `!switch` counts, matching what the
   chat commands already enforced.

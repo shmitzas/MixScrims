@@ -216,7 +216,8 @@ public class MixScrimsService : IMixScrims
             if (m == null) continue;
             var mapName = m.MapName ?? string.Empty;
             var displayName = m.DisplayName ?? string.Empty;
-            var workshopId = m.WorkshopId ?? string.Empty;
+            // The resolved id, so a consumer never has to strip a `ws:` prefix itself.
+            var workshopId = m.ResolvedWorkshopId ?? string.Empty;
             // An entry carrying no identifier at all is one ChangeMap could never resolve.
             if (mapName.Length == 0 && displayName.Length == 0 && workshopId.Length == 0) continue;
             result.Add(new MapPoolEntry(mapName, displayName, workshopId, m.CanBeVoted));

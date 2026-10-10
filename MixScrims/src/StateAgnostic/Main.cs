@@ -386,16 +386,21 @@ public sealed partial class MixScrims
             return;
         }
 
+        var canonical = map.CanonicalId;
+        if (string.IsNullOrWhiteSpace(canonical))
+        {
+            logger.LogError("LoadMap: entry '{Map}' carries neither a map name nor a workshop id; skipping map switch.", map.DisplayName);
+            return;
+        }
+
 		if (cfg.DetailedLogging)
-			logger.LogInformation("LoadMap: Executing map change to {Map}", map.MapName);
-        if (map.IsWorkshopMap && !string.IsNullOrWhiteSpace(map.WorkshopId))
-        {
-            engine.ExecuteCommand($"host_workshop_map {map.WorkshopId}");
-        }
-        else
-        {
-            engine.ExecuteCommand($"map {map.MapName}");
-        }
+			logger.LogInformation("LoadMap: Executing map change to {Map}", canonical);
+
+        // `nextlevel` is a server-wide convar any plugin, admin or the built-in end-of-match
+        // vote can leave populated, and a stale value overrides the change issued right after
+        // it. Overwriting it is what makes the command below the one that lands.
+        engine.ExecuteCommand($"nextlevel {canonical}");
+        engine.ExecuteCommand(map.IsWorkshop ? $"host_workshop_map {canonical}" : $"changelevel {canonical}");
     }
 
     /// <summary>

@@ -401,8 +401,13 @@ public sealed partial class MixScrims
     /// </summary>
 	internal MapDetails? GetMapByWorkshopId(string workshopId)
 	{
+		// Compare resolved ids so a `ws:`-prefixed entry and a bare numeric argument match.
+		var wanted = MapDetails.ResolveWorkshopId(workshopId);
+		if (wanted == null)
+			return null;
+
 		return mapsConfig.Maps.FirstOrDefault(m =>
-			string.Equals(m.WorkshopId, workshopId, StringComparison.OrdinalIgnoreCase));
+			string.Equals(m.ResolvedWorkshopId, wanted, StringComparison.OrdinalIgnoreCase));
 	}
 
 	/// <summary>

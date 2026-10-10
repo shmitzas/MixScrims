@@ -28,7 +28,9 @@
 		     v2.8.0 documents the game-thread affinity every member already required,
 		            makes the roster + map-vote reads return snapshots instead of
 		            throwing on a stale player reference, and adds GetConfiguredMapPool
-		            so the map pool is readable outside a live vote.
+		            so the map pool is readable outside a live vote. Its MapPoolEntry
+		            hands out the resolved workshop id (no `ws:` prefix) and derives
+		            IsWorkshop from it, so the two cannot contradict each other.
 		     All existing v1.x methods are preserved for backward compatibility. -->
 		<GenerateAssemblyInfo>true</GenerateAssemblyInfo>
 		<Version>2.8.0</Version>
