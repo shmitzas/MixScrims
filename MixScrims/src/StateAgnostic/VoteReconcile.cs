@@ -25,6 +25,9 @@ public partial class MixScrims
         try { HandlePlayerDisconnectVoteKick(leaver, Team.T); }
         catch (Exception ex) { logger.LogError(ex, "ReconcileVotesAfterDisconnect: T vote kick reconcile failed."); }
 
+        try { HandlePlayerDisconnectVoteKick(leaver, Team.None); }
+        catch (Exception ex) { logger.LogError(ex, "ReconcileVotesAfterDisconnect: server-wide vote kick reconcile failed."); }
+
         try { HandlePlayerDisconnectMapVote(leaver); }
         catch (Exception ex) { logger.LogError(ex, "ReconcileVotesAfterDisconnect: map vote reconcile failed."); }
 
@@ -121,10 +124,10 @@ public partial class MixScrims
     /// </summary>
     internal void HandlePlayerDisconnectVoteKick(IPlayer leaver, Team team)
     {
-        var inProgress = team == Team.CT ? isVoteKickInProgressCt : isVoteKickInProgressT;
-        if (!inProgress) return;
+        var vote = GetVoteKickSlot(team);
+        if (!vote.InProgress) return;
 
-        var target = team == Team.CT ? voteKickTargetCt : voteKickTargetT;
+        var target = vote.Target;
 
         // Nothing left to kick. Through VoteKickResult, never inline: it is the only path that
         // raises VoteKickResult, which a consumer rendering its own UI has nothing else to go on.
@@ -136,32 +139,69 @@ public partial class MixScrims
             return;
         }
 
-        var voters = team == Team.CT ? voteKickVotersCt : voteKickVotersT;
-        var cast = team == Team.CT ? voteKickTotalVotesCastCt : voteKickTotalVotesCastT;
+        if (IsServerWideVoteKey(team))
+        {
+            HandlePlayerDisconnectVoteKickServerWide(leaver, team, vote, target);
+            return;
+        }
+
+        var voters = vote.Voters;
+        var cast = vote.TotalVotesCast;
 
         // No -1 here: StartVoteKick keeps the caller inside the eligible count (it excludes only
         // the target), and the pass check compares the yes count against that same number.
         var recomputed = cast + CountPendingVoters(team, voters, leaver, target);
 
-        var current = team == Team.CT ? voteKickEligibleVotesCt : voteKickEligibleVotesT;
+        var current = vote.EligibleVotes;
         if (recomputed == current) return;
 
         if (cfg.DetailedLogging)
             logger.LogInformation("HandlePlayerDisconnectVoteKick: {Team} eligible {Old} -> {New} ({Cast} cast).",
                 team, current, recomputed, cast);
 
-        if (team == Team.CT)
-            voteKickEligibleVotesCt = recomputed;
-        else
-            voteKickEligibleVotesT = recomputed;
+        vote.EligibleVotes = recomputed;
+        vote.Electorate = recomputed;
 
         SendVoteKickProgressCenterHtml(team);
 
-        var yesCount = team == Team.CT ? voteKickYesCountCt : voteKickYesCountT;
-        if (yesCount >= recomputed)
+        if (vote.YesCount >= recomputed)
         {
-            (team == Team.CT ? voteKickTimerCt : voteKickTimerT)?.Cancel();
+            vote.Timer?.Cancel();
             VoteKickResult(team, true);
+        }
+    }
+
+    /// <summary>
+    /// Re-sizes a server-wide electorate and re-derives the ratio threshold off it, then resolves
+    /// the vote if the ballots in hand already settle it either way.
+    /// </summary>
+    private void HandlePlayerDisconnectVoteKickServerWide(IPlayer leaver, Team team, VoteKickSlot vote, IPlayer? target)
+    {
+        var electorate = ComputeServerWideElectorate(target, leaver);
+        var threshold = ComputeVoteKickThreshold(electorate);
+
+        if (electorate == vote.Electorate && threshold == vote.EligibleVotes) return;
+
+        if (cfg.DetailedLogging)
+            logger.LogInformation("HandlePlayerDisconnectVoteKick: server-wide electorate {OldE} -> {NewE}, threshold {Old} -> {New} ({Cast} cast).",
+                vote.Electorate, electorate, vote.EligibleVotes, threshold, vote.TotalVotesCast);
+
+        vote.Electorate = electorate;
+        vote.EligibleVotes = threshold;
+
+        SendVoteKickProgressCenterHtml(team);
+
+        if (vote.YesCount >= threshold)
+        {
+            vote.Timer?.Cancel();
+            VoteKickResult(team, true);
+            return;
+        }
+
+        if (vote.YesCount + Math.Max(0, electorate - vote.TotalVotesCast) < threshold)
+        {
+            vote.Timer?.Cancel();
+            VoteKickResult(team, false);
         }
     }
 

@@ -179,6 +179,12 @@ public class VoteKickConfig
 {
     public bool Enabled { get; set; } = true;
     public int VoteKickTime { get; set; } = 30;
+
+    // Both read only while a consumer has switched vote kick server-wide; a team vote is
+    // unanimous and has no threshold to tune. Defaults mirror Rtv so the two bars match
+    // out of the box, but they are separate knobs - retuning RTV must not move this one.
+    public int MinimumVotesRequired { get; set; } = 1;
+    public double VoteThresholdRatio { get; set; } = 0.5;
 }
 
 public class RtvConfig

@@ -36,13 +36,8 @@ public partial class MixScrims
     /// Computes the YES-vote threshold required to pass an RTV given the current human count.
     /// Uses ceil(humans * VoteThresholdRatio), floored by MinimumVotesRequired.
     /// </summary>
-    internal int ComputeRtvThreshold(int humanCount)
-    {
-        if (humanCount <= 0)
-            return Math.Max(1, cfg.Rtv.MinimumVotesRequired);
-        int byRatio = (int)Math.Ceiling(humanCount * cfg.Rtv.VoteThresholdRatio);
-        return Math.Max(cfg.Rtv.MinimumVotesRequired, byRatio);
-    }
+    internal int ComputeRtvThreshold(int humanCount) =>
+        ComputeVoteThreshold(humanCount, cfg.Rtv.MinimumVotesRequired, cfg.Rtv.VoteThresholdRatio);
 
     /// <summary>
     /// Drops a voter when they disconnect and re-checks the threshold against the new human count.

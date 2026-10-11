@@ -404,6 +404,28 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
+    /// Announces the change, then resets the match and switches level together once the announcement has been up for <paramref name="announceSeconds"/>.
+    /// </summary>
+    internal void LoadMapAfterMatch(MapDetails map, int announceSeconds)
+    {
+        if (cfg.DetailedLogging)
+            logger.LogInformation("LoadMapAfterMatch: announcing {Map}, switching level in {Seconds}s", map.CanonicalId, announceSeconds);
+
+        // Warmup, not the phase being left: HandleMapChosenNewMapLoad restores this value.
+        stateBeforeMapLoading = MatchState.Warmup;
+        mixScrimsService.SetMatchState(MatchState.MapLoading);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.map.changing", map.Name]);
+
+        var token = Core.Scheduler.DelayBySeconds(Math.Max(0, announceSeconds), () =>
+        {
+            // LoadMap in this same callback: the reset defers its warmup.cfg exec by a tick, which is where the level change hides the stall.
+            ResetPluginState();
+            LoadMap(map);
+        });
+        Core.Scheduler.StopOnMapChange(token);
+    }
+
+    /// <summary>
     /// Schedules a chat announcement to notify players that the specified map is loading after a 15-second delay.
     /// </summary>
     internal void ScheduleMapLoadingAnnouncement(MapDetails map)

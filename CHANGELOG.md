@@ -9,9 +9,31 @@ Notable changes to MixScrims, newest first.
 
 **API consumers may want to update (contract 2.9.0).** New members let a consumer
 suppress the same-team damage hook for a round of its own, ask whether the pick
-rosters have been sealed, read either playing roster by slot so bots are counted, and
-run a map vote during live play without handing the match over to the voting phase.
+rosters have been sealed, read either playing roster by slot so bots are counted,
+run a map vote during live play without handing the match over to the voting phase,
+switch vote kick to a server-wide vote, and change map after a match without the
+server visibly dropping into warmup first.
 See [API Reference](https://github.com/shmitzas/MixScrims/wiki/API-Reference).
+
+- A consumer driving its own post-match flow can now call `ChangeMapAfterMatch(map)`
+  instead of `CancelMatch()` followed by `ChangeMap(map)`. It announces the change
+  immediately and, five seconds later, resets the match and switches level in the same
+  callback — so the reset's `warmup.cfg` exec lands behind the loading screen instead of
+  in front of it. The old pair re-entered warmup on the finished map and left players
+  respawned there, staring at a map about to be discarded, for the whole load delay.
+  `ChangeMap()` is unchanged, and MixScrims' own post-match reload already worked this
+  way.
+
+- Vote kick can now be switched **server-wide** by a consumer plugin via
+  `SetServerWideVoteKick(true)`. In that mode `!votekick` works in any state bar a map
+  load or the post-match teardown, is put to every human on the server instead of one
+  team, and passes on `max(MinimumVotesRequired, ceil(electorate * VoteThresholdRatio))`
+  — the same formula `!rtv` uses — instead of requiring unanimity. Bots neither vote nor
+  count towards the bar, the target is still excluded, and a NO is only an absent YES, so
+  the vote closes early only once the remaining ballots cannot reach the threshold. It
+  reports through `Team.None` on the existing vote-kick events plus new
+  `GetVoteKickTargetServerWide()` / `GetVoteKickTallyServerWide()` reads. Off by default:
+  with no consumer setting it, vote kick behaves exactly as before.
 
 - Map voting can now run as a **deferred vote**: `StartDeferredMapVote(seconds)` opens
   the usual vote — same ballot, same menu, same per-vote chat tally, same winner

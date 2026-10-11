@@ -227,6 +227,18 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
+    /// YES votes needed to carry a vote: ceil(count * ratio), floored by <paramref name="minimumVotes"/>.
+    /// Shared by RTV and the server-wide vote kick so the two cannot drift apart.
+    /// </summary>
+    internal static int ComputeVoteThreshold(int count, int minimumVotes, double ratio)
+    {
+        if (count <= 0)
+            return Math.Max(1, minimumVotes);
+        var byRatio = (int)Math.Ceiling(count * ratio);
+        return Math.Max(minimumVotes, byRatio);
+    }
+
+    /// <summary>
     /// Returns a list of all valid players.
     /// </summary>
     internal List<IPlayer> GetPlayers()
@@ -374,6 +386,24 @@ public sealed partial class MixScrims
     {
         return GetPlayers().FirstOrDefault(p =>
             string.Equals(p.Name, playerName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Resolves a chat-typed target through SwiftlyS2's own matcher, so partial names, #userid,
+    /// SteamID64 and @-groups all behave as they do in every other plugin on the server.
+    /// Ambiguous input resolves to nothing - a kick must never guess between two matches.
+    /// </summary>
+    internal IPlayer? FindTargetByQuery(IPlayer caller, string query, out bool ambiguous)
+    {
+        // IncludeSelf keeps the caller in range so self-targeting keeps its own
+        // message instead of degrading into "not found".
+        var matches = Core.PlayerManager
+            .FindTargettedPlayers(caller, query, TargetSearchMode.IncludeSelf)
+            .Where(IsPlayerValid)
+            .ToList();
+
+        ambiguous = matches.Count > 1;
+        return ambiguous ? null : matches.FirstOrDefault();
     }
 
     internal IPlayer? GetPlayerBySteamId(ulong steamId)

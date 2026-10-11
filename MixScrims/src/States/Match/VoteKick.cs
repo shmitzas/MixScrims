@@ -5,69 +5,148 @@ using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
 
-public partial class MixScrims
+/// <summary>
+/// One vote kick's state. Three exist: CT, T, and the server-wide vote a consumer opts into.
+/// </summary>
+internal sealed class VoteKickSlot
 {
-    // CT team vote kick state
-    internal IPlayer? voteKickTargetCt = null;
-    internal bool isVoteKickInProgressCt = false;
-    internal int voteKickYesCountCt = 0;
-    internal int voteKickEligibleVotesCt = 0;
-    internal int voteKickTotalVotesCastCt = 0;
-    internal CancellationTokenSource? voteKickTimerCt = null;
-    internal HashSet<ulong> voteKickVotersCt = [];
-
-    // T team vote kick state
-    internal IPlayer? voteKickTargetT = null;
-    internal bool isVoteKickInProgressT = false;
-    internal int voteKickYesCountT = 0;
-    internal int voteKickEligibleVotesT = 0;
-    internal int voteKickTotalVotesCastT = 0;
-    internal CancellationTokenSource? voteKickTimerT = null;
-    internal HashSet<ulong> voteKickVotersT = [];
+    internal IPlayer? Target;
+    internal bool InProgress;
+    internal int YesCount;
 
     /// <summary>
-    /// Initiates a vote to kick the specified player from their team. All eligible teammates must vote YES
-    /// for the kick to pass. Any NO vote or timer expiry fails the vote.
+    /// YES votes needed to pass: the whole electorate in a team vote, which is what makes that
+    /// vote unanimous, and the ratio threshold in a server-wide one.
+    /// </summary>
+    internal int EligibleVotes;
+
+    /// <summary>Server-wide only: voters who may still answer, which the ratio is taken over.</summary>
+    internal int Electorate;
+
+    internal int TotalVotesCast;
+    internal CancellationTokenSource? Timer;
+    internal HashSet<ulong> Voters = [];
+
+    internal void Reset()
+    {
+        Target = null;
+        InProgress = false;
+        YesCount = 0;
+        EligibleVotes = 0;
+        Electorate = 0;
+        TotalVotesCast = 0;
+        Timer?.Cancel();
+        Timer = null;
+        Voters.Clear();
+    }
+}
+
+public partial class MixScrims
+{
+    internal readonly VoteKickSlot voteKickCt = new();
+    internal readonly VoteKickSlot voteKickT = new();
+    internal readonly VoteKickSlot voteKickServerWide = new();
+
+    /// <summary>Set only through the API; nothing in the plugin's own paths turns it on.</summary>
+    internal bool serverWideVoteKick = false;
+
+    /// <summary>
+    /// A kick racing a level change resolves against a roster that is about to be rebuilt, so the
+    /// loading states stay closed even in server-wide mode. Ended and Reset are the post-match
+    /// teardown, where a kick races the map change a driver has already queued.
+    /// </summary>
+    internal static bool IsVoteKickAllowedInState(MatchState state) =>
+        state is not (MatchState.MapLoading or MatchState.MapChosen or MatchState.Reset or MatchState.Ended);
+
+    /// <summary>Server-wide votes are keyed <see cref="Team.None"/>, which has no roster of its own.</summary>
+    internal static bool IsServerWideVoteKey(Team team) => team == Team.None;
+
+    internal VoteKickSlot GetVoteKickSlot(Team team) =>
+        team == Team.CT ? voteKickCt
+        : team == Team.T ? voteKickT
+        : voteKickServerWide;
+
+    internal List<IPlayer> GetVoteKickAudience(Team team) =>
+        IsServerWideVoteKey(team) ? GetPlayers() : GetPlayersInTeam(team);
+
+    private void AnnounceVoteKick(Team team, string message)
+    {
+        if (IsServerWideVoteKey(team))
+            PrintMessageToAllPlayers(message);
+        else
+            PrintMessageToTeam(team, message);
+    }
+
+    /// <summary>
+    /// Humans who may still answer a server-wide vote. Bots are excluded from the base as well as
+    /// from the vote, matching RTV - counting a bot that never votes would put the bar out of
+    /// reach on a bot-heavy server.
+    /// </summary>
+    internal int ComputeServerWideElectorate(IPlayer? target, IPlayer? leaver = null)
+    {
+        var targetSteamId = SafeSteamId(target);
+        var count = 0;
+        foreach (var player in GetPlayers())
+        {
+            if (IsBot(player)) continue;
+            if (leaver != null && IsSamePlayer(player, leaver)) continue;
+            var steamId = SafeSteamId(player);
+            if (steamId == 0 || steamId == targetSteamId) continue;
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Clamped to the electorate so a <c>MinimumVotesRequired</c> larger than the server can
+    /// supply cannot put the bar out of reach and strand the vote until its timer expires.
+    /// </summary>
+    internal int ComputeVoteKickThreshold(int electorate)
+    {
+        var threshold = ComputeVoteThreshold(electorate, cfg.VoteKick.MinimumVotesRequired, cfg.VoteKick.VoteThresholdRatio);
+        return electorate > 0 ? Math.Min(threshold, electorate) : threshold;
+    }
+
+    /// <summary>
+    /// Initiates a vote to kick the specified player. A team vote needs every eligible teammate to
+    /// vote YES; a server-wide vote needs the ratio threshold. Either way a timer expiry fails it.
     /// </summary>
     internal void StartVoteKick(IPlayer caller, IPlayer target, Team team)
     {
         var callerName = caller.Name ?? $"#{caller.PlayerID}";
         var targetName = target.Name ?? $"#{target.PlayerID}";
+        var serverWide = IsServerWideVoteKey(team);
+        var slot = GetVoteKickSlot(team);
 
         if (cfg.DetailedLogging)
             logger.LogInformation("StartVoteKick: {Caller} called vote to kick {Target} on team {Team}", callerName, targetName, team);
 
-        // Initialize per-team state
-        if (team == Team.CT)
+        slot.InProgress = true;
+        slot.Target = target;
+        slot.YesCount = 1; // caller auto-votes yes
+        slot.TotalVotesCast = 1;
+        slot.Voters = [caller.SteamID];
+        slot.Timer?.Cancel();
+        slot.Timer = null;
+
+        // Eligible voters = everyone the vote is put to, except the target
+        var audience = GetVoteKickAudience(team);
+        var eligible = audience.Where(p => p.SteamID != target.SteamID).ToList();
+        int eligibleCount;
+
+        if (serverWide)
         {
-            isVoteKickInProgressCt = true;
-            voteKickTargetCt = target;
-            voteKickYesCountCt = 1; // caller auto-votes yes
-            voteKickTotalVotesCastCt = 1;
-            voteKickVotersCt = [caller.SteamID];
-            voteKickTimerCt?.Cancel();
-            voteKickTimerCt = null;
+            eligible = eligible.Where(p => !IsBot(p)).ToList();
+            slot.Electorate = eligible.Count;
+            eligibleCount = ComputeVoteKickThreshold(slot.Electorate);
         }
         else
         {
-            isVoteKickInProgressT = true;
-            voteKickTargetT = target;
-            voteKickYesCountT = 1; // caller auto-votes yes
-            voteKickTotalVotesCastT = 1;
-            voteKickVotersT = [caller.SteamID];
-            voteKickTimerT?.Cancel();
-            voteKickTimerT = null;
+            eligibleCount = eligible.Count;
+            slot.Electorate = eligibleCount;
         }
 
-        // Eligible voters = all team members except the target
-        var teamPlayers = GetPlayersInTeam(team);
-        var eligible = teamPlayers.Where(p => p.SteamID != target.SteamID).ToList();
-        int eligibleCount = eligible.Count;
-
-        if (team == Team.CT)
-            voteKickEligibleVotesCt = eligibleCount;
-        else
-            voteKickEligibleVotesT = eligibleCount;
+        slot.EligibleVotes = eligibleCount;
 
         // Fire VoteKickStarted + the caller's implicit YES cast NOW that all snapshot
         // fields (target, tallies, eligible count) are in place — subscribers reading
@@ -82,8 +161,8 @@ public partial class MixScrims
                     Team: team,
                     VoterSteamId: initiatorSid,
                     VoteYes: true,
-                    CurrentYesCount: team == Team.CT ? voteKickYesCountCt : voteKickYesCountT,
-                    CurrentTotalCast: team == Team.CT ? voteKickTotalVotesCastCt : voteKickTotalVotesCastT,
+                    CurrentYesCount: slot.YesCount,
+                    CurrentTotalCast: slot.TotalVotesCast,
                     EligibleVotes: eligibleCount));
         }
 
@@ -98,36 +177,30 @@ public partial class MixScrims
             return;
         }
 
-        // Count bot votes inline (bots auto-vote yes)
-        int botYesVotes = 0;
-        foreach (var p in menuPlayers.Where(p => IsBot(p)))
+        if (!serverWide)
         {
-            var voterSet = team == Team.CT ? voteKickVotersCt : voteKickVotersT;
-            voterSet.Add(p.SteamID);
-            botYesVotes++;
+            // Count bot votes inline (bots auto-vote yes)
+            int botYesVotes = 0;
+            foreach (var p in menuPlayers.Where(p => IsBot(p)))
+            {
+                slot.Voters.Add(p.SteamID);
+                botYesVotes++;
+            }
+
+            slot.YesCount += botYesVotes;
+            slot.TotalVotesCast += botYesVotes;
         }
 
-        if (team == Team.CT)
-        {
-            voteKickYesCountCt += botYesVotes;
-            voteKickTotalVotesCastCt += botYesVotes;
-        }
-        else
-        {
-            voteKickYesCountT += botYesVotes;
-            voteKickTotalVotesCastT += botYesVotes;
-        }
-
-        // Check if all eligible players already voted yes after bots
-        int currentYes = team == Team.CT ? voteKickYesCountCt : voteKickYesCountT;
-        if (currentYes >= eligibleCount)
+        // Team: everyone already voted yes. Server-wide: the caller alone meets the ratio.
+        if (slot.YesCount >= eligibleCount)
         {
             VoteKickResult(team, true);
             return;
         }
 
-        // Announce to team
-        PrintMessageToTeam(team, Core.Localizer["command.votekick.started", callerName, targetName]);
+        AnnounceVoteKick(team, Core.Localizer[
+            serverWide ? "command.votekick.started.server" : "command.votekick.started",
+            callerName, targetName]);
 
         // Build vote menu
         var builder = Core.MenusAPI
@@ -171,15 +244,12 @@ public partial class MixScrims
         var timer = Core.Scheduler.DelayBySeconds(cfg.VoteKick.VoteKickTime, () => VoteKickResult(team, false));
         Core.Scheduler.StopOnMapChange(timer);
 
-        if (team == Team.CT)
-            voteKickTimerCt = timer;
-        else
-            voteKickTimerT = timer;
+        slot.Timer = timer;
     }
 
     /// <summary>
-    /// Handles a single player's vote in an active vote kick for the specified team.
-    /// A NO vote immediately fails the vote; a YES vote checks whether all eligible players have voted.
+    /// Handles a single player's vote in an active vote kick. In a team vote a NO fails it
+    /// immediately; in a server-wide vote the tally runs against the ratio threshold.
     /// </summary>
     internal void HandleVoteKickVote(IPlayer voter, Team team, bool voteYes)
     {
@@ -203,26 +273,17 @@ public partial class MixScrims
             return;
         }
 
-        bool inProgress = team == Team.CT ? isVoteKickInProgressCt : isVoteKickInProgressT;
-        if (!inProgress)
+        var vote = GetVoteKickSlot(team);
+        if (!vote.InProgress)
             return;
 
-        var voters = team == Team.CT ? voteKickVotersCt : voteKickVotersT;
-        if (!voters.Add(voter.SteamID))
+        if (!vote.Voters.Add(voter.SteamID))
             return; // already voted
 
         CloseMenuForPlayer(voter);
 
-        if (team == Team.CT)
-        {
-            voteKickTotalVotesCastCt++;
-            if (voteYes) voteKickYesCountCt++;
-        }
-        else
-        {
-            voteKickTotalVotesCastT++;
-            if (voteYes) voteKickYesCountT++;
-        }
+        vote.TotalVotesCast++;
+        if (voteYes) vote.YesCount++;
 
         {
             ulong voterSid; try { voterSid = voter.SteamID; } catch { voterSid = 0; }
@@ -231,30 +292,47 @@ public partial class MixScrims
                     Team: team,
                     VoterSteamId: voterSid,
                     VoteYes: voteYes,
-                    CurrentYesCount: team == Team.CT ? voteKickYesCountCt : voteKickYesCountT,
-                    CurrentTotalCast: team == Team.CT ? voteKickTotalVotesCastCt : voteKickTotalVotesCastT,
-                    EligibleVotes: team == Team.CT ? voteKickEligibleVotesCt : voteKickEligibleVotesT));
+                    CurrentYesCount: vote.YesCount,
+                    CurrentTotalCast: vote.TotalVotesCast,
+                    EligibleVotes: vote.EligibleVotes));
         }
 
         SendVoteKickProgressCenterHtml(team);
 
-        // Any NO vote fails the kick immediately. Routed through VoteKickResult
-        // rather than torn down inline: it is the only path that raises
-        // VoteKickResult, and a consumer replacing the built-in UI has nothing
-        // else telling it the vote closed.
-        if (!voteYes)
+        if (!IsServerWideVoteKey(team))
         {
-            VoteKickResult(team, false);
+            // Any NO vote fails the kick immediately. Routed through VoteKickResult
+            // rather than torn down inline: it is the only path that raises
+            // VoteKickResult, and a consumer replacing the built-in UI has nothing
+            // else telling it the vote closed.
+            if (!voteYes)
+            {
+                VoteKickResult(team, false);
+                return;
+            }
+
+            // Check if all eligible players voted yes
+            if (vote.YesCount >= vote.EligibleVotes)
+            {
+                vote.Timer?.Cancel();
+                VoteKickResult(team, true);
+            }
             return;
         }
 
-        // Check if all eligible players voted yes
-        int yesCount = team == Team.CT ? voteKickYesCountCt : voteKickYesCountT;
-        int eligibleCount = team == Team.CT ? voteKickEligibleVotesCt : voteKickEligibleVotesT;
-        if (yesCount >= eligibleCount)
+        if (vote.YesCount >= vote.EligibleVotes)
         {
-            (team == Team.CT ? voteKickTimerCt : voteKickTimerT)?.Cancel();
+            vote.Timer?.Cancel();
             VoteKickResult(team, true);
+            return;
+        }
+
+        // Under a ratio a NO is only an absent YES, so the vote closes early on arithmetic
+        // rather than on one objection: when the ballots left cannot carry it to the bar.
+        if (vote.YesCount + Math.Max(0, vote.Electorate - vote.TotalVotesCast) < vote.EligibleVotes)
+        {
+            vote.Timer?.Cancel();
+            VoteKickResult(team, false);
         }
     }
 
@@ -263,11 +341,11 @@ public partial class MixScrims
     /// </summary>
     internal void VoteKickResult(Team team, bool passed)
     {
-        bool inProgress = team == Team.CT ? isVoteKickInProgressCt : isVoteKickInProgressT;
-        if (!inProgress)
+        var vote = GetVoteKickSlot(team);
+        if (!vote.InProgress)
             return;
 
-        var target = team == Team.CT ? voteKickTargetCt : voteKickTargetT;
+        var target = vote.Target;
         // Reads guarded rather than raw: the disconnect reconciler closes a vote whose target
         // has just left, and a throw here would land before RaiseVoteKickResult and strand both
         // the vote state and any consumer's UI. "?" is the same fallback a null target gets.
@@ -283,13 +361,17 @@ public partial class MixScrims
 
         if (passed && targetSteamId != 0)
         {
-            var locKey = team == Team.CT ? "command.votekick.passed.ct" : "command.votekick.passed.t";
-            PrintMessageToTeam(team, Core.Localizer[locKey, targetName]);
-            KickPlayer(targetSteamId, Core.Localizer["info.kick_reason.votekicked"]);
+            var serverWide = IsServerWideVoteKey(team);
+            var locKey = serverWide
+                ? "command.votekick.passed.server"
+                : team == Team.CT ? "command.votekick.passed.ct" : "command.votekick.passed.t";
+            AnnounceVoteKick(team, Core.Localizer[locKey, targetName]);
+            KickPlayer(targetSteamId, Core.Localizer[
+                serverWide ? "info.kick_reason.votekicked.server" : "info.kick_reason.votekicked"]);
         }
         else
         {
-            PrintMessageToTeam(team, Core.Localizer["command.votekick.failed", targetName]);
+            AnnounceVoteKick(team, Core.Localizer["command.votekick.failed", targetName]);
         }
 
         ResetVoteKickState(team);
@@ -297,17 +379,20 @@ public partial class MixScrims
 
     /// <summary>
     /// Sends a CenterHTML vote progress display ("Waiting for votes / [X/Y] players voted")
-    /// to all players in the specified team.
+    /// to everyone the vote was put to.
     /// </summary>
     internal void SendVoteKickProgressCenterHtml(Team team)
     {
         if (suppressBuiltInCenterHtml) return;
-        int totalVotesCast = team == Team.CT ? voteKickTotalVotesCastCt : voteKickTotalVotesCastT;
-        int eligibleCount = team == Team.CT ? voteKickEligibleVotesCt : voteKickEligibleVotesT;
-        var message = Core.Localizer["info.center.votekick.progress", totalVotesCast, eligibleCount];
+        var vote = GetVoteKickSlot(team);
 
-        var teamPlayers = GetPlayersInTeam(team);
-        foreach (var player in teamPlayers)
+        // Server-wide counts YES against the bar, not ballots returned: with the bar below the
+        // electorate, ballots returned says nothing about how close the vote is.
+        var message = IsServerWideVoteKey(team)
+            ? Core.Localizer["info.center.votekick.progress.server", vote.YesCount, vote.EligibleVotes]
+            : Core.Localizer["info.center.votekick.progress", vote.TotalVotesCast, vote.EligibleVotes];
+
+        foreach (var player in GetVoteKickAudience(team))
         {
             if (IsPlayerValid(player) && !IsBot(player))
                 player.SendCenterHTML(message, 5000);
@@ -315,44 +400,16 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Closes the vote kick menu for all human players in the specified team.
+    /// Closes the vote kick menu for all human players the vote was put to.
     /// </summary>
     internal void CloseVoteKickMenusForTeam(Team team)
     {
-        var teamPlayers = GetPlayersInTeam(team);
-        foreach (var player in teamPlayers)
+        foreach (var player in GetVoteKickAudience(team))
         {
             if (IsPlayerValid(player) && !IsBot(player))
                 CloseMenuForPlayer(player);
         }
     }
 
-    /// <summary>
-    /// Resets all vote kick state variables for the specified team.
-    /// </summary>
-    internal void ResetVoteKickState(Team team)
-    {
-        if (team == Team.CT)
-        {
-            voteKickTargetCt = null;
-            isVoteKickInProgressCt = false;
-            voteKickYesCountCt = 0;
-            voteKickEligibleVotesCt = 0;
-            voteKickTotalVotesCastCt = 0;
-            voteKickTimerCt?.Cancel();
-            voteKickTimerCt = null;
-            voteKickVotersCt.Clear();
-        }
-        else if (team == Team.T)
-        {
-            voteKickTargetT = null;
-            isVoteKickInProgressT = false;
-            voteKickYesCountT = 0;
-            voteKickEligibleVotesT = 0;
-            voteKickTotalVotesCastT = 0;
-            voteKickTimerT?.Cancel();
-            voteKickTimerT = null;
-            voteKickVotersT.Clear();
-        }
-    }
+    internal void ResetVoteKickState(Team team) => GetVoteKickSlot(team).Reset();
 }

@@ -321,20 +321,31 @@ public class MixScrimsService : IMixScrims
     public int GetRemainingTimeoutsCt() => _mixScrims.timeoutCountCt;
     public int GetRemainingTimeoutsT() => _mixScrims.timeoutCountT;
 
-    public ulong? GetVoteKickTargetCt()
+    public ulong? GetVoteKickTargetCt() => ResolveVoteKickTarget(Team.CT);
+    public ulong? GetVoteKickTargetT() => ResolveVoteKickTarget(Team.T);
+    public ulong? GetVoteKickTargetServerWide() => ResolveVoteKickTarget(Team.None);
+
+    private ulong? ResolveVoteKickTarget(Team team)
     {
-        var t = _mixScrims.voteKickTargetCt;
+        var t = _mixScrims.GetVoteKickSlot(team).Target;
         if (t == null || !_mixScrims.IsPlayerValid(t)) return null;
         try { return t.SteamID; } catch { return null; }
     }
-    public ulong? GetVoteKickTargetT()
+
+    private static (int Yes, int Cast, int Eligible) ToTally(VoteKickSlot slot) =>
+        (slot.YesCount, slot.TotalVotesCast, slot.EligibleVotes);
+
+    public (int Yes, int Cast, int Eligible) GetVoteKickTallyCt() => ToTally(_mixScrims.GetVoteKickSlot(Team.CT));
+    public (int Yes, int Cast, int Eligible) GetVoteKickTallyT() => ToTally(_mixScrims.GetVoteKickSlot(Team.T));
+    public (int Yes, int Cast, int Eligible) GetVoteKickTallyServerWide() => ToTally(_mixScrims.GetVoteKickSlot(Team.None));
+
+    public void SetServerWideVoteKick(bool enabled)
     {
-        var t = _mixScrims.voteKickTargetT;
-        if (t == null || !_mixScrims.IsPlayerValid(t)) return null;
-        try { return t.SteamID; } catch { return null; }
+        _mixScrims.serverWideVoteKick = enabled;
+        if (_mixScrims.cfg.DetailedLogging)
+            _mixScrims.logger?.LogInformation("SetServerWideVoteKick: {Enabled}", enabled);
     }
-    public (int Yes, int Cast, int Eligible) GetVoteKickTallyCt() => (_mixScrims.voteKickYesCountCt, _mixScrims.voteKickTotalVotesCastCt, _mixScrims.voteKickEligibleVotesCt);
-    public (int Yes, int Cast, int Eligible) GetVoteKickTallyT() => (_mixScrims.voteKickYesCountT, _mixScrims.voteKickTotalVotesCastT, _mixScrims.voteKickEligibleVotesT);
+    public bool IsServerWideVoteKick() => _mixScrims.serverWideVoteKick;
 
     public Team? GetActiveSurrenderVoteTeam() => _mixScrims.isSurrenderVoteInProgress ? _mixScrims.surrenderVoteTeam : (Team?)null;
     public (int Yes, int Cast, int Eligible) GetSurrenderVoteTally()
@@ -545,14 +556,14 @@ public class MixScrimsService : IMixScrims
 
     public void CastVoteKickVote(ulong steamId, Team team, bool voteYes)
     {
-        if (team != Team.CT && team != Team.T)
+        var serverWide = MixScrims.IsServerWideVoteKey(team);
+        if (team != Team.CT && team != Team.T && !serverWide)
         {
             _mixScrims.logger?.LogWarning("CastVoteKickVote: ignored, unsupported team {Team}.", team);
             return;
         }
 
-        var inProgress = team == Team.CT ? _mixScrims.isVoteKickInProgressCt : _mixScrims.isVoteKickInProgressT;
-        if (!inProgress)
+        if (!_mixScrims.GetVoteKickSlot(team).InProgress)
         {
             _mixScrims.logger?.LogWarning("CastVoteKickVote: ignored, no {Team} vote kick is open.", team);
             return;
@@ -561,13 +572,14 @@ public class MixScrimsService : IMixScrims
         var player = ResolveConnectedPlayer(steamId, nameof(CastVoteKickVote));
         if (player == null) return;
 
-        if (!IsPlayerOnTeam(player, team))
+        // A server-wide vote has no roster to belong to; the electorate is the whole server.
+        if (!serverWide && !IsPlayerOnTeam(player, team))
         {
             _mixScrims.logger?.LogWarning("CastVoteKickVote: ignored, {SteamId} is not on team {Team}.", steamId, team);
             return;
         }
 
-        // HandleVoteKickVote owns the already-voted check via voteKickVotersCt/T.
+        // HandleVoteKickVote owns the already-voted check via the slot's voter set.
         _mixScrims.HandleVoteKickVote(player, team, voteYes);
     }
 
@@ -908,6 +920,34 @@ public class MixScrimsService : IMixScrims
             return;
         }
         _mixScrims.LoadSelectedMap(mapByName);
+    }
+
+    public bool ChangeMapAfterMatch(string mapName, int announceSeconds = 5)
+    {
+        if (string.IsNullOrEmpty(mapName))
+        {
+            _mixScrims.logger.LogError("ChangeMapAfterMatch: mapName cannot be empty.");
+            return false;
+        }
+
+        // Same debounce as ChangeMap: stacking map commands across plugins is a known
+        // CS2 crash trigger during the transition window.
+        var currentState = _mixScrims.mixScrimsService.GetCurrentMatchState();
+        if (currentState == MatchState.MapLoading || currentState == MatchState.MapChosen)
+        {
+            _mixScrims.logger.LogWarning("ChangeMapAfterMatch: ignoring external request to {Map} - map change already in progress (state={State}).", mapName, currentState);
+            return false;
+        }
+
+        var map = _mixScrims.GetMapByName(mapName) ?? _mixScrims.GetMapByWorkshopId(mapName);
+        if (map == null)
+        {
+            _mixScrims.logger.LogError("ChangeMapAfterMatch: Map {MapName} was not found in the config.", mapName);
+            return false;
+        }
+
+        _mixScrims.LoadMapAfterMatch(map, announceSeconds);
+        return true;
     }
 
     public void ForceAllPlayersToReady()

@@ -196,6 +196,31 @@ public interface IMixScrims : IDisposable
     /// <summary>T vote-kick tally as (yes, cast, eligible), all zero when no vote is active.</summary>
     (int Yes, int Cast, int Eligible) GetVoteKickTallyT();
 
+    /// <summary>
+    /// Switches vote kick to a server-wide vote: callable from any state bar a map load,
+    /// put to every human on the server rather than one team, and carried by the same
+    /// ratio threshold RTV uses instead of requiring unanimity. Off until a consumer sets
+    /// it, and it overrides config until the plugin unloads.
+    /// </summary>
+    void SetServerWideVoteKick(bool enabled);
+
+    /// <summary>Current effective value of the server-wide vote-kick switch.</summary>
+    bool IsServerWideVoteKick();
+
+    /// <summary>
+    /// Current server-wide vote-kick target SteamID64, or null when none is active. Always
+    /// null while the switch is off, when <see cref="GetVoteKickTargetCt"/> and
+    /// <see cref="GetVoteKickTargetT"/> are the live reads instead.
+    /// </summary>
+    ulong? GetVoteKickTargetServerWide();
+
+    /// <summary>
+    /// Server-wide vote-kick tally as (yes, cast, eligible), all zero when no vote is active.
+    /// <c>Eligible</c> is the YES votes needed to pass, not the size of the electorate: the
+    /// bar is a ratio of the humans present, so it is what a progress display counts towards.
+    /// </summary>
+    (int Yes, int Cast, int Eligible) GetVoteKickTallyServerWide();
+
     /// <summary>Team whose surrender vote is in progress, or null when none is active.</summary>
     Team? GetActiveSurrenderVoteTeam();
 
@@ -253,7 +278,11 @@ public interface IMixScrims : IDisposable
     /// <summary>Casts a yes/no vote on the in-flight surrender vote, under the same guards as <see cref="CastTimeoutVote"/>.</summary>
     void CastSurrenderVote(ulong steamId, bool voteYes);
 
-    /// <summary>Casts a yes/no vote on the named team's vote kick, which is explicit because CT and T can run one simultaneously.</summary>
+    /// <summary>
+    /// Casts a yes/no vote on the named team's vote kick, which is explicit because CT and T
+    /// can run one simultaneously. Pass <see cref="Team.None"/> for a server-wide vote, where
+    /// team membership is not checked.
+    /// </summary>
     void CastVoteKickVote(ulong steamId, Team team, bool voteYes);
 
     /// <summary>Drives the full team-pick pipeline, as a no-op unless the state is PickingTeam and the caller captains the active picking team.</summary>
@@ -354,6 +383,10 @@ public interface IMixScrims : IDisposable
 
     /// <summary>Changes to the given official or workshop map, which after a match needs <see cref="CancelMatch"/> first to clear the rosters.</summary>
     void ChangeMap(string mapName = "", string workshopId = "");
+
+    /// <summary>Announces the change now and, <paramref name="announceSeconds"/> later, clears match state and switches level in one callback — so the reset's config exec lands behind the loading screen instead of in front of it. For a driver that owns the post-match flow; <see cref="ChangeMap"/> stays the general-purpose entry.</summary>
+    /// <returns>False when the map names no <c>maps.jsonc</c> entry, or a map change is already in flight.</returns>
+    bool ChangeMapAfterMatch(string mapName, int announceSeconds = 5);
 
     /// <summary>Marks every not-already-ready player as ready.</summary>
     void ForceAllPlayersToReady();

@@ -9,9 +9,11 @@ namespace MixScrims;
 public partial class MixScrims
 {
     /// <summary>
-    /// Initiates a vote to kick a teammate from the match. All other teammates must vote YES for the kick to pass.
+    /// Initiates a vote to kick a player. By default the vote is put to the caller's team during
+    /// a match and needs every other teammate to vote YES; a consumer can switch it server-wide,
+    /// where it runs in any state and passes on a ratio of the players present.
     /// </summary>
-    [Command("votekick", false, "", HelpText = "Starts a unanimous vote to kick a teammate from the match. Usage: !votekick")]
+    [Command("votekick", false, "", HelpText = "Starts a vote to kick a player. Usage: !votekick <player name>")]
     public void OnVoteKick(ICommandContext context)
     {
         if (!context.IsSentByPlayer)
@@ -33,24 +35,31 @@ public partial class MixScrims
             return;
         }
 
+        var serverWide = serverWideVoteKick;
+
         var matchState = mixScrimsService.GetCurrentMatchState();
-        if (matchState != MatchState.Match)
+        var stateAllows = serverWide ? IsVoteKickAllowedInState(matchState) : matchState == MatchState.Match;
+        if (!stateAllows)
         {
             PrintMessageToPlayer(caller, Core.Localizer["command.invalid_state", "votekick"]);
             return;
         }
 
-        if (caller.PlayerPawn == null)
+        var callerTeam = Team.None;
+        if (!serverWide)
         {
-            logger.LogError("OnVoteKick: caller PlayerPawn is null");
-            return;
-        }
+            if (caller.PlayerPawn == null)
+            {
+                logger.LogError("OnVoteKick: caller PlayerPawn is null");
+                return;
+            }
 
-        var callerTeam = (Team)caller.PlayerPawn.TeamNum;
-        if (callerTeam != Team.CT && callerTeam != Team.T)
-        {
-            PrintMessageToPlayer(caller, Core.Localizer["error.not_in_team"]);
-            return;
+            callerTeam = (Team)caller.PlayerPawn.TeamNum;
+            if (callerTeam != Team.CT && callerTeam != Team.T)
+            {
+                PrintMessageToPlayer(caller, Core.Localizer["error.not_in_team"]);
+                return;
+            }
         }
 
         if (context.Args.Length < 1)
@@ -60,7 +69,13 @@ public partial class MixScrims
         }
 
         var targetName = string.Join(" ", context.Args);
-        var target = GetPlayerByName(targetName);
+        var target = FindTargetByQuery(caller, targetName, out var ambiguousTarget);
+        if (ambiguousTarget)
+        {
+            PrintMessageToPlayer(caller, Core.Localizer["command.votekick.ambiguous_target", targetName]);
+            return;
+        }
+
         if (target == null || !IsPlayerValid(target))
         {
             PrintMessageToPlayer(caller, Core.Localizer["command.votekick.invalid_target", targetName]);
@@ -73,23 +88,26 @@ public partial class MixScrims
             return;
         }
 
-        if (target.PlayerPawn == null)
+        if (!serverWide)
         {
-            logger.LogError("OnVoteKick: target PlayerPawn is null");
-            return;
+            if (target.PlayerPawn == null)
+            {
+                logger.LogError("OnVoteKick: target PlayerPawn is null");
+                return;
+            }
+
+            var targetTeam = (Team)target.PlayerPawn.TeamNum;
+            if (targetTeam != callerTeam)
+            {
+                PrintMessageToPlayer(caller, Core.Localizer["command.votekick.not_teammate"]);
+                return;
+            }
         }
 
-        var targetTeam = (Team)target.PlayerPawn.TeamNum;
-        if (targetTeam != callerTeam)
+        if (GetVoteKickSlot(callerTeam).InProgress)
         {
-            PrintMessageToPlayer(caller, Core.Localizer["command.votekick.not_teammate"]);
-            return;
-        }
-
-        bool voteInProgress = callerTeam == Team.CT ? isVoteKickInProgressCt : isVoteKickInProgressT;
-        if (voteInProgress)
-        {
-            PrintMessageToPlayer(caller, Core.Localizer["command.votekick.vote_in_progress"]);
+            PrintMessageToPlayer(caller, Core.Localizer[
+                serverWide ? "command.votekick.vote_in_progress.server" : "command.votekick.vote_in_progress"]);
             return;
         }
 
