@@ -5,75 +5,38 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
-## [1.12.1] - 2026-10-10
-
-**API consumers may want to update (contract 2.9.0).** New members let a consumer
-suppress the same-team damage hook for a round of its own, ask whether the pick
-rosters have been sealed, read either playing roster by slot so bots are counted,
-run a map vote during live play without handing the match over to the voting phase,
-switch vote kick to a server-wide vote, and change map after a match without the
-server visibly dropping into warmup first.
-See [API Reference](https://github.com/shmitzas/MixScrims/wiki/API-Reference).
-
-- A consumer driving its own post-match flow can now call `ChangeMapAfterMatch(map)`
-  instead of `CancelMatch()` followed by `ChangeMap(map)`. It announces the change
-  immediately and, five seconds later, resets the match and switches level in the same
-  callback — so the reset's `warmup.cfg` exec lands behind the loading screen instead of
-  in front of it. The old pair re-entered warmup on the finished map and left players
-  respawned there, staring at a map about to be discarded, for the whole load delay.
-  `ChangeMap()` is unchanged, and MixScrims' own post-match reload already worked this
-  way.
-
-- Vote kick can now be switched **server-wide** by a consumer plugin via
-  `SetServerWideVoteKick(true)`. In that mode `!votekick` works in any state bar a map
-  load or the post-match teardown, is put to every human on the server instead of one
-  team, and passes on `max(MinimumVotesRequired, ceil(electorate * VoteThresholdRatio))`
-  — the same formula `!rtv` uses — instead of requiring unanimity. Bots neither vote nor
-  count towards the bar, the target is still excluded, and a NO is only an absent YES, so
-  the vote closes early only once the remaining ballots cannot reach the threshold. It
-  reports through `Team.None` on the existing vote-kick events plus new
-  `GetVoteKickTargetServerWide()` / `GetVoteKickTallyServerWide()` reads. Off by default:
-  with no consumer setting it, vote kick behaves exactly as before.
-
-- Map voting can now run as a **deferred vote**: `StartDeferredMapVote(seconds)` opens
-  the usual vote — same ballot, same menu, same per-vote chat tally, same winner
-  announcement — but leaves the match state alone, and at its deadline announces the
-  winner and raises `MapVotingEnded` without changing state or loading the map. The
-  caller keeps the result. `EndDeferredMapVote()` closes a running one early and
-  resolves it immediately; the stranded deadline cannot announce a second time.
-  `StartMapVoting()` is unchanged.
-- The team-pick menu now opens on the round the pick phase restarts into, rather than
-  while that restart is still landing. Captains pick after everyone has respawned on
-  their new sides; the match stays paused until the draft is done.
-- Fixed `SetFaceitLikeDamageControlSuppressed` doing nothing. The switch was on the API
-  but was never read, so a consumer running its own knife round still had every
-  same-team hit zeroed.
-- The ready-count centre HUD and the ready-status chat announcements now stop when the
-  knife round starts. They already did on every other way out of warmup; only a driver
-  that starts the knife round straight from warmup ever saw them carry on.
-- Map votes no longer offer the map currently being played, workshop maps included. A
-  one-map pool still offers that map, because the alternative is an empty vote.
-- `DisallowVotePreviousMaps` now also keeps played workshop maps out of later votes.
-  Their history was recorded under the engine's internal map name, which matched no
-  configured entry.
-
-## [1.12.0] - 2026-10-09
+## [1.12.0] - 2026-10-10
 
 Must update to this version in order to avoid random crashes.
 
-**API consumers must update (contract 2.8.0).** Drivers now take effect on the next
-game tick rather than immediately, and every member taking a SteamID must be called
-on the game thread. New members let a consumer hold the match at its current phase
-and drive the transitions itself, set which captain picks first, and read the
-configured map pool at any time. See
-[API Reference](https://github.com/shmitzas/MixScrims/wiki/API-Reference).
+## API consumers must update (contract 2.9.0).
 
-**`maps.jsonc` must be rewritten.** Each entry is now a display `Name` and an `Id`,
-where the ID is either an official map name or a workshop item ID:
-`{ "Name": "Dust 2", "Id": "de_dust2" }`. `CanBeVoted` stays, is optional and
-defaults to true. The old `MapName` / `DisplayName` / `WorkshopId` properties are gone
-and are not read as fallbacks — a file still using them loads with every map blank, and
-the server log says so at startup.
+- This API change also improved async <> main-thread safety. Check [documentation](https://github.com/shmitzas/MixScrims/wiki/API-Reference#thread-affinity) to find what needs to be updated for all plugins that use MixScrimsAPI.
+
+## New maps.jsonc config style - matches [MapChooser](https://github.com/SwiftlyS2-Plugins/MapChooser)
+
+Example new config:
+```jsonc
+{
+  "MapsConfig": {
+    "Maps": [
+      {
+        "Name": "Mirage",
+        "Id": "de_mirage",
+        "CanBeVoted": true
+      },
+      {
+        "Name": "Workshop Map",
+        "Id": "3375020",
+        "CanBeVoted": false
+      },
+      ...
+    ]
+  }
+}
+```
+
+## Full summary:
 
 - Fixed a server crash when clicking any in-game menu button — map voting was the
   common one, but every other menu could trigger it too.
@@ -92,10 +55,29 @@ the server log says so at startup.
   `SkipTeamPicking` both on, and gives up the whole-team starting-side vote.
 - Changing map after a match now comes up in warmup, where `!ready` and RTV work
   again, instead of carrying the finished match's state across.
+- `ChangeMapAfterMatch(map)` does the same for a consumer driving its own post-match
+  flow, without players being dropped into warmup on the map about to be discarded.
+  `ChangeMap()` is unchanged.
+- The team-pick menu now opens on the round the pick phase restarts into, so captains
+  pick once everyone has respawned on their new sides.
 - Players who connect while map voting is running now get the vote menu.
 - A disconnect no longer abandons its own cleanup half-way, so leavers are reliably
   removed from rosters, the ready list, open votes and pick menus.
 - A map vote abandoned before it finishes no longer changes the map on its own.
+- Map votes no longer offer the map currently being played, workshop maps included. A
+  one-map pool still offers that map, because the alternative is an empty vote.
+- `DisallowVotePreviousMaps` now also keeps played workshop maps out of later votes.
+- `StartDeferredMapVote(seconds)` runs the usual ballot and menu without handing the
+  match over to the voting phase; the winner is announced but not loaded, and the
+  caller keeps the result. `EndDeferredMapVote()` closes a running one early.
+- `SetServerWideVoteKick(true)` puts `!votekick` to every human on the server instead
+  of one team, and lets it run in any state bar a map load or the post-match teardown.
+  Off by default — vote kick is otherwise unchanged.
+- A server-wide vote kick passes on the same threshold `!rtv` uses instead of requiring
+  unanimity. Bots neither vote nor count towards it, and it closes early once the
+  remaining ballots cannot reach the threshold.
+- The ready-count centre HUD and the ready-status chat announcements now stop when the
+  knife round starts, as they already did on every other way out of warmup.
 
 ## [1.11.7] - 2026-10-08
 

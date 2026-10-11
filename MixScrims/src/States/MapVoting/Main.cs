@@ -73,7 +73,7 @@ public partial class MixScrims
         if (!deferred)
             PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.map_voting"]);
 
-        var mapsToVote = GetMapsToVote();
+        var mapsToVote = GetMapsToVote(excludeRunningMap: rtvTriggeredMapVote);
         if (mapsToVote.Count == 0)
         {
             if (deferred)

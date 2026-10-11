@@ -328,16 +328,19 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Returns a list of maps that can be voted for.
+    /// Returns a list of maps that can be voted for. <paramref name="excludeRunningMap"/> is for
+    /// RTV, which re-rolls from Warmup before <c>StartMatch</c> has recorded the current map in
+    /// <c>playedMaps</c> and would otherwise offer the map we are standing on. Every other vote
+    /// leaves the running map to the <c>DisallowVotePreviousMaps</c> history alone.
     /// </summary>
-    internal List<MapDetails> GetMapsToVote()
+    internal List<MapDetails> GetMapsToVote(bool excludeRunningMap = false)
     {
         var pool = mapsConfig.Maps
             .Where(m => m.CanBeVoted && !playedMaps.Any(pm =>
                 string.Equals(pm.CanonicalId, m.CanonicalId, StringComparison.OrdinalIgnoreCase))).ToList();
 
-        // playedMaps is only appended by StartMatch, so a vote opened before any match has run
-        // on this map would otherwise offer the map we are standing on.
+        if (!excludeRunningMap) return pool;
+
         var running = GetRunningMap();
         if (running is null) return pool;
 

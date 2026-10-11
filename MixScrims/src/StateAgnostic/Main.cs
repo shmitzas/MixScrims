@@ -452,7 +452,9 @@ public sealed partial class MixScrims
     /// </summary>
     internal MapDetails GetRandomMap()
     {
-        var maps = GetMapsToVote();
+        // Reached only as the "no votes were cast" fallback, where the point is to switch away
+        // from here — returning the running map would be a non-answer.
+        var maps = GetMapsToVote(excludeRunningMap: true);
         if (maps.Count == 0)
         {
             maps = mapsConfig.Maps.Where(m => m.CanBeVoted).ToList();
