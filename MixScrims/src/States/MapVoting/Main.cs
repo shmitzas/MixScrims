@@ -14,6 +14,17 @@ public partial class MixScrims
     internal List<string> currentVoteMapNames = new();
     internal DateTime? mapVoteDeadline = null;
 
+    // A vote running without owning the match state: the caller keeps the result instead of
+    // MixScrims loading it. Mirrors rtvTriggeredMapVote, which likewise only alters the exit.
+    internal bool deferredMapVoteActive = false;
+
+    // Bumped by every open and every close, so an armed deadline callback from a superseded
+    // vote recognises itself as stale. Cancelling the token alone cannot cover the close paths.
+    internal int mapVoteEpoch = 0;
+
+    /// <summary>Whether a vote is accepting ballots, in either mode.</summary>
+    internal bool MapVoteIsOpen => MatchState == MatchState.MapVoting || deferredMapVoteActive;
+
     // Membership is what stops a later retry reopening a vote the player has already answered.
     private readonly HashSet<int> mapVotePendingJoiners = [];
 
@@ -23,32 +34,67 @@ public partial class MixScrims
     /// <summary>
     /// Presents map voting options to players and starts the map voting phase
     /// </summary>
-    internal void StartMapVotingPhase()
+    internal void StartMapVotingPhase() => StartMapVotingCore(deferred: false, cfg.DefaultVoteTimeSeconds);
+
+    /// <summary>
+    /// Opens a vote that leaves the match state alone and parks the result for the caller.
+    /// </summary>
+    /// <returns>Whether the vote opened.</returns>
+    internal bool StartDeferredMapVotePhase(int voteSeconds)
+    {
+        if (MatchState == MatchState.MapVoting)
+        {
+            logger.LogWarning("StartDeferredMapVote: ignored, a map voting phase already owns the match state.");
+            return false;
+        }
+        if (deferredMapVoteActive)
+        {
+            logger.LogWarning("StartDeferredMapVote: ignored, a deferred vote is already running.");
+            return false;
+        }
+
+        return StartMapVotingCore(deferred: true, voteSeconds > 0 ? voteSeconds : cfg.DefaultVoteTimeSeconds);
+    }
+
+    private bool StartMapVotingCore(bool deferred, int voteSeconds)
     {
         StopPreMatchAnnouncementTimers();
 
         if (cfg.DetailedLogging)
-            logger.LogInformation("StartMapVotingPhase");
-        mixScrimsService.SetMatchState(MatchState.MapVoting);
+            logger.LogInformation("StartMapVotingPhase (deferred={Deferred}, seconds={Seconds})", deferred, voteSeconds);
+        if (!deferred)
+            mixScrimsService.SetMatchState(MatchState.MapVoting);
+        // Assigned rather than only set: a native vote started over a deferred one supersedes it.
+        deferredMapVoteActive = deferred;
+        mapVoteEpoch++;
         votedMaps.Clear();
         mapVotePendingJoiners.Clear();
-        PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.map_voting"]);
+        // Deferred callers frame the vote themselves; this line describes a phase change.
+        if (!deferred)
+            PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.map_voting"]);
 
         var mapsToVote = GetMapsToVote();
         if (mapsToVote.Count == 0)
         {
+            if (deferred)
+            {
+                deferredMapVoteActive = false;
+                logger.LogWarning("StartDeferredMapVote: no maps are available to vote on.");
+                return false;
+            }
+
             PrintMessageToAllPlayers(Core.Localizer["error.no_maps_configured"]);
             logger.LogError("No maps available for voting. Check your configuration.");
             mixScrimsService.SetMatchState(MatchState.Reset);
-            return;
+            return false;
         }
 
         // shuffle maps order
         mapsToVote = mapsToVote.OrderBy(_ => Guid.NewGuid()).ToList();
 
-        currentVoteMapNames = mapsToVote.Select(m => m.DisplayName).ToList();
-        mapVoteDeadline = DateTime.UtcNow.AddSeconds(cfg.DefaultVoteTimeSeconds);
-        mixScrimsService.RaiseMapVotingStarted(currentVoteMapNames.AsReadOnly(), cfg.DefaultVoteTimeSeconds);
+        currentVoteMapNames = mapsToVote.Select(m => m.Name).ToList();
+        mapVoteDeadline = DateTime.UtcNow.AddSeconds(voteSeconds);
+        mixScrimsService.RaiseMapVotingStarted(currentVoteMapNames.AsReadOnly(), voteSeconds);
 
         var builder = Core.MenusAPI
             .CreateBuilder()
@@ -65,11 +111,11 @@ public partial class MixScrims
         foreach (var map in mapsToVote)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("  - {Map}", map.DisplayName);
-            var button = new ButtonMenuOption(map.DisplayName);
+                logger.LogInformation("  - {Map}", map.Name);
+            var button = new ButtonMenuOption(map.Name);
             button.Click += async (sender, args) =>
             {
-                RegisterMapVoteByName(args.Player, map.DisplayName);
+                RegisterMapVoteByName(args.Player, map.Name);
                 await ValueTask.CompletedTask;
             };
             builder.AddOption(button);
@@ -87,8 +133,27 @@ public partial class MixScrims
             DisplayMapVotingMenu(player);
         }
 
-        var token = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, AnnouncePickedMap);
+        var epoch = mapVoteEpoch;
+        var token = Core.Scheduler.DelayBySeconds(voteSeconds, () =>
+        {
+            // Stale once any later open or close bumped the epoch, which is what keeps an
+            // early close from being followed by this callback announcing a second time.
+            if (mapVoteEpoch != epoch) return;
+            AnnouncePickedMap();
+        });
         Core.Scheduler.StopOnMapChange(token);
+        return true;
+    }
+
+    /// <summary>
+    /// Closes a running deferred vote immediately and announces the winner.
+    /// </summary>
+    /// <returns>Whether a deferred vote was running.</returns>
+    internal bool EndDeferredMapVoteNow()
+    {
+        if (!deferredMapVoteActive) return false;
+        AnnouncePickedMap();
+        return true;
     }
 
     /// <summary>
@@ -121,7 +186,7 @@ public partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation("Player {Player} voted for map {Map}", playerName, mapDisplayName);
 
-        var votedMap = mapsConfig.Maps.FirstOrDefault(m => string.Equals(m.DisplayName, mapDisplayName, StringComparison.OrdinalIgnoreCase));
+        var votedMap = mapsConfig.Maps.FirstOrDefault(m => string.Equals(m.Name, mapDisplayName, StringComparison.OrdinalIgnoreCase));
         if (votedMap == null)
         {
             logger.LogError("RegisterMapVote: Map not found in configuration: {Map}", mapDisplayName);
@@ -131,16 +196,17 @@ public partial class MixScrims
         }
 
         var previouslyVoted = votedMaps.FirstOrDefault(m => m.VotedBy.Any(v => v == player.PlayerID));
-        string? previousDisplayName = previouslyVoted?.Map?.DisplayName;
+        string? previousDisplayName = previouslyVoted?.Map?.Name;
         if (previouslyVoted != null)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("{Player} already voted for {Prev}. Removing vote...", playerName, previouslyVoted.Map.DisplayName);
+                logger.LogInformation("{Player} already voted for {Prev}. Removing vote...", playerName, previouslyVoted.Map.Name);
             previouslyVoted.Votes = Math.Max(0, previouslyVoted.Votes - 1);
             previouslyVoted.VotedBy.Remove(player.PlayerID);
         }
 
-        var existingVote = votedMaps.FirstOrDefault(m => m.Map.MapName == votedMap.MapName);
+        var existingVote = votedMaps.FirstOrDefault(m =>
+            string.Equals(m.Map.CanonicalId, votedMap.CanonicalId, StringComparison.OrdinalIgnoreCase));
         int votes;
         if (existingVote != null)
         {
@@ -159,9 +225,9 @@ public partial class MixScrims
         ulong voterSid;
         try { voterSid = player.SteamID; } catch { voterSid = 0; }
         if (voterSid != 0)
-            mixScrimsService.RaiseMapVoteCast(voterSid, votedMap.DisplayName, previousDisplayName);
+            mixScrimsService.RaiseMapVoteCast(voterSid, votedMap.Name, previousDisplayName);
 
-        PrintMessageToAllPlayers(Core.Localizer["announcement.map.voted", playerName, votedMap.DisplayName, votes]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.map.voted", playerName, votedMap.Name, votes]);
 
         CloseMenuForPlayer(player);
     }
@@ -213,7 +279,7 @@ public partial class MixScrims
             {
                 try
                 {
-                    if (MatchState != MatchState.MapVoting) return;
+                    if (!MapVoteIsOpen) return;
                     if (!mapVotePendingJoiners.Contains(playerSlot)) return;
 
                     var player = Core.PlayerManager.GetPlayer(playerSlot);
@@ -238,9 +304,11 @@ public partial class MixScrims
     /// </summary>
     internal void AnnouncePickedMap()
     {
+        var deferred = deferredMapVoteActive;
+
         // The vote timer is only StopOnMapChange, so an abandoned phase leaves it armed to fire
         // in Warmup and force-load a map.
-        if (MatchState != MatchState.MapVoting)
+        if (!deferred && MatchState != MatchState.MapVoting)
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("AnnouncePickedMap: ignored, map voting is no longer running (state={State}).", MatchState);
@@ -264,6 +332,23 @@ public partial class MixScrims
             }
         }
 
+        if (deferred)
+        {
+            // Closing before the deadline is what makes "30s or match end, whichever is
+            // shorter" work: the bump strands the armed callback.
+            deferredMapVoteActive = false;
+            mapVoteEpoch++;
+
+            VotedMap deferredPick = GetMostVotedMap();
+            PrintMessageToAllPlayers(Core.Localizer["announcement.map.chosen", deferredPick.Map.Name, deferredPick.Votes]);
+            mixScrimsService.RaiseMapVotingEnded(deferredPick.Map.Name, deferredPick.Votes);
+            currentVoteMapNames.Clear();
+            mapVotePendingJoiners.Clear();
+            mapVoteDeadline = null;
+            // No state change and no map load - the caller owns the result.
+            return;
+        }
+
         if (rtvTriggeredMapVote)
         {
             // RTV-driven map vote: behave like a manual !map. Stay in Warmup across the
@@ -279,8 +364,8 @@ public partial class MixScrims
         }
 
         VotedMap pickedMap = GetMostVotedMap();
-        PrintMessageToAllPlayers(Core.Localizer["announcement.map.chosen", pickedMap.Map.DisplayName, pickedMap.Votes]);
-        mixScrimsService.RaiseMapVotingEnded(pickedMap.Map.DisplayName, pickedMap.Votes);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.map.chosen", pickedMap.Map.Name, pickedMap.Votes]);
+        mixScrimsService.RaiseMapVotingEnded(pickedMap.Map.Name, pickedMap.Votes);
         currentVoteMapNames.Clear();
         mapVotePendingJoiners.Clear();
         mapVoteDeadline = null;

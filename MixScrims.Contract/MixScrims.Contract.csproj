@@ -31,11 +31,17 @@
 		            so the map pool is readable outside a live vote. Its MapPoolEntry
 		            hands out the resolved workshop id (no `ws:` prefix) and derives
 		            IsWorkshop from it, so the two cannot contradict each other.
+		     v2.9.0 adds the slot-keyed captain surface, mirroring v2.3.0's pick surface:
+		            SetCt/TCaptainBySlot, GetCt/TCaptainSlot and CaptainAssigned/RemovedBySlot.
+		            Every bot reads SteamID 0, so the SteamID members can neither install nor
+		            identify a bot captain and the SteamID events never fire for one. It also
+		            adds SetFaceitLikeDamageControlSuppressed / IsFaceitLikeDamageControlSuppressed,
+		            which replace a hardcoded MatchState.KnifeRound carve-out in the damage hook.
 		     All existing v1.x methods are preserved for backward compatibility. -->
 		<GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-		<Version>2.8.0</Version>
-		<AssemblyVersion>2.8.0.0</AssemblyVersion>
-		<FileVersion>2.8.0.0</FileVersion>
+		<Version>2.9.0</Version>
+		<AssemblyVersion>2.9.0.0</AssemblyVersion>
+		<FileVersion>2.9.0.0</FileVersion>
 		<GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
 	</PropertyGroup>
 

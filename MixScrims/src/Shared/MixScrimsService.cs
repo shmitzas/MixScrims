@@ -27,6 +27,8 @@ public class MixScrimsService : IMixScrims
     public event Action<ulong, bool>? PlayerReadyChanged;
     public event Action<Team, ulong>? CaptainAssigned;
     public event Action<Team, ulong>? CaptainRemoved;
+    public event Action<Team, int>? CaptainAssignedBySlot;
+    public event Action<Team, int>? CaptainRemovedBySlot;
     public event Action<Team>? TeamPickingStarted;
     public event Action<Team, ulong, int>? PlayerPickedForTeam;
     public event Action<IReadOnlyList<string>, int>? MapVotingStarted;
@@ -64,6 +66,8 @@ public class MixScrimsService : IMixScrims
     internal void RaisePlayerReadyChanged(ulong steamId, bool isReady) => SafeInvoke(nameof(PlayerReadyChanged), PlayerReadyChanged, steamId, isReady);
     internal void RaiseCaptainAssigned(Team team, ulong steamId) => SafeInvoke(nameof(CaptainAssigned), CaptainAssigned, team, steamId);
     internal void RaiseCaptainRemoved(Team team, ulong oldSteamId) => SafeInvoke(nameof(CaptainRemoved), CaptainRemoved, team, oldSteamId);
+    internal void RaiseCaptainAssignedBySlot(Team team, int slot) => SafeInvoke(nameof(CaptainAssignedBySlot), CaptainAssignedBySlot, team, slot);
+    internal void RaiseCaptainRemovedBySlot(Team team, int oldSlot) => SafeInvoke(nameof(CaptainRemovedBySlot), CaptainRemovedBySlot, team, oldSlot);
     internal void RaiseTeamPickingStarted(Team startingTeam) => SafeInvoke(nameof(TeamPickingStarted), TeamPickingStarted, startingTeam);
     internal void RaisePlayerPickedForTeam(Team team, ulong pickedSteamId, int pickIndex) => SafeInvoke(nameof(PlayerPickedForTeam), PlayerPickedForTeam, team, pickedSteamId, pickIndex);
     internal void RaiseMapVotingStarted(IReadOnlyList<string> mapDisplayNames, int deadlineSeconds) => SafeInvoke(nameof(MapVotingStarted), MapVotingStarted, mapDisplayNames, deadlineSeconds);
@@ -155,6 +159,18 @@ public class MixScrimsService : IMixScrims
         try { return c.SteamID; } catch { return null; }
     }
 
+    // Bots all read SteamID 0, so these are the only reads that can name a bot captain.
+    public int? GetCtCaptainSlot() => CaptainSlotOf(_mixScrims.captainCt);
+
+    public int? GetTCaptainSlot() => CaptainSlotOf(_mixScrims.captainT);
+
+    private int? CaptainSlotOf(IPlayer? captain)
+    {
+        if (captain == null || !_mixScrims.IsPlayerValid(captain)) return null;
+        var slot = SafePlayerId(captain);
+        return slot < 0 ? null : slot;
+    }
+
     public string GetCtTeamName() => _mixScrims.ctTeamNameOverride ?? "COUNTER-TERRORISTS";
     public string GetTTeamName() => _mixScrims.tTeamNameOverride ?? "TERRORISTS";
 
@@ -183,8 +199,8 @@ public class MixScrimsService : IMixScrims
             VotedMap v;
             try { v = votedMaps[i]; }
             catch (ArgumentOutOfRangeException) { break; }
-            if (v?.Map == null || string.IsNullOrEmpty(v.Map.DisplayName)) continue;
-            result[v.Map.DisplayName] = v.Votes;
+            if (v?.Map == null || string.IsNullOrEmpty(v.Map.Name)) continue;
+            result[v.Map.Name] = v.Votes;
         }
         return result;
     }
@@ -214,13 +230,13 @@ public class MixScrimsService : IMixScrims
         foreach (var m in maps)
         {
             if (m == null) continue;
-            var mapName = m.MapName ?? string.Empty;
-            var displayName = m.DisplayName ?? string.Empty;
             // The resolved id, so a consumer never has to strip a `ws:` prefix itself.
-            var workshopId = m.ResolvedWorkshopId ?? string.Empty;
+            var id = m.CanonicalId;
             // An entry carrying no identifier at all is one ChangeMap could never resolve.
-            if (mapName.Length == 0 && displayName.Length == 0 && workshopId.Length == 0) continue;
-            result.Add(new MapPoolEntry(mapName, displayName, workshopId, m.CanBeVoted));
+            if (id.Length == 0) continue;
+            // An entry may legally carry only an Id; a blank menu label would be unrenderable.
+            var name = string.IsNullOrWhiteSpace(m.Name) ? id : m.Name;
+            result.Add(new MapPoolEntry(name, id, m.CanBeVoted));
         }
         return result;
     }
@@ -242,12 +258,13 @@ public class MixScrimsService : IMixScrims
         foreach (var v in _mixScrims.votedMaps)
         {
             if (v.VotedBy.Contains(pid))
-                return v.Map?.DisplayName;
+                return v.Map?.Name;
         }
         return null;
     }
 
     public Team? GetActivePickingTeam() => _mixScrims.activePickingTeam;
+    public bool IsTeamPickingFinalized() => _mixScrims.teamPickingFinalized;
     public IReadOnlyList<ulong> GetUnpickedPlayers()
     {
         if (_mixScrims.MatchState != MatchState.PickingTeam)
@@ -370,8 +387,15 @@ public class MixScrimsService : IMixScrims
         if (_mixScrims.cfg.DetailedLogging)
             _mixScrims.logger?.LogInformation("SetBuiltInCenterHtmlSuppressed: {Suppressed}", suppressed);
     }
+    public void SetFaceitLikeDamageControlSuppressed(bool suppressed)
+    {
+        _mixScrims.suppressFaceitLikeDamageControl = suppressed;
+        if (_mixScrims.cfg.DetailedLogging)
+            _mixScrims.logger?.LogInformation("SetFaceitLikeDamageControlSuppressed: {Suppressed}", suppressed);
+    }
     public bool AreBuiltInMenusSuppressed() => _mixScrims.suppressBuiltInMenus;
     public bool IsBuiltInCenterHtmlSuppressed() => _mixScrims.suppressBuiltInCenterHtml;
+    public bool IsFaceitLikeDamageControlSuppressed() => _mixScrims.suppressFaceitLikeDamageControl;
 
     // =========================================================================
     // Flow control
@@ -442,9 +466,9 @@ public class MixScrimsService : IMixScrims
 
     public void CastMapVote(ulong steamId, string mapDisplayName)
     {
-        if (_mixScrims.MatchState != MatchState.MapVoting)
+        if (!_mixScrims.MapVoteIsOpen)
         {
-            _mixScrims.logger?.LogWarning("CastMapVote: ignored, match state is {State} (expected MapVoting).", _mixScrims.MatchState);
+            _mixScrims.logger?.LogWarning("CastMapVote: ignored, no map vote is open (state is {State}).", _mixScrims.MatchState);
             return;
         }
         if (string.IsNullOrWhiteSpace(mapDisplayName))
@@ -790,6 +814,18 @@ public class MixScrimsService : IMixScrims
         _mixScrims.StartMapVotingPhase();
     }
 
+    public bool StartDeferredMapVote(int voteSeconds)
+    {
+        return _mixScrims.StartDeferredMapVotePhase(voteSeconds);
+    }
+
+    public bool EndDeferredMapVote()
+    {
+        return _mixScrims.EndDeferredMapVoteNow();
+    }
+
+    public bool IsDeferredMapVoteRunning() => _mixScrims.deferredMapVoteActive;
+
     public void StartTeamPicking()
     {
         _mixScrims.StartTeamPickingPhase();
@@ -938,6 +974,31 @@ public class MixScrimsService : IMixScrims
         return SafeSteamIds(_mixScrims.playingTPlayers);
     }
 
+    public IReadOnlyList<int> GetPlayingCtPlayerSlots()
+    {
+        return SafePlayerIds(_mixScrims.playingCtPlayers);
+    }
+
+    public IReadOnlyList<int> GetPlayingTPlayerSlots()
+    {
+        return SafePlayerIds(_mixScrims.playingTPlayers);
+    }
+
+    /// <summary>Snapshot of a roster's live slots, skipping disposed entries but keeping bots.</summary>
+    private static List<int> SafePlayerIds(List<IPlayer> roster)
+    {
+        var result = new List<int>(roster.Count);
+        for (var i = 0; i < roster.Count; i++)
+        {
+            IPlayer entry;
+            try { entry = roster[i]; }
+            catch (ArgumentOutOfRangeException) { break; }
+            var slot = SafePlayerId(entry);
+            if (slot >= 0) result.Add(slot);
+        }
+        return result;
+    }
+
     /// <summary>Snapshot of a roster's live SteamIDs, skipping disposed entries and bots.</summary>
     private List<ulong> SafeSteamIds(List<IPlayer> roster)
     {
@@ -1032,6 +1093,49 @@ public class MixScrimsService : IMixScrims
             return;
         }
         _mixScrims.PickTCaptain(player);
+    }
+
+    public void SetCtCaptainBySlot(int slot)
+    {
+        if (!TryResolveCaptainSlot(slot, nameof(SetCtCaptainBySlot), out var player)) return;
+        _mixScrims.PickCtCaptain(player);
+    }
+
+    public void SetTCaptainBySlot(int slot)
+    {
+        if (!TryResolveCaptainSlot(slot, nameof(SetTCaptainBySlot), out var player)) return;
+        _mixScrims.PickTCaptain(player);
+    }
+
+    /// <summary>
+    /// Refuses rather than falling through to a random draw the way <c>PickCtCaptain</c> does on
+    /// an invalid player, so only the slot the caller named can ever fill.
+    /// </summary>
+    private bool TryResolveCaptainSlot(int slot, string caller, out IPlayer player)
+    {
+        player = default!;
+        if (slot < 0)
+        {
+            _mixScrims.logger.LogError("{Caller}: ignored, slot {Slot} is not a player slot.", caller, slot);
+            return false;
+        }
+
+        IPlayer? resolved;
+        try { resolved = MixScrims.Core.PlayerManager.GetPlayer(slot); }
+        catch (Exception ex)
+        {
+            _mixScrims.logger.LogError(ex, "{Caller}: slot {Slot} lookup threw.", caller, slot);
+            return false;
+        }
+
+        if (resolved == null || !_mixScrims.IsPlayerValid(resolved))
+        {
+            _mixScrims.logger.LogError("{Caller}: ignored, no valid player in slot {Slot}.", caller, slot);
+            return false;
+        }
+
+        player = resolved;
+        return true;
     }
 
     public void KickNotPlayingPlayers(string? reason = "")

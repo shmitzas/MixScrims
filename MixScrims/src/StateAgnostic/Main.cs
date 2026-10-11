@@ -349,7 +349,7 @@ public sealed partial class MixScrims
     internal void LoadSelectedMap(MapDetails map)
     {
 		if (cfg.DetailedLogging)
-			logger.LogInformation("LoadSelectedMap: Loading map {Map}", map.MapName);
+			logger.LogInformation("LoadSelectedMap: Loading map {Map}", map.CanonicalId);
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
@@ -368,7 +368,7 @@ public sealed partial class MixScrims
         Core.Scheduler.StopOnMapChange(loadMapToken);
 
         mixScrimsService.SetMatchState(MatchState.MapLoading);
-        PrintMessageToAllPlayers(Core.Localizer["announcement.map.changing", map.DisplayName]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.map.changing", map.Name]);
         ScheduleMapLoadingAnnouncement(map);
     }
 
@@ -382,14 +382,14 @@ public sealed partial class MixScrims
         // have already torn the engine down between scheduling and firing.
         if (Core.Engine is not { } engine)
         {
-            logger.LogWarning("LoadMap: Core.Engine unavailable; skipping map switch to {Map}.", map.MapName);
+            logger.LogWarning("LoadMap: Core.Engine unavailable; skipping map switch to {Map}.", map.CanonicalId);
             return;
         }
 
         var canonical = map.CanonicalId;
         if (string.IsNullOrWhiteSpace(canonical))
         {
-            logger.LogError("LoadMap: entry '{Map}' carries neither a map name nor a workshop id; skipping map switch.", map.DisplayName);
+            logger.LogError("LoadMap: entry '{Map}' carries neither a name nor an id; skipping map switch.", map.Name);
             return;
         }
 
@@ -417,7 +417,7 @@ public sealed partial class MixScrims
 
             if (matchState == MatchState.MapLoading)
             {
-                PrintMessageToAllPlayers(Core.Localizer["announcement.map.loading", map.DisplayName]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.map.loading", map.Name]);
                 LoadSelectedMap(map);
             }
         });
@@ -438,7 +438,7 @@ public sealed partial class MixScrims
         if (maps.Count == 0)
         {
             logger.LogError("GetRandomMap: No maps available for voting. Check configuration.");
-            return new MapDetails { MapName = "de_mirage", DisplayName = "Mirage", CanBeVoted = true };
+            return new MapDetails { Name = "Mirage", Id = "de_mirage" };
         }
         var index = Random.Shared.Next(maps.Count);
         return maps[index];

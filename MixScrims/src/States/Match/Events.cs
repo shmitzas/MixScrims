@@ -82,12 +82,7 @@ public partial class MixScrims
                 ResetPluginState();
                 var mapNameStr = engine.GlobalVars.MapName.ToString() ?? string.Empty;
                 // Reload through the configured entry: a bare name drops the workshop id.
-                var map = (mapNameStr.Length > 0 ? GetMapByName(mapNameStr) : null)
-                    ?? new MapDetails
-                    {
-                        MapName = mapNameStr,
-                        DisplayName = mapNameStr,
-                    };
+                var map = GetRunningMap() ?? new MapDetails { Name = mapNameStr, Id = mapNameStr };
                 LoadMap(map);
             }
             catch (Exception ex)

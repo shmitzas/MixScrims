@@ -43,11 +43,15 @@ public partial class MixScrims
         activePickingTeam = null;
         currentPickIndex = 0;
         teamPickingFinalized = false;
+        pendingFirstPickTeam = null;
+        pickPhaseEpoch++;
         nextPickingTeamOverride = NoPickingTeamOverride;
         openPickMenuPoolSlots.Clear();
         votedMaps.Clear();
         currentVoteMapNames.Clear();
         mapVoteDeadline = null;
+        deferredMapVoteActive = false;
+        mapVoteEpoch++;
         // A stale slot here makes ScheduleMapVoteForJoiner early-return for the rest of the session.
         mapVotePendingJoiners.Clear();
         mapVotingMenu = null;

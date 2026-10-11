@@ -16,11 +16,17 @@ public interface IMixScrims : IDisposable
     /// <summary>Fires when a player's ready status changes during Warmup or MapChosen (SteamID64, isReady).</summary>
     event Action<ulong, bool>? PlayerReadyChanged;
 
-    /// <summary>Fires when a captain slot is filled (team, incoming captain SteamID64).</summary>
+    /// <summary>Fires when a captain slot is filled (team, incoming captain SteamID64), and never for a bot because every bot reads SteamID 0.</summary>
     event Action<Team, ulong>? CaptainAssigned;
 
-    /// <summary>Fires when a captain slot is vacated (team, outgoing captain SteamID64), preceding <see cref="CaptainAssigned"/> on a replacement.</summary>
+    /// <summary>Fires when a captain slot is vacated (team, outgoing captain SteamID64), preceding <see cref="CaptainAssigned"/> on a replacement, and never for a bot.</summary>
     event Action<Team, ulong>? CaptainRemoved;
+
+    /// <summary>Slot-keyed <see cref="CaptainAssigned"/> taking an <c>IPlayer.PlayerID</c>, which fires for bot captains too.</summary>
+    event Action<Team, int>? CaptainAssignedBySlot;
+
+    /// <summary>Slot-keyed <see cref="CaptainRemoved"/> taking an <c>IPlayer.PlayerID</c>, which fires for bot captains too.</summary>
+    event Action<Team, int>? CaptainRemovedBySlot;
 
     /// <summary>Fires once when the PickingTeam phase opens, carrying the team that picks first.</summary>
     event Action<Team>? TeamPickingStarted;
@@ -115,11 +121,17 @@ public interface IMixScrims : IDisposable
     /// <summary>Whether the plugin requires every connected player to be ready before advancing.</summary>
     bool GetRequireAllConnectedPlayersToBeReady();
 
-    /// <summary>Current CT captain SteamID64, or null when unset or invalid.</summary>
+    /// <summary>Current CT captain SteamID64, or null when unset or invalid, and 0 when a bot holds the slot.</summary>
     ulong? GetCtCaptain();
 
-    /// <summary>Current T captain SteamID64, or null when unset or invalid.</summary>
+    /// <summary>Current T captain SteamID64, or null when unset or invalid, and 0 when a bot holds the slot.</summary>
     ulong? GetTCaptain();
+
+    /// <summary>Slot-keyed <see cref="GetCtCaptain"/>, which is the only read that can identify a bot captain.</summary>
+    int? GetCtCaptainSlot();
+
+    /// <summary>Slot-keyed <see cref="GetTCaptain"/>, which is the only read that can identify a bot captain.</summary>
+    int? GetTCaptainSlot();
 
     /// <summary>SteamID64 of the captain entitled to choose the starting side, or null when nobody is.</summary>
     ulong? GetStartingSidePicker();
@@ -133,16 +145,16 @@ public interface IMixScrims : IDisposable
     /// <summary>Live CT and T scores, or <c>(0, 0)</c> when game rules are unavailable.</summary>
     (int Ct, int T) GetMatchScore();
 
-    /// <summary>Map vote tallies keyed by map display name, empty outside the MapVoting state.</summary>
+    /// <summary>Map vote tallies keyed by map display name, for a vote in either mode. Not cleared when a vote ends.</summary>
     IReadOnlyDictionary<string, int> GetMapVoteTallies();
 
-    /// <summary>Map display names currently up for vote in menu order, empty outside the MapVoting state.</summary>
+    /// <summary>Map display names currently up for vote in menu order, for a vote in either mode, empty when none is open.</summary>
     IReadOnlyList<string> GetVoteableMapDisplayNames();
 
     /// <summary>Every map configured in <c>maps.jsonc</c> in file order, independent of match state and re-read per call so a config reload lands.</summary>
     IReadOnlyList<MapPoolEntry> GetConfiguredMapPool();
 
-    /// <summary>Seconds remaining on the map vote deadline, or 0 outside the MapVoting state.</summary>
+    /// <summary>Seconds remaining on the map vote deadline, for a vote in either mode, or 0 when none is open.</summary>
     int GetMapVoteSecondsRemaining();
 
     /// <summary>Map display name the given player currently backs, or null when they have not voted.</summary>
@@ -150,6 +162,9 @@ public interface IMixScrims : IDisposable
 
     /// <summary>Team whose turn it is to pick, or null outside the PickingTeam phase.</summary>
     Team? GetActivePickingTeam();
+
+    /// <summary>Whether the pick rosters have been promoted to the playing ones for this match, which is the only read that answers it in a lobby holding bots.</summary>
+    bool IsTeamPickingFinalized();
 
     /// <summary>Currently-unpicked SteamID64s during the PickingTeam phase, excluding bots.</summary>
     IReadOnlyList<ulong> GetUnpickedPlayers();
@@ -201,6 +216,12 @@ public interface IMixScrims : IDisposable
 
     /// <summary>Current effective value of the built-in center-HTML suppression switch.</summary>
     bool IsBuiltInCenterHtmlSuppressed();
+
+    /// <summary>Suppresses or restores the same-team damage hook, layered over the <c>FaceitLikeDamageControl</c> config: the hook runs only when that is enabled and this is not set.</summary>
+    void SetFaceitLikeDamageControlSuppressed(bool suppressed);
+
+    /// <summary>Current effective value of the same-team damage suppression switch.</summary>
+    bool IsFaceitLikeDamageControlSuppressed();
 
     /// <summary>Whether captains are enabled (<c>!DisableCaptains</c>).</summary>
     bool GetCaptainsEnabled();
@@ -282,8 +303,27 @@ public interface IMixScrims : IDisposable
     /// <summary>Enters the warmup phase.</summary>
     void StartWarmup();
 
-    /// <summary>Opens map voting over the configured map pool.</summary>
+    /// <summary>Opens map voting over the configured map pool. At the deadline MixScrims loads the winning map.</summary>
     void StartMapVoting();
+
+    /// <summary>
+    /// Opens map voting without taking the match state, so a vote can run during live play.
+    /// At the deadline MixScrims announces the winner and raises <c>MapVotingEnded</c> but
+    /// changes no state and loads no map - the caller acts on the result.
+    /// </summary>
+    /// <param name="voteSeconds">Vote length; anything not positive uses <c>DefaultVoteTimeSeconds</c>.</param>
+    /// <returns>Whether the vote opened. False when no maps are available, or when a map voting phase or another deferred vote is already running.</returns>
+    bool StartDeferredMapVote(int voteSeconds);
+
+    /// <summary>
+    /// Closes a running deferred vote immediately, announcing the winner and raising
+    /// <c>MapVotingEnded</c> once. The deadline cannot then fire a second announcement.
+    /// </summary>
+    /// <returns>Whether a deferred vote was running.</returns>
+    bool EndDeferredMapVote();
+
+    /// <summary>Whether a deferred map vote is currently accepting ballots.</summary>
+    bool IsDeferredMapVoteRunning();
 
     /// <summary>Enters the team picking phase.</summary>
     void StartTeamPicking();
@@ -345,6 +385,12 @@ public interface IMixScrims : IDisposable
     /// <summary>SteamID64s on the active T roster.</summary>
     List<ulong> GetPlayingTPlayers();
 
+    /// <summary>Slot-keyed <see cref="GetPlayingCtPlayers"/>, which is the only read that counts a bot on the roster.</summary>
+    IReadOnlyList<int> GetPlayingCtPlayerSlots();
+
+    /// <summary>Slot-keyed <see cref="GetPlayingTPlayers"/>, which is the only read that counts a bot on the roster.</summary>
+    IReadOnlyList<int> GetPlayingTPlayerSlots();
+
     /// <summary>Appends a connected player to the active CT roster list only; <see cref="StartMatch"/> is what moves them onto the team.</summary>
     void AddPlayerToPlayingCtPlayers(ulong steamId);
 
@@ -371,6 +417,12 @@ public interface IMixScrims : IDisposable
 
     /// <summary>Admin-force sets the T captain, bypassing every <see cref="VolunteerAsCaptain"/> eligibility check.</summary>
     void SetTCaptain(ulong steamId);
+
+    /// <summary>Slot-keyed <see cref="SetCtCaptain"/> taking an <c>IPlayer.PlayerID</c>, so bots can captain.</summary>
+    void SetCtCaptainBySlot(int slot);
+
+    /// <summary>Slot-keyed <see cref="SetTCaptain"/> taking an <c>IPlayer.PlayerID</c>, so bots can captain.</summary>
+    void SetTCaptainBySlot(int slot);
 
     /// <summary>Kicks every connected human absent from both playing rosters.</summary>
     void KickNotPlayingPlayers(string? reason = "");

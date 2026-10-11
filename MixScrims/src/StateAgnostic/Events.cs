@@ -112,7 +112,7 @@ partial class MixScrims
             LoadWarmupConfig();
         }
 
-        if (MatchState == MatchState.MapVoting)
+        if (MapVoteIsOpen)
             ScheduleMapVoteForJoiner(playerSlot);
 
         try
@@ -1104,7 +1104,7 @@ partial class MixScrims
     
     public void HandleTakeDamage(ref TakeDamageEntityPreContext ctx)
     {
-        if (!cfg.FaceitLikeDamageControl)
+        if (!cfg.FaceitLikeDamageControl || suppressFaceitLikeDamageControl)
         {
             return;
         }

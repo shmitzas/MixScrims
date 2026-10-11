@@ -124,11 +124,12 @@ public partial class MixScrims
             return;
         }
 
-        var mapDetails = mapsConfig.Maps.FirstOrDefault(m => m.MapName.Equals(mapName, StringComparison.OrdinalIgnoreCase));
+        // Unresolved is not fatal: history records a synthetic entry rather than aborting the start.
+        var mapDetails = GetRunningMap();
         if (mapDetails == null)
         {
-            logger.LogWarning("StartMatch: Map {MapName} not found in configuration.", mapName);
-            return;
+            logger.LogWarning("StartMatch: Map {MapName} not found in configuration; recording it in history as-is.", mapName);
+            mapDetails = new MapDetails { Name = mapName, Id = mapName };
         }
 
         if (playedMaps.Count >= cfg.DisallowVotePreviousMaps)
@@ -144,7 +145,7 @@ public partial class MixScrims
                 while (playedMaps.Count > maxHistory)
                 {
                     if (cfg.DetailedLogging)
-                        logger.LogInformation("StartMatch: Removing oldest map {MapName} from history.", playedMaps[0].MapName);
+                        logger.LogInformation("StartMatch: Removing oldest map {MapName} from history.", playedMaps[0].CanonicalId);
                     playedMaps.RemoveAt(0);
                 }
             }

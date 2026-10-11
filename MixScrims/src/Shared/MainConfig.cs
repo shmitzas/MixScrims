@@ -105,9 +105,11 @@ public class MainConfig
 
 public class MapDetails
 {
-    public string MapName { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    public string WorkshopId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Official map name, a workshop id, or null to use <see cref="Name"/> as the identifier.</summary>
+    public string? Id { get; set; }
+
     public bool CanBeVoted { get; set; } = true;
 
     /// <summary>Accepts <c>ws:3070596702</c> or <c>3070596702</c>; null when the value names no workshop item.</summary>
@@ -123,17 +125,26 @@ public class MapDetails
     }
 
     [JsonIgnore]
-    public string? ResolvedWorkshopId => ResolveWorkshopId(WorkshopId);
+    public string? ResolvedWorkshopId => ResolveWorkshopId(Id);
 
     [JsonIgnore]
     public bool IsWorkshop => ResolvedWorkshopId is not null;
 
     /// <summary>
-    /// What every map-change command must be given — never <see cref="DisplayName"/>, which the
-    /// engine prefix-matches against installed maps and can resolve to a different map.
+    /// What every map-change command must be given — never <see cref="Name"/> when an
+    /// <see cref="Id"/> exists, because the engine prefix-matches a loose name against
+    /// installed maps and can resolve it to a different map.
     /// </summary>
     [JsonIgnore]
-    public string CanonicalId => ResolvedWorkshopId ?? MapName.Trim();
+    public string CanonicalId
+    {
+        get
+        {
+            if (ResolvedWorkshopId is { } workshop) return workshop;
+            var id = Id?.Trim() ?? string.Empty;
+            return id.Length > 0 ? id : Name.Trim();
+        }
+    }
 }
 
 public class VotedMap

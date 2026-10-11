@@ -19,7 +19,7 @@ public partial class MixScrims
             logger.LogInformation("All maps list:");
             foreach (var map in maps)
             {
-                logger.LogInformation("Map: {DisplayName} ({MapName})", map.DisplayName, map.MapName);
+                logger.LogInformation("Map: {DisplayName} ({MapName})", map.Name, map.CanonicalId);
             }
         }
         else
@@ -27,7 +27,7 @@ public partial class MixScrims
             PrintMessageToPlayer(admin, "All maps list:");
             foreach (var map in maps)
             {
-                PrintMessageToPlayer(admin, Core.Localizer["command.maps", map.DisplayName, map.MapName]);
+                PrintMessageToPlayer(admin, Core.Localizer["command.maps", map.Name, map.CanonicalId]);
             }
         }
     }

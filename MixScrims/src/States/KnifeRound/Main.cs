@@ -47,6 +47,10 @@ public partial class MixScrims
         // Captured before the state write below; by the decision point the state reads KnifeRound.
         var previousState = mixScrimsService.GetCurrentMatchState();
 
+        // Stock only reaches the knife round through PickingTeam, which stops these already;
+        // a driver entering it straight from Warmup does not.
+        StopPreMatchAnnouncementTimers();
+
         mixScrimsService.SetMatchState(MatchState.KnifeRound);
         mixScrimsService.RaiseKnifeRoundStarted();
         PrintMessageToAllPlayers(Core.Localizer["announcement.state_changed.knife_round"]);

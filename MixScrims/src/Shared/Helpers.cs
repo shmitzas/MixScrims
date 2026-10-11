@@ -320,8 +320,35 @@ public sealed partial class MixScrims
     /// </summary>
     internal List<MapDetails> GetMapsToVote()
     {
-        return mapsConfig.Maps
-            .Where(m => m.CanBeVoted && !playedMaps.Any(pm => pm.MapName == m.MapName)).ToList();
+        var pool = mapsConfig.Maps
+            .Where(m => m.CanBeVoted && !playedMaps.Any(pm =>
+                string.Equals(pm.CanonicalId, m.CanonicalId, StringComparison.OrdinalIgnoreCase))).ToList();
+
+        // playedMaps is only appended by StartMatch, so a vote opened before any match has run
+        // on this map would otherwise offer the map we are standing on.
+        var running = GetRunningMap();
+        if (running is null) return pool;
+
+        var others = pool
+            .Where(m => !string.Equals(m.CanonicalId, running.CanonicalId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // A one-map pool has nothing else to offer, and an empty vote sends MapVoting to Reset.
+        return others.Count > 0 ? others : pool;
+    }
+
+    /// <summary>The running map's configured entry, or null when <c>maps.jsonc</c> does not list it.</summary>
+    internal MapDetails? GetRunningMap()
+    {
+        if (Core.Engine is not { } engine) return null;
+
+        // The engine names a workshop map by an internal name no entry carries; "0"/blank means stock.
+        var workshopId = engine.WorkshopId?.Trim() ?? string.Empty;
+        if (workshopId.Length > 0 && workshopId != "0" && GetMapByWorkshopId(workshopId) is { } workshopMap)
+            return workshopMap;
+
+        var mapName = engine.GlobalVars.MapName.ToString();
+        return string.IsNullOrEmpty(mapName) ? null : GetMapByName(mapName);
     }
 
     /// <summary>
@@ -387,13 +414,15 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Retrieves the details of a map by its name or display name.
+    /// Retrieves the details of a map by its display name or its identifier.
     /// </summary>
     internal MapDetails? GetMapByName(string mapName)
     {
+        // CanonicalId as well as Id, so a bare `3070596702` still finds a `ws:`-prefixed entry.
         return mapsConfig.Maps.FirstOrDefault(m =>
-            string.Equals(m.MapName, mapName, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(m.DisplayName, mapName, StringComparison.OrdinalIgnoreCase));
+            string.Equals(m.Name, mapName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(m.Id, mapName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(m.CanonicalId, mapName, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

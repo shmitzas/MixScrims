@@ -174,7 +174,7 @@ public partial class MixScrims
     /// </remarks>
     internal void HandlePlayerDisconnectMapVote(IPlayer leaver)
     {
-        if (mixScrimsService.GetCurrentMatchState() != MatchState.MapVoting) return;
+        if (!MapVoteIsOpen) return;
         if (votedMaps.Count == 0) return;
 
         var slot = SafePlayerId(leaver);
@@ -188,7 +188,7 @@ public partial class MixScrims
 
         if (cfg.DetailedLogging)
             logger.LogInformation("HandlePlayerDisconnectMapVote: withdrew a vote for {Map} ({Votes} left).",
-                castVote.Map?.DisplayName ?? "<unknown>", castVote.Votes);
+                castVote.Map?.Name ?? "<unknown>", castVote.Votes);
     }
 
     /// <summary>

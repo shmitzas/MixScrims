@@ -1,6 +1,9 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
 using SwiftlyS2.Core.Menus.OptionsBase;
+using SwiftlyS2.Shared.GameEventDefinitions;
+using SwiftlyS2.Shared.GameEvents;
+using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using System.Numerics;
@@ -30,6 +33,16 @@ public partial class MixScrims
     // Slots the currently-open pick menu offers. A disconnect only has to rebuild the menu
     // when it removes one of these; see HandlePlayerDisconnectTeamPickMenu.
     internal readonly HashSet<int> openPickMenuPoolSlots = [];
+
+    // First picker, parked between the toss and the round the phase's own restart produces.
+    internal Team? pendingFirstPickTeam = null;
+
+    // A captain disconnecting re-enters the phase; the backstop must not fire into its successor.
+    internal int pickPhaseEpoch = 0;
+
+    // Covers a restart that dispatched but produced no round_start; 2s scheduling + 1s
+    // TerminateRound delay puts the real one at ~3s.
+    private const float FirstPickPromptBackstopSeconds = 6f;
 
     /// <summary>
     /// Initiates the team-picking phase of the match, assigning captains to teams and prompting the first captain to
@@ -162,6 +175,8 @@ public partial class MixScrims
             {
                 logger.LogWarning("StartTeamPickingPhase: restart did not dispatch; re-pausing so the pick phase stays frozen.");
                 PauseMatch();
+                // No restart means no round_start, so nothing else will ever open the menu.
+                OpenFirstPickPrompt("restart-failed");
             }
         });
         Core.Scheduler.StopOnMapChange(pickRestartToken);
@@ -189,12 +204,47 @@ public partial class MixScrims
             ?? (Random.Shared.Next(2, 4) == 3 ? Team.CT : Team.T);
         activePickingTeam = pickFirst;
         mixScrimsService.RaiseTeamPickingStarted(pickFirst);
-        if (pickFirst == Team.CT)
+
+        // The menu waits for the restart above to land, so captains pick over a round that has
+        // already reset and respawned them. activePickingTeam and the event stay here, leaving a
+        // consumer's view of the phase unchanged.
+        pendingFirstPickTeam = pickFirst;
+        var thisPhase = ++pickPhaseEpoch;
+        var pickPromptBackstopToken = Core.Scheduler.DelayBySeconds(FirstPickPromptBackstopSeconds, () =>
         {
-            PromptCaptainToPickPlayer(captainCt, Team.CT);
+            if (pickPhaseEpoch != thisPhase) return;
+            OpenFirstPickPrompt("backstop");
+        });
+        Core.Scheduler.StopOnMapChange(pickPromptBackstopToken);
+    }
+
+    /// <summary>Opens the first captain's pick menu, latched so its three callers cannot double it.</summary>
+    private void OpenFirstPickPrompt(string callSite)
+    {
+        if (pendingFirstPickTeam is not { } team) return;
+        if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam)
+        {
+            pendingFirstPickTeam = null;
             return;
         }
-        PromptCaptainToPickPlayer(captainT, Team.T);
+
+        pendingFirstPickTeam = null;
+
+        if (cfg.DetailedLogging)
+            logger.LogInformation("OpenFirstPickPrompt[{Site}]: prompting the {Team} captain.", callSite, team);
+
+        PromptCaptainToPickPlayer(team == Team.CT ? captainCt : captainT, team);
+    }
+
+    /// <summary>
+    /// The round the pick phase's own restart produced: players have respawned, so this is where
+    /// the first pick menu opens.
+    /// </summary>
+    [GameEventHandler(HookMode.Post)]
+    public HookResult HandleRoundStartPickingTeam(EventRoundStart @event)
+    {
+        OpenFirstPickPrompt("round_start");
+        return HookResult.Continue;
     }
 
     private Team? ConsumeNextPickingTeamOverride()
@@ -654,8 +704,9 @@ public partial class MixScrims
             }
             if (matchState == MatchState.KnifeRound)
             {
-                var newCtId = captainCt.SteamID;
-                if (!playingCtPlayers.Any(p => SafeSteamId(p) == newCtId))
+                // Slot, not SteamID: a bot captain reads 0 and would match any other bot already here.
+                var newCtSlot = SafePlayerId(captainCt);
+                if (!playingCtPlayers.Any(p => SafePlayerId(p) == newCtSlot))
                     playingCtPlayers.Add(captainCt);
             }
 
@@ -733,8 +784,9 @@ public partial class MixScrims
             }
             if (matchState == MatchState.KnifeRound)
             {
-                var newTId = captainT.SteamID;
-                if (!playingTPlayers.Any(p => SafeSteamId(p) == newTId))
+                // Slot, not SteamID: a bot captain reads 0 and would match any other bot already here.
+                var newTSlot = SafePlayerId(captainT);
+                if (!playingTPlayers.Any(p => SafePlayerId(p) == newTSlot))
                     playingTPlayers.Add(captainT);
             }
 
