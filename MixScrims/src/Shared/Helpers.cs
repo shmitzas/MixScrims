@@ -227,6 +227,18 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
+    /// YES votes needed to carry a vote: ceil(count * ratio), floored by <paramref name="minimumVotes"/>.
+    /// Shared by RTV and the server-wide vote kick so the two cannot drift apart.
+    /// </summary>
+    internal static int ComputeVoteThreshold(int count, int minimumVotes, double ratio)
+    {
+        if (count <= 0)
+            return Math.Max(1, minimumVotes);
+        var byRatio = (int)Math.Ceiling(count * ratio);
+        return Math.Max(minimumVotes, byRatio);
+    }
+
+    /// <summary>
     /// Returns a list of all valid players.
     /// </summary>
     internal List<IPlayer> GetPlayers()
@@ -316,12 +328,42 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Returns a list of maps that can be voted for.
+    /// Returns a list of maps that can be voted for. <paramref name="excludeRunningMap"/> is for
+    /// RTV, which re-rolls from Warmup before <c>StartMatch</c> has recorded the current map in
+    /// <c>playedMaps</c> and would otherwise offer the map we are standing on. Every other vote
+    /// leaves the running map to the <c>DisallowVotePreviousMaps</c> history alone.
     /// </summary>
-    internal List<MapDetails> GetMapsToVote()
+    internal List<MapDetails> GetMapsToVote(bool excludeRunningMap = false)
     {
-        return mapsConfig.Maps
-            .Where(m => m.CanBeVoted && !playedMaps.Any(pm => pm.MapName == m.MapName)).ToList();
+        var pool = mapsConfig.Maps
+            .Where(m => !playedMaps.Any(pm =>
+                string.Equals(pm.CanonicalId, m.CanonicalId, StringComparison.OrdinalIgnoreCase))).ToList();
+
+        if (!excludeRunningMap) return pool;
+
+        var running = GetRunningMap();
+        if (running is null) return pool;
+
+        var others = pool
+            .Where(m => !string.Equals(m.CanonicalId, running.CanonicalId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // A one-map pool has nothing else to offer, and an empty vote sends MapVoting to Reset.
+        return others.Count > 0 ? others : pool;
+    }
+
+    /// <summary>The running map's configured entry, or null when <c>maps.jsonc</c> does not list it.</summary>
+    internal MapDetails? GetRunningMap()
+    {
+        if (Core.Engine is not { } engine) return null;
+
+        // The engine names a workshop map by an internal name no entry carries; "0"/blank means stock.
+        var workshopId = engine.WorkshopId?.Trim() ?? string.Empty;
+        if (workshopId.Length > 0 && workshopId != "0" && GetMapByWorkshopId(workshopId) is { } workshopMap)
+            return workshopMap;
+
+        var mapName = engine.GlobalVars.MapName.ToString();
+        return string.IsNullOrEmpty(mapName) ? null : GetMapByName(mapName);
     }
 
     /// <summary>
@@ -347,6 +389,24 @@ public sealed partial class MixScrims
     {
         return GetPlayers().FirstOrDefault(p =>
             string.Equals(p.Name, playerName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Resolves a chat-typed target through SwiftlyS2's own matcher, so partial names, #userid,
+    /// SteamID64 and @-groups all behave as they do in every other plugin on the server.
+    /// Ambiguous input resolves to nothing - a kick must never guess between two matches.
+    /// </summary>
+    internal IPlayer? FindTargetByQuery(IPlayer caller, string query, out bool ambiguous)
+    {
+        // IncludeSelf keeps the caller in range so self-targeting keeps its own
+        // message instead of degrading into "not found".
+        var matches = Core.PlayerManager
+            .FindTargettedPlayers(caller, query, TargetSearchMode.IncludeSelf)
+            .Where(IsPlayerValid)
+            .ToList();
+
+        ambiguous = matches.Count > 1;
+        return ambiguous ? null : matches.FirstOrDefault();
     }
 
     internal IPlayer? GetPlayerBySteamId(ulong steamId)
@@ -387,13 +447,15 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Retrieves the details of a map by its name or display name.
+    /// Retrieves the details of a map by its display name or its identifier.
     /// </summary>
     internal MapDetails? GetMapByName(string mapName)
     {
+        // CanonicalId as well as Id, so a bare `3070596702` still finds a `ws:`-prefixed entry.
         return mapsConfig.Maps.FirstOrDefault(m =>
-            string.Equals(m.MapName, mapName, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(m.DisplayName, mapName, StringComparison.OrdinalIgnoreCase));
+            string.Equals(m.Name, mapName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(m.Id, mapName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(m.CanonicalId, mapName, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -401,8 +463,13 @@ public sealed partial class MixScrims
     /// </summary>
 	internal MapDetails? GetMapByWorkshopId(string workshopId)
 	{
+		// Compare resolved ids so a `ws:`-prefixed entry and a bare numeric argument match.
+		var wanted = MapDetails.ResolveWorkshopId(workshopId);
+		if (wanted == null)
+			return null;
+
 		return mapsConfig.Maps.FirstOrDefault(m =>
-			string.Equals(m.WorkshopId, workshopId, StringComparison.OrdinalIgnoreCase));
+			string.Equals(m.ResolvedWorkshopId, wanted, StringComparison.OrdinalIgnoreCase));
 	}
 
 	/// <summary>
@@ -468,18 +535,13 @@ public sealed partial class MixScrims
     private readonly HashSet<int> _loggedDisposedPlayerHashes = new();
 
     /// <summary>
-    /// Safely reads <see cref="IPlayer.SteamID"/> from a possibly-null or possibly-disposed
-    /// player reference. Returns <c>0UL</c> on any failure (null, ObjectDisposedException,
-    /// or any other exception). Use this for LINQ predicates and projections over the plugin's
-    /// stored roster lists (<c>playingCtPlayers</c>, <c>playingTPlayers</c>, <c>pickedCtPlayers</c>,
-    /// <c>pickedTPlayers</c>, <c>readyPlayers</c>) — SwiftlyS2 may dispose the underlying Player
-    /// object between the time we added it and the time we read it, and every direct property
-    /// access throws <see cref="ObjectDisposedException"/> on a disposed object.
+    /// Reads <see cref="IPlayer.SteamID"/> from a possibly-null or possibly-disposed reference,
+    /// returning <c>0UL</c> on any failure.
     /// </summary>
     /// <remarks>
-    /// Real players always have a non-zero SteamID; only bots return <c>0UL</c> from a live
-    /// read. Rosters never contain bots (they are filtered upstream), so a returned <c>0UL</c>
-    /// from a roster entry unambiguously means "disposed".
+    /// SwiftlyS2 can dispose a Player between the time it was added to a roster list and the time
+    /// it is read, and every direct property access then throws, so roster LINQ must go through
+    /// this. Rosters never contain bots, so a returned <c>0UL</c> unambiguously means disposed.
     /// </remarks>
     internal ulong SafeSteamId(IPlayer? player)
     {
@@ -543,23 +605,19 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Safely reads the player's name from a possibly-null or possibly-disposed player
-    /// reference. Returns a sentinel string (<c>&lt;null&gt;</c>, <c>&lt;disposed&gt;</c>, or
-    /// <c>&lt;error&gt;</c>) on any failure, and a <c>Slot {id}</c> fallback (via
-    /// <see cref="SafePlayerId"/>) when the name is empty. Use this for structured-log
-    /// <c>{PlayerName}</c> placeholders over the plugin's stored roster lists so log formatting
-    /// never throws when SwiftlyS2 has disposed the underlying Player object between the time we
-    /// added it and the time we read it. Same disposal-safety rationale as
-    /// <see cref="SafeSteamId"/>.
+    /// Reads a player's name from a possibly-null or possibly-disposed reference, falling back to
+    /// <c>Slot {id}</c> or a sentinel (<c>&lt;null&gt;</c>, <c>&lt;disposed&gt;</c>, <c>&lt;error&gt;</c>).
     /// </summary>
+    /// <remarks>
+    /// <b>Call only below an <see cref="IsPlayerValid"/> guard, and only on the game thread.</b>
+    /// <c>IPlayer.Name</c> derefs a ServerSideClient pointer unguarded, so a torn-down client
+    /// SIGSEGVs the host - the catch below cannot contain that.
+    /// </remarks>
     internal string SafePlayerName(IPlayer? player)
     {
         if (player is null) return "<null>";
         try
         {
-            // IPlayer.Name is a slot-indexed engine lookup. Controller.PlayerName instead walks
-            // the controller's schema memory, which SIGSEGVs the host (uncatchable) once the
-            // controller is torn down - try/catch here would not save us.
             var name = player.Name;
             return string.IsNullOrEmpty(name) ? $"Slot {SafePlayerId(player)}" : name;
         }

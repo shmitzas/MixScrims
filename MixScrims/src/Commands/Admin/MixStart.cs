@@ -51,10 +51,7 @@ public partial class MixScrims
             PrintMessageToAllPlayers(Core.Localizer["command.force.match_start", "Console"]);
         }
 
-        // Only force-start (re)launch the knife round from pre-match phases. If we are already
-        // past picking teams (KnifeRound / PickingStartingSide / Match / Timeout), restarting
-        // StartKnifeRound() would loop the knife round forever (the bug observed when a captain
-        // ref was disposed and the side-pick menu never opened, so admin used !start).
+        // Past picking the rosters are sealed, so re-entering would restart a live match.
         var currentState = mixScrimsService.GetCurrentMatchState();
         if (currentState != MatchState.Warmup
             && currentState != MatchState.MapChosen
@@ -68,6 +65,6 @@ public partial class MixScrims
             return;
         }
 
-        StartKnifeRound();
+        StartMatchWithoutKnifeRound();
     }
 }

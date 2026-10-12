@@ -5,6 +5,82 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
+## [1.12.0] - 2026-10-10
+
+Must update to this version in order to avoid random crashes.
+
+## API consumers must update (contract 2.9.0).
+
+- This API change also improved async <> main-thread safety. Check [documentation](https://github.com/shmitzas/MixScrims/wiki/API-Reference#thread-affinity) to find what needs to be updated for all plugins that use MixScrimsAPI.
+
+## New maps.jsonc config style - matches [MapChooser](https://github.com/SwiftlyS2-Plugins/MapChooser)
+
+Example new config:
+```jsonc
+{
+  "MapsConfig": {
+    "Maps": [
+      {
+        "Name": "Mirage",
+        "Id": "de_mirage"
+      },
+      {
+        "Name": "Workshop Map",
+        "Id": "3375020"
+      },
+      ...
+    ]
+  }
+}
+```
+
+## Full summary:
+
+- Fixed a server crash when clicking any in-game menu button — map voting was the
+  common one, but every other menu could trigger it too.
+- Fixed two team picks landing in the same instant both being applied, which could
+  put a player on the wrong side or end the draft with lopsided teams.
+- Map changes no longer load the wrong map when another plugin, an admin or the
+  game's own end-of-match vote has already queued a next map.
+- Map entries are one name and one ID instead of three fields. The ID may be an
+  official map name, a workshop ID, or `ws:` plus a workshop ID, and omitting it
+  falls back to the name. `IsWorkshopMap` and `CanBeVoted` are gone — `maps.jsonc`
+  takes comments, so commenting an entry out is how a map leaves rotation now.
+  A leftover `CanBeVoted` is ignored, so a map you had excluded from voting is back
+  in the vote until you comment it out. The two are not equivalent: a commented-out
+  entry is also not loadable with `!map`, where `CanBeVoted: false` still was.
+- Only the knife round's winning captain can decide the starting side, matching what
+  `!stay` / `!switch` already enforced.
+- `!mix_start` now starts the match itself instead of launching a knife round first.
+- New `SkipKnifeRoundWhenPickingAndCaptainsDisabled` (off by default) starts the
+  match straight after teams are assigned. Applies only with `DisableCaptains` and
+  `SkipTeamPicking` both on, and gives up the whole-team starting-side vote.
+- Changing map after a match now comes up in warmup, where `!ready` and RTV work
+  again, instead of carrying the finished match's state across.
+- `ChangeMapAfterMatch(map)` does the same for a consumer driving its own post-match
+  flow, without players being dropped into warmup on the map about to be discarded.
+  `ChangeMap()` is unchanged.
+- The team-pick menu now opens on the round the pick phase restarts into, so captains
+  pick once everyone has respawned on their new sides.
+- Players who connect while map voting is running now get the vote menu.
+- A disconnect no longer abandons its own cleanup half-way, so leavers are reliably
+  removed from rosters, the ready list, open votes and pick menus.
+- A map vote abandoned before it finishes no longer changes the map on its own.
+- Map votes no longer offer the map currently being played, workshop maps included. A
+  one-map pool still offers that map, because the alternative is an empty vote.
+- `DisallowVotePreviousMaps` now also keeps played workshop maps out of later votes.
+- `StartDeferredMapVote(seconds)` runs the usual ballot and menu without handing the
+  match over to the voting phase; the winner is announced but not loaded, and the
+  caller keeps the result. `EndDeferredMapVote()` closes a running one early.
+- `SetServerWideVoteKick(true)` puts `!votekick` to every human on the server instead
+  of one team, and lets it run in any state bar a map load or the post-match teardown.
+  Off by default — vote kick is otherwise unchanged.
+- A server-wide vote kick passes on the same threshold `!rtv` uses instead of requiring
+  unanimity. Bots neither vote nor count towards it, and it closes early once the
+  remaining ballots cannot reach the threshold.
+- The ready-count centre HUD and the ready-status chat announcements now stop when the
+  knife round starts, as they already did on every other way out of warmup.
+
 ## [1.11.7] - 2026-10-08
 
 - Votes no longer hang when a player leaves mid-vote. Surrender, timeout and vote

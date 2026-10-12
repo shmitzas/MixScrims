@@ -211,6 +211,13 @@ public sealed partial class MixScrims
         if (cfg.DetailedLogging)
             logger.LogInformation("CheckReadyPlayersToStart: readyPlayers={ReadyCount} (effective={Effective}) | Required={Required}", readyPlayers.Count, effectiveReady, required);
 
+        if (phaseProgressionHeld)
+        {
+            if (cfg.DetailedLogging)
+                logger.LogInformation("CheckReadyPlayersToStart: phase progression is held; not advancing.");
+            return;
+        }
+
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState == MatchState.Warmup && effectiveReady >= required)
@@ -296,7 +303,8 @@ public sealed partial class MixScrims
     /// </summary>
     internal void RemovePlayerFromReadyList(IPlayer player, bool announce = false)
     {
-        var name = player.Name ?? $"#{player.PlayerID}";
+        // HandleDisconnectedPlayer passes an already-disposed leaver, so Safe* reads only.
+        var name = SafePlayerName(player);
         if (cfg.DetailedLogging)
             logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
 
@@ -304,8 +312,10 @@ public sealed partial class MixScrims
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
-            var sid = player.SteamID;
-            var existing = readyPlayers.FirstOrDefault(p => SafeSteamId(p) == sid);
+            var sid = SafeSteamId(player);
+            var existing = sid != 0
+                ? readyPlayers.FirstOrDefault(p => SafeSteamId(p) == sid)
+                : readyPlayers.FirstOrDefault(p => IsSamePlayer(p, player));
 
             if (existing == null)
             {
@@ -339,7 +349,7 @@ public sealed partial class MixScrims
     internal void LoadSelectedMap(MapDetails map)
     {
 		if (cfg.DetailedLogging)
-			logger.LogInformation("LoadSelectedMap: Loading map {Map}", map.MapName);
+			logger.LogInformation("LoadSelectedMap: Loading map {Map}", map.CanonicalId);
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
@@ -358,7 +368,7 @@ public sealed partial class MixScrims
         Core.Scheduler.StopOnMapChange(loadMapToken);
 
         mixScrimsService.SetMatchState(MatchState.MapLoading);
-        PrintMessageToAllPlayers(Core.Localizer["announcement.map.changing", map.DisplayName]);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.map.changing", map.Name]);
         ScheduleMapLoadingAnnouncement(map);
     }
 
@@ -372,20 +382,47 @@ public sealed partial class MixScrims
         // have already torn the engine down between scheduling and firing.
         if (Core.Engine is not { } engine)
         {
-            logger.LogWarning("LoadMap: Core.Engine unavailable; skipping map switch to {Map}.", map.MapName);
+            logger.LogWarning("LoadMap: Core.Engine unavailable; skipping map switch to {Map}.", map.CanonicalId);
+            return;
+        }
+
+        var canonical = map.CanonicalId;
+        if (string.IsNullOrWhiteSpace(canonical))
+        {
+            logger.LogError("LoadMap: entry '{Map}' carries neither a name nor an id; skipping map switch.", map.Name);
             return;
         }
 
 		if (cfg.DetailedLogging)
-			logger.LogInformation("LoadMap: Executing map change to {Map}", map.MapName);
-        if (map.IsWorkshopMap && !string.IsNullOrWhiteSpace(map.WorkshopId))
+			logger.LogInformation("LoadMap: Executing map change to {Map}", canonical);
+
+        // `nextlevel` is a server-wide convar any plugin, admin or the built-in end-of-match
+        // vote can leave populated, and a stale value overrides the change issued right after
+        // it. Overwriting it is what makes the command below the one that lands.
+        engine.ExecuteCommand($"nextlevel {canonical}");
+        engine.ExecuteCommand(map.IsWorkshop ? $"host_workshop_map {canonical}" : $"changelevel {canonical}");
+    }
+
+    /// <summary>
+    /// Announces the change, then resets the match and switches level together once the announcement has been up for <paramref name="announceSeconds"/>.
+    /// </summary>
+    internal void LoadMapAfterMatch(MapDetails map, int announceSeconds)
+    {
+        if (cfg.DetailedLogging)
+            logger.LogInformation("LoadMapAfterMatch: announcing {Map}, switching level in {Seconds}s", map.CanonicalId, announceSeconds);
+
+        // Warmup, not the phase being left: HandleMapChosenNewMapLoad restores this value.
+        stateBeforeMapLoading = MatchState.Warmup;
+        mixScrimsService.SetMatchState(MatchState.MapLoading);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.map.changing", map.Name]);
+
+        var token = Core.Scheduler.DelayBySeconds(Math.Max(0, announceSeconds), () =>
         {
-            engine.ExecuteCommand($"host_workshop_map {map.WorkshopId}");
-        }
-        else
-        {
-            engine.ExecuteCommand($"map {map.MapName}");
-        }
+            // LoadMap in this same callback: the reset defers its warmup.cfg exec by a tick, which is where the level change hides the stall.
+            ResetPluginState();
+            LoadMap(map);
+        });
+        Core.Scheduler.StopOnMapChange(token);
     }
 
     /// <summary>
@@ -402,7 +439,7 @@ public sealed partial class MixScrims
 
             if (matchState == MatchState.MapLoading)
             {
-                PrintMessageToAllPlayers(Core.Localizer["announcement.map.loading", map.DisplayName]);
+                PrintMessageToAllPlayers(Core.Localizer["announcement.map.loading", map.Name]);
                 LoadSelectedMap(map);
             }
         });
@@ -415,15 +452,17 @@ public sealed partial class MixScrims
     /// </summary>
     internal MapDetails GetRandomMap()
     {
-        var maps = GetMapsToVote();
+        // Reached only as the "no votes were cast" fallback, where the point is to switch away
+        // from here — returning the running map would be a non-answer.
+        var maps = GetMapsToVote(excludeRunningMap: true);
         if (maps.Count == 0)
         {
-            maps = mapsConfig.Maps.Where(m => m.CanBeVoted).ToList();
+            maps = mapsConfig.Maps.ToList();
         }
         if (maps.Count == 0)
         {
             logger.LogError("GetRandomMap: No maps available for voting. Check configuration.");
-            return new MapDetails { MapName = "de_mirage", DisplayName = "Mirage", CanBeVoted = true };
+            return new MapDetails { Name = "Mirage", Id = "de_mirage" };
         }
         var index = Random.Shared.Next(maps.Count);
         return maps[index];
@@ -489,17 +528,36 @@ public sealed partial class MixScrims
     /// </summary>
     internal void SetCtCaptain(IPlayer admin, string pickedPlayerName)
     {
+        if (admin is null)
+        {
+            logger.LogError("SetCtCaptain: admin is null");
+            return;
+        }
+
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        var slot = admin.PlayerID;
+        Core.Scheduler.NextTick(() => SetCtCaptainOnGameThread(slot, pickedPlayerName));
+    }
+
+    private void SetCtCaptainOnGameThread(int adminSlot, string pickedPlayerName)
+    {
+        var admin = Core.PlayerManager.GetPlayer(adminSlot);
+        if (admin is null || !IsPlayerValid(admin))
+        {
+            logger.LogWarning("SetCtCaptain: slot {Slot} left before the pick could be applied.", adminSlot);
+            return;
+        }
+
         var player = GetPlayerByName(pickedPlayerName);
 
         if (player == null || !IsPlayerValid(player))
         {
             logger.LogError("SetCtCaptain: picked player is invalid");
-            var localizer = Core.Translation.GetPlayerLocalizer(admin);
             admin.SendChat(GetServerPrefix() + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             return;
         }
 
-        PrintMessageToAllPlayers(Core.Localizer["command.captain.ct", admin.Name ?? $"#{admin.PlayerID}", player.Name ?? $"#{player.PlayerID}"]);
+        PrintMessageToAllPlayers(Core.Localizer["command.captain.ct", SafePlayerName(admin), SafePlayerName(player)]);
         PickCtCaptain(player);
 
         CloseMenuForPlayer(admin);
@@ -510,17 +568,36 @@ public sealed partial class MixScrims
     /// </summary>
     internal void SetTCaptain(IPlayer admin, string pickedPlayerName)
     {
+        if (admin is null)
+        {
+            logger.LogError("SetTCaptain: admin is null");
+            return;
+        }
+
+        // Same thread-pool dispatch as SetCtCaptain above.
+        var slot = admin.PlayerID;
+        Core.Scheduler.NextTick(() => SetTCaptainOnGameThread(slot, pickedPlayerName));
+    }
+
+    private void SetTCaptainOnGameThread(int adminSlot, string pickedPlayerName)
+    {
+        var admin = Core.PlayerManager.GetPlayer(adminSlot);
+        if (admin is null || !IsPlayerValid(admin))
+        {
+            logger.LogWarning("SetTCaptain: slot {Slot} left before the pick could be applied.", adminSlot);
+            return;
+        }
+
         var player = GetPlayerByName(pickedPlayerName);
 
         if (player == null || !IsPlayerValid(player))
         {
             logger.LogError("SetTCaptain: picked player is invalid");
-            var localizer = Core.Translation.GetPlayerLocalizer(admin);
             admin.SendChat(GetServerPrefix() + " " + Core.Localizer["error.invalid_player_picked", pickedPlayerName]);
             return;
         }
 
-        PrintMessageToAllPlayers(Core.Localizer["command.captain.t", admin.Name ?? $"#{admin.PlayerID}", player.Name ?? $"#{player.PlayerID}"]);
+        PrintMessageToAllPlayers(Core.Localizer["command.captain.t", SafePlayerName(admin), SafePlayerName(player)]);
         PickTCaptain(player);
 
         CloseMenuForPlayer(admin);
@@ -544,7 +621,12 @@ public sealed partial class MixScrims
             return;
         }
 
-        var steamId = player.SteamID;
+        var steamId = SafeSteamId(player);
+        if (steamId == 0)
+        {
+            // Disposed reference or a bot - neither is punishable.
+            return;
+        }
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (cfg.PlayerLeavePunishment.Sensitivity == 0)

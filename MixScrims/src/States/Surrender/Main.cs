@@ -192,9 +192,23 @@ public partial class MixScrims
     /// </summary>
     internal void HandleSurrenderVote(IPlayer player, string choice)
     {
-        if (!IsPlayerValid(player))
+        if (player is null)
         {
-            logger.LogWarning("HandleSurrenderVote: ignoring vote from invalid/disconnected player {Slot}.", player?.Slot);
+            logger.LogWarning("HandleSurrenderVote: ignoring vote from a null player reference.");
+            return;
+        }
+
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        var slot = player.PlayerID;
+        Core.Scheduler.NextTick(() => HandleSurrenderVoteOnGameThread(slot, choice));
+    }
+
+    private void HandleSurrenderVoteOnGameThread(int slot, string choice)
+    {
+        var player = Core.PlayerManager.GetPlayer(slot);
+        if (player is null || !IsPlayerValid(player))
+        {
+            logger.LogWarning("HandleSurrenderVote: ignoring vote from invalid/disconnected player {Slot}.", slot);
             return;
         }
 

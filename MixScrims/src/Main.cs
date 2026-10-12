@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.11.7",
+    Version = "1.12.0",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -48,6 +48,12 @@ public partial class MixScrims : BasePlugin
     // until plugin unload.
     internal bool suppressBuiltInMenus = false;
     internal bool suppressBuiltInCenterHtml = false;
+
+    // Not seeded from cfg: it layers over FaceitLikeDamageControl rather than replacing it,
+    // so a consumer that never calls the setter must leave the configured behaviour alone.
+    internal bool suppressFaceitLikeDamageControl = false;
+
+    internal bool phaseProgressionHeld = false;
 
     public MixScrims(ISwiftlyCore core) : base(core)
     {
@@ -277,15 +283,33 @@ public partial class MixScrims : BasePlugin
             var provider = services.BuildServiceProvider();
 
             mapsConfigMonitor = provider.GetRequiredService<IOptionsMonitor<MapsConfig>>();
-            mapsConfigMonitor.OnChange(_ =>
+            ReportUnusableMapEntries(mapsConfigMonitor.CurrentValue, fileName);
+            mapsConfigMonitor.OnChange(updated =>
             {
                 logger.LogWarning("MixScrims: maps.jsonc reloaded.");
+                ReportUnusableMapEntries(updated, fileName);
             });
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to load MixScrims maps configuration.");
         }
+    }
+
+    /// <summary>
+    /// An entry with neither <c>Name</c> nor <c>Id</c> is one a file written against the superseded
+    /// <c>MapName</c>/<c>DisplayName</c>/<c>WorkshopId</c> shape produces: the binder ignores unknown
+    /// keys, so it yields a full-length pool of blank entries instead of failing.
+    /// </summary>
+    private void ReportUnusableMapEntries(MapsConfig? maps, string fileName)
+    {
+        var unusable = maps?.Maps?.Count(m => m != null && string.IsNullOrWhiteSpace(m.CanonicalId)) ?? 0;
+        if (unusable == 0) return;
+
+        logger.LogError(
+            "{File}: {Count} map entries carry neither \"Name\" nor \"Id\", so they cannot be loaded or voted for. "
+            + "Rewrite every entry as {{ \"Name\": \"Dust 2\", \"Id\": \"de_dust2\" }}, where \"Id\" is an official map name or a workshop id.",
+            fileName, unusable);
     }
 
     internal void LoadDiscordConfig()

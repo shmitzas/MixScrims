@@ -6,9 +6,9 @@ namespace MixScrims;
 public partial class MixScrims
 {
     ///<summary>
-    ///Lists all configured maps regardless of voteable status
+    ///Lists every configured map, including the ones !maps hides as recently played
     ///</summary>
-    [Command("maplist_all", false, "managemix", HelpText = "Lists all configured maps regardless of voteable status. Usage: !maplist_all")]
+    [Command("maplist_all", false, "managemix", HelpText = "Lists every configured map, including recently played ones. Usage: !maplist_all")]
     public void OnListAllMaps(ICommandContext context)
     {
         var admin = context.Sender;
@@ -19,7 +19,7 @@ public partial class MixScrims
             logger.LogInformation("All maps list:");
             foreach (var map in maps)
             {
-                logger.LogInformation("Map: {DisplayName} ({MapName})", map.DisplayName, map.MapName);
+                logger.LogInformation("Map: {DisplayName} ({MapName})", map.Name, map.CanonicalId);
             }
         }
         else
@@ -27,7 +27,7 @@ public partial class MixScrims
             PrintMessageToPlayer(admin, "All maps list:");
             foreach (var map in maps)
             {
-                PrintMessageToPlayer(admin, Core.Localizer["command.maps", map.DisplayName, map.MapName]);
+                PrintMessageToPlayer(admin, Core.Localizer["command.maps", map.Name, map.CanonicalId]);
             }
         }
     }

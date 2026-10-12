@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MixScrims;
 
 public class MainConfig
@@ -29,6 +31,8 @@ public class MainConfig
     public bool PreventNotPickedPlayersFromJoiningOngoingMatch { get; set; } = false;
     public bool KickPlayersNotInMatch { get; set; } = false;
     public bool SkipTeamPicking { get; set; } = false;
+    // Also forfeits the whole-team starting-side vote: sides stay as team picking assigned them.
+    public bool SkipKnifeRoundWhenPickingAndCaptainsDisabled { get; set; } = false;
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
@@ -101,11 +105,44 @@ public class MainConfig
 
 public class MapDetails
 {
-    public string MapName { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    public string WorkshopId { get; set; } = string.Empty;
-    public bool CanBeVoted { get; set; } = true;
-    public bool IsWorkshopMap { get; set; } = false;
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Official map name, a workshop id, or null to use <see cref="Name"/> as the identifier.</summary>
+    public string? Id { get; set; }
+
+    /// <summary>Accepts <c>ws:3070596702</c> or <c>3070596702</c>; null when the value names no workshop item.</summary>
+    public static string? ResolveWorkshopId(string? value)
+    {
+        var id = value?.Trim() ?? string.Empty;
+        if (id.StartsWith("ws:", StringComparison.OrdinalIgnoreCase))
+            id = id[3..].Trim();
+        else if (!long.TryParse(id, out _))
+            return null;
+
+        return id.Length > 0 ? id : null;
+    }
+
+    [JsonIgnore]
+    public string? ResolvedWorkshopId => ResolveWorkshopId(Id);
+
+    [JsonIgnore]
+    public bool IsWorkshop => ResolvedWorkshopId is not null;
+
+    /// <summary>
+    /// What every map-change command must be given — never <see cref="Name"/> when an
+    /// <see cref="Id"/> exists, because the engine prefix-matches a loose name against
+    /// installed maps and can resolve it to a different map.
+    /// </summary>
+    [JsonIgnore]
+    public string CanonicalId
+    {
+        get
+        {
+            if (ResolvedWorkshopId is { } workshop) return workshop;
+            var id = Id?.Trim() ?? string.Empty;
+            return id.Length > 0 ? id : Name.Trim();
+        }
+    }
 }
 
 public class VotedMap
@@ -140,6 +177,12 @@ public class VoteKickConfig
 {
     public bool Enabled { get; set; } = true;
     public int VoteKickTime { get; set; } = 30;
+
+    // Both read only while a consumer has switched vote kick server-wide; a team vote is
+    // unanimous and has no threshold to tune. Defaults mirror Rtv so the two bars match
+    // out of the box, but they are separate knobs - retuning RTV must not move this one.
+    public int MinimumVotesRequired { get; set; } = 1;
+    public double VoteThresholdRatio { get; set; } = 0.5;
 }
 
 public class RtvConfig

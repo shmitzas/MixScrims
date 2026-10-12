@@ -7,7 +7,7 @@ namespace MixScrims;
 public partial class MixScrims
 {
     /// <summary>
-    /// Re-points every open ballot and roster-driven menu at the roster a disconnect leaves
+    /// Re-points every open vote and roster-driven menu at the roster a disconnect leaves
     /// behind, and resolves whatever that roster already settles. Branches are isolated so one
     /// throwing surface cannot strand the rest.
     /// </summary>
@@ -24,6 +24,9 @@ public partial class MixScrims
 
         try { HandlePlayerDisconnectVoteKick(leaver, Team.T); }
         catch (Exception ex) { logger.LogError(ex, "ReconcileVotesAfterDisconnect: T vote kick reconcile failed."); }
+
+        try { HandlePlayerDisconnectVoteKick(leaver, Team.None); }
+        catch (Exception ex) { logger.LogError(ex, "ReconcileVotesAfterDisconnect: server-wide vote kick reconcile failed."); }
 
         try { HandlePlayerDisconnectMapVote(leaver); }
         catch (Exception ex) { logger.LogError(ex, "ReconcileVotesAfterDisconnect: map vote reconcile failed."); }
@@ -62,10 +65,9 @@ public partial class MixScrims
     /// roster already settles it - including a collapse down to the caller alone.
     /// </summary>
     /// <remarks>
-    /// Recomputed as "ballots cast + voters who can still answer", never decremented:
+    /// Recomputed as "votes cast + voters who can still answer", never decremented:
     /// <see cref="SafeSteamId"/> reads 0 off a disposed reference, so a decrement keyed on the
-    /// leaver would no-op exactly when it is needed - and would lose the caller's counted yes
-    /// when the caller is the one leaving.
+    /// leaver would no-op exactly when it is needed.
     /// </remarks>
     internal void HandlePlayerDisconnectSurrenderVote(IPlayer leaver)
     {
@@ -122,10 +124,10 @@ public partial class MixScrims
     /// </summary>
     internal void HandlePlayerDisconnectVoteKick(IPlayer leaver, Team team)
     {
-        var inProgress = team == Team.CT ? isVoteKickInProgressCt : isVoteKickInProgressT;
-        if (!inProgress) return;
+        var vote = GetVoteKickSlot(team);
+        if (!vote.InProgress) return;
 
-        var target = team == Team.CT ? voteKickTargetCt : voteKickTargetT;
+        var target = vote.Target;
 
         // Nothing left to kick. Through VoteKickResult, never inline: it is the only path that
         // raises VoteKickResult, which a consumer rendering its own UI has nothing else to go on.
@@ -137,62 +139,96 @@ public partial class MixScrims
             return;
         }
 
-        var voters = team == Team.CT ? voteKickVotersCt : voteKickVotersT;
-        var cast = team == Team.CT ? voteKickTotalVotesCastCt : voteKickTotalVotesCastT;
+        if (IsServerWideVoteKey(team))
+        {
+            HandlePlayerDisconnectVoteKickServerWide(leaver, team, vote, target);
+            return;
+        }
+
+        var voters = vote.Voters;
+        var cast = vote.TotalVotesCast;
 
         // No -1 here: StartVoteKick keeps the caller inside the eligible count (it excludes only
         // the target), and the pass check compares the yes count against that same number.
         var recomputed = cast + CountPendingVoters(team, voters, leaver, target);
 
-        var current = team == Team.CT ? voteKickEligibleVotesCt : voteKickEligibleVotesT;
+        var current = vote.EligibleVotes;
         if (recomputed == current) return;
 
         if (cfg.DetailedLogging)
             logger.LogInformation("HandlePlayerDisconnectVoteKick: {Team} eligible {Old} -> {New} ({Cast} cast).",
                 team, current, recomputed, cast);
 
-        if (team == Team.CT)
-            voteKickEligibleVotesCt = recomputed;
-        else
-            voteKickEligibleVotesT = recomputed;
+        vote.EligibleVotes = recomputed;
+        vote.Electorate = recomputed;
 
         SendVoteKickProgressCenterHtml(team);
 
-        var yesCount = team == Team.CT ? voteKickYesCountCt : voteKickYesCountT;
-        if (yesCount >= recomputed)
+        if (vote.YesCount >= recomputed)
         {
-            (team == Team.CT ? voteKickTimerCt : voteKickTimerT)?.Cancel();
+            vote.Timer?.Cancel();
             VoteKickResult(team, true);
         }
     }
 
     /// <summary>
-    /// Withdraws the leaver's map-vote ballot.
+    /// Re-sizes a server-wide electorate and re-derives the ratio threshold off it, then resolves
+    /// the vote if the ballots in hand already settle it either way.
+    /// </summary>
+    private void HandlePlayerDisconnectVoteKickServerWide(IPlayer leaver, Team team, VoteKickSlot vote, IPlayer? target)
+    {
+        var electorate = ComputeServerWideElectorate(target, leaver);
+        var threshold = ComputeVoteKickThreshold(electorate);
+
+        if (electorate == vote.Electorate && threshold == vote.EligibleVotes) return;
+
+        if (cfg.DetailedLogging)
+            logger.LogInformation("HandlePlayerDisconnectVoteKick: server-wide electorate {OldE} -> {NewE}, threshold {Old} -> {New} ({Cast} cast).",
+                vote.Electorate, electorate, vote.EligibleVotes, threshold, vote.TotalVotesCast);
+
+        vote.Electorate = electorate;
+        vote.EligibleVotes = threshold;
+
+        SendVoteKickProgressCenterHtml(team);
+
+        if (vote.YesCount >= threshold)
+        {
+            vote.Timer?.Cancel();
+            VoteKickResult(team, true);
+            return;
+        }
+
+        if (vote.YesCount + Math.Max(0, electorate - vote.TotalVotesCast) < threshold)
+        {
+            vote.Timer?.Cancel();
+            VoteKickResult(team, false);
+        }
+    }
+
+    /// <summary>
+    /// Withdraws the leaver's map vote.
     /// </summary>
     /// <remarks>
-    /// The vote picks the map the players who are still here will load, so a departed ballot has
-    /// no stake in it. The slot key is the forcing reason: <c>VotedBy</c> holds player ids, and a
-    /// ballot left behind makes the next connection into that slot read as a revote in
-    /// <see cref="RegisterMapVoteByName"/> - their first vote would silently decrement a map they
-    /// never chose. Votes and VotedBy are decremented together, matching the revote path.
+    /// Keyed on slot: a vote left behind makes the next connection into that slot read as a revote
+    /// in <see cref="RegisterMapVoteByName"/>, decrementing a map they never chose.
     /// </remarks>
     internal void HandlePlayerDisconnectMapVote(IPlayer leaver)
     {
-        if (mixScrimsService.GetCurrentMatchState() != MatchState.MapVoting) return;
+        if (!MapVoteIsOpen) return;
         if (votedMaps.Count == 0) return;
 
         var slot = SafePlayerId(leaver);
         if (slot < 0) return;
 
-        var ballot = votedMaps.FirstOrDefault(m => m.VotedBy.Contains(slot));
-        if (ballot == null) return;
+        var castVote = votedMaps.FirstOrDefault(m => m.VotedBy.Contains(slot));
+        if (castVote == null) return;
 
-        ballot.VotedBy.Remove(slot);
-        ballot.Votes = Math.Max(0, ballot.Votes - 1);
+        castVote.VotedBy.Remove(slot);
+        castVote.Votes = Math.Max(0, castVote.Votes - 1);
 
         if (cfg.DetailedLogging)
             logger.LogInformation("HandlePlayerDisconnectMapVote: withdrew a vote for {Map} ({Votes} left).",
-                ballot.Map?.DisplayName ?? "<unknown>", ballot.Votes);
+                castVote.Map?.Name ?? "<unknown>", castVote.Votes);
     }
 
     /// <summary>

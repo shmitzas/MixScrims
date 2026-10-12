@@ -352,9 +352,23 @@ public partial class MixScrims
     /// </summary>
     internal void HandleTimeoutVote(IPlayer player, string choice)
     {
-        if (!IsPlayerValid(player))
+        if (player is null)
         {
-            logger.LogWarning("HandleTimeoutVote: ignoring vote from invalid/disconnected player {Slot}.", player?.Slot);
+            logger.LogWarning("HandleTimeoutVote: ignoring vote from a null player reference.");
+            return;
+        }
+
+        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        var slot = player.PlayerID;
+        Core.Scheduler.NextTick(() => HandleTimeoutVoteOnGameThread(slot, choice));
+    }
+
+    private void HandleTimeoutVoteOnGameThread(int slot, string choice)
+    {
+        var player = Core.PlayerManager.GetPlayer(slot);
+        if (player is null || !IsPlayerValid(player))
+        {
+            logger.LogWarning("HandleTimeoutVote: ignoring vote from invalid/disconnected player {Slot}.", slot);
             return;
         }
 

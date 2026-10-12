@@ -26,9 +26,7 @@ public partial class MixScrims
             return;
         }
 
-        var matchState = mixScrimsService.GetCurrentMatchState();
-
-        if (matchState == MatchState.MapVoting)
+        if (MapVoteIsOpen)
         {
             if (mapVotingMenu == null)
             {
