@@ -221,8 +221,8 @@ public class MixScrimsService : IMixScrims
 
     public IReadOnlyList<MapPoolEntry> GetConfiguredMapPool()
     {
-        // Deliberately not GetMapsToVote(): that filters to CanBeVoted and drops already-played
-        // maps, where this is the whole pool with the filtering left to the caller.
+        // Deliberately not GetMapsToVote(): that drops already-played maps, where this is the
+        // whole pool with the filtering left to the caller.
         var maps = _mixScrims.mapsConfig.Maps;
         if (maps == null || maps.Count == 0) return Array.Empty<MapPoolEntry>();
 
@@ -236,7 +236,7 @@ public class MixScrimsService : IMixScrims
             if (id.Length == 0) continue;
             // An entry may legally carry only an Id; a blank menu label would be unrenderable.
             var name = string.IsNullOrWhiteSpace(m.Name) ? id : m.Name;
-            result.Add(new MapPoolEntry(name, id, m.CanBeVoted));
+            result.Add(new MapPoolEntry(name, id));
         }
         return result;
     }

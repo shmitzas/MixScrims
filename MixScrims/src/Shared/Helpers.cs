@@ -336,7 +336,7 @@ public sealed partial class MixScrims
     internal List<MapDetails> GetMapsToVote(bool excludeRunningMap = false)
     {
         var pool = mapsConfig.Maps
-            .Where(m => m.CanBeVoted && !playedMaps.Any(pm =>
+            .Where(m => !playedMaps.Any(pm =>
                 string.Equals(pm.CanonicalId, m.CanonicalId, StringComparison.OrdinalIgnoreCase))).ToList();
 
         if (!excludeRunningMap) return pool;

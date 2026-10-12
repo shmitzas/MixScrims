@@ -22,13 +22,11 @@ Example new config:
     "Maps": [
       {
         "Name": "Mirage",
-        "Id": "de_mirage",
-        "CanBeVoted": true
+        "Id": "de_mirage"
       },
       {
         "Name": "Workshop Map",
-        "Id": "3375020",
-        "CanBeVoted": false
+        "Id": "3375020"
       },
       ...
     ]
@@ -46,7 +44,11 @@ Example new config:
   game's own end-of-match vote has already queued a next map.
 - Map entries are one name and one ID instead of three fields. The ID may be an
   official map name, a workshop ID, or `ws:` plus a workshop ID, and omitting it
-  falls back to the name. `IsWorkshopMap` is gone.
+  falls back to the name. `IsWorkshopMap` and `CanBeVoted` are gone — `maps.jsonc`
+  takes comments, so commenting an entry out is how a map leaves rotation now.
+  A leftover `CanBeVoted` is ignored, so a map you had excluded from voting is back
+  in the vote until you comment it out. The two are not equivalent: a commented-out
+  entry is also not loadable with `!map`, where `CanBeVoted: false` still was.
 - Only the knife round's winning captain can decide the starting side, matching what
   `!stay` / `!switch` already enforced.
 - `!mix_start` now starts the match itself instead of launching a knife round first.

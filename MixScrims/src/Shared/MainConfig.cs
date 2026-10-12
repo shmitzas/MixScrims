@@ -110,8 +110,6 @@ public class MapDetails
     /// <summary>Official map name, a workshop id, or null to use <see cref="Name"/> as the identifier.</summary>
     public string? Id { get; set; }
 
-    public bool CanBeVoted { get; set; } = true;
-
     /// <summary>Accepts <c>ws:3070596702</c> or <c>3070596702</c>; null when the value names no workshop item.</summary>
     public static string? ResolveWorkshopId(string? value)
     {

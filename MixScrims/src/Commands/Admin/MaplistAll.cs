@@ -6,9 +6,9 @@ namespace MixScrims;
 public partial class MixScrims
 {
     ///<summary>
-    ///Lists all configured maps regardless of voteable status
+    ///Lists every configured map, including the ones !maps hides as recently played
     ///</summary>
-    [Command("maplist_all", false, "managemix", HelpText = "Lists all configured maps regardless of voteable status. Usage: !maplist_all")]
+    [Command("maplist_all", false, "managemix", HelpText = "Lists every configured map, including recently played ones. Usage: !maplist_all")]
     public void OnListAllMaps(ICommandContext context)
     {
         var admin = context.Sender;
