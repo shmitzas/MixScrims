@@ -200,8 +200,7 @@ public class RtvConfig
 public class AutoResetOnLeaveConfig
 {
     public bool Enabled { get; set; } = false;
-    // Mirrors MainConfig.MinimumReadyPlayers' default. 0 leaves the feature inert, which an
-    // existing config.jsonc on disk still carries - ValidateConfig warns about exactly that.
-    public int MinimumPlayersRequired { get; set; } = 10;    public int GracePeriodSeconds { get; set; } = 30;
+    public int MinimumPlayersRequired { get; set; } = 10;
+    public int GracePeriodSeconds { get; set; } = 30;
 }
 
