@@ -45,6 +45,8 @@ public partial class MixScrims
         teamPickingFinalized = false;
         pendingFirstPickTeam = null;
         pickPhaseEpoch++;
+        pickPhaseResetPending = false;
+        CancelPickTurnTimers();
         nextPickingTeamOverride = NoPickingTeamOverride;
         openPickMenuPoolSlots.Clear();
         votedMaps.Clear();

@@ -120,6 +120,7 @@ partial class MixScrims
             var player = Core.PlayerManager.GetPlayer(playerSlot);
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleClientPutInServer: Retrieved player from slot {Slot}.", playerSlot);
+            RememberPlayerIdentity(player);
             if (player != null && player.IsValid)
             {
                 if (MatchState != MatchState.Warmup && MatchState != MatchState.MapVoting && MatchState != MatchState.MapChosen && MatchState != MatchState.PickingTeam)
@@ -169,6 +170,8 @@ partial class MixScrims
                         var delayedPlayer = Core.PlayerManager.GetPlayer(playerSlot);
                         if (delayedPlayer != null && delayedPlayer.IsValid)
                         {
+                            // Second capture: Steam authorization can land after put-in-server.
+                            RememberPlayerIdentity(delayedPlayer);
                             var currentState = mixScrimsService.GetCurrentMatchState();
                             if (currentState == MatchState.Warmup || currentState == MatchState.MapVoting || currentState == MatchState.MapChosen)
                                 HandlePlayerChangeTeam(delayedPlayer, 0);
@@ -343,7 +346,9 @@ partial class MixScrims
         var player = @event.UserIdPlayer;
         if (cfg.DetailedLogging)
             logger.LogInformation("HandlePlayerDisconnect");
-        HandleDisconnectedPlayer(player);
+        // Both come off the event payload, so they survive the client the IPlayer reads deref.
+        RememberPlayerIdentity(@event.PlayerID, @event.XuID, @event.Name);
+        HandleDisconnectedPlayer(player, @event.XuID, @event.Name);
         return HookResult.Continue;
     }
 
@@ -356,17 +361,22 @@ partial class MixScrims
         int slot = @event.PlayerId;
         if (cfg.DetailedLogging)
             logger.LogInformation("OnPlayerDisconnect: slot {Slot}", slot);
-        HandleDisconnectedPlayer(Core.PlayerManager.GetPlayer(slot));
+        // No identity on this payload, so the cache is the only source when it wins the dedup latch.
+        var (cachedSteamId, cachedName) = RecallPlayerIdentity(slot);
+        HandleDisconnectedPlayer(Core.PlayerManager.GetPlayer(slot), cachedSteamId, cachedName);
     }
 
     /// <summary>
     /// Handles the removal and cleanup of a player who has disconnected from the match.
     /// </summary>
+    /// <param name="steamIdHint">Identity captured while the client was live. The engine stops
+    /// serving <see cref="IPlayer.SteamID"/> at disconnect, and reading
+    /// <see cref="IPlayer.Name"/> off a released client is a SIGSEGV, not an exception.</param>
     /// <remarks>
     /// Steps run isolated under <see cref="RunDisconnectCleanupStep"/>: one aborting would leave
     /// the leaver in rosters, votes and menus for the rest of the match.
     /// </remarks>
-    internal void HandleDisconnectedPlayer(IPlayer? player)
+    internal void HandleDisconnectedPlayer(IPlayer? player, ulong steamIdHint = 0, string? nameHint = null)
     {
         if (player == null)
         {
@@ -389,21 +399,31 @@ partial class MixScrims
         // refs so the RemoveAll itself never throws on the entries it's removing.
         RunDisconnectCleanupStep("roster sweep", () =>
         {
-            readyPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-            pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-            pickedTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-            playingCtPlayers.RemoveAll(p => SafeSteamId(p) == 0);
-            playingTPlayers.RemoveAll(p => SafeSteamId(p) == 0);
+            // The leaver is left to the targeted "ready list" step below, which is the only
+            // thing that raises PlayerReadyChanged for them.
+            readyPlayers.RemoveAll(e => !ReferenceEquals(e.Player, player) && !IsPlayerConnected(e.Player));
+            // Connection, not SteamID: every bot reads 0 too, so sweeping on == 0 emptied these
+            // rosters of the whole bot pool in a TestMode lobby.
+            pickedCtPlayers.RemoveAll(p => !ReferenceEquals(p, player) && !IsPlayerConnected(p));
+            pickedTPlayers.RemoveAll(p => !ReferenceEquals(p, player) && !IsPlayerConnected(p));
+            playingCtPlayers.RemoveAll(p => !ReferenceEquals(p, player) && !IsPlayerConnected(p));
+            playingTPlayers.RemoveAll(p => !ReferenceEquals(p, player) && !IsPlayerConnected(p));
         });
 
-        // Cache the disconnecting player's SteamID once. If the IPlayer is already disposed
-        // by the time this handler runs, steamId will be 0 and the targeted per-player
-        // removals below become no-ops - but the sweep above will already have taken care
-        // of any ghost entries this player left behind.
-        var steamId = SafeSteamId(player);
-
-        // Cache player name for logging since Controller might become invalid during disconnect
-        var playerName = SafePlayerName(player);
+        // Hint, then cache, then a live read: the first two were captured while the client existed.
+        var steamId = steamIdHint;
+        var playerName = nameHint;
+        if (steamId == 0 || string.IsNullOrEmpty(playerName))
+        {
+            var (cachedSteamId, cachedName) = RecallPlayerIdentity(disconnectingPlayerSlot);
+            if (steamId == 0) steamId = cachedSteamId;
+            if (string.IsNullOrEmpty(playerName)) playerName = cachedName;
+        }
+        if (steamId == 0) steamId = SafeSteamId(player);
+        // IPlayer.Name derefs ServerSideClient with no disposed check, so a released client takes
+        // the host down past any try/catch.
+        if (string.IsNullOrEmpty(playerName))
+            playerName = IsPlayerConnected(player) ? SafePlayerName(player) : $"Slot {disconnectingPlayerSlot}";
 
         RunDisconnectCleanupStep("join + rtv state", () =>
         {
@@ -415,18 +435,18 @@ partial class MixScrims
 
         RunDisconnectCleanupStep("roster removal", () =>
         {
-            if (steamId == 0) return;
-
-            if (pickedCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
+            // Not gated on steamId != 0: that is the one value the engine stops serving at
+            // disconnect. IsSamePlayer falls back to the slot, which outlives it.
+            if (pickedCtPlayers.RemoveAll(p => IsSamePlayer(p, player)) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedCtPlayers.", playerName);
 
-            if (pickedTPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
+            if (pickedTPlayers.RemoveAll(p => IsSamePlayer(p, player)) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from pickedTPlayers.", playerName);
 
-            if (playingCtPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
+            if (playingCtPlayers.RemoveAll(p => IsSamePlayer(p, player)) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingCtPlayers.", playerName);
 
-            if (playingTPlayers.RemoveAll(p => SafeSteamId(p) == steamId) > 0 && cfg.DetailedLogging)
+            if (playingTPlayers.RemoveAll(p => IsSamePlayer(p, player)) > 0 && cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removed {PlayerName} from playingTPlayers.", playerName);
         });
 
@@ -440,16 +460,20 @@ partial class MixScrims
 
                 // IsSamePlayer, not a raw SteamID compare: a disposed reference would throw here
                 // and abort every cleanup step below, and every bot shares SteamID 0.
-                if (IsSamePlayer(player, captainCt))
+                var wasCtCaptain = IsSamePlayer(player, captainCt);
+                var wasTCaptain = IsSamePlayer(player, captainT);
+                if (!wasCtCaptain && !wasTCaptain) return;
+
+                if (wasCtCaptain) AssignCaptain(Team.CT, null);
+                if (wasTCaptain) AssignCaptain(Team.T, null);
+
+                if (cfg.ResetOnCaptainLeave)
                 {
-                    AssignCaptain(Team.CT, null);
-                    StartTeamPickingPhase();
+                    ScheduleCaptainLeaveReset(playerName);
+                    return;
                 }
-                if (IsSamePlayer(player, captainT))
-                {
-                    AssignCaptain(Team.T, null);
-                    StartTeamPickingPhase();
-                }
+
+                StartTeamPickingPhase();
             });
         }
 
@@ -469,9 +493,8 @@ partial class MixScrims
                         logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is CT captain");
 
                     AssignCaptain(Team.CT, null);
-                    // steamId is the disconnecting player's ID; use SafeSteamId on roster entries
-                    // to skip disposed ghosts when picking the successor captain.
-                    var newCaptain = playingCtPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
+                    // steamId reads 0 on a real disconnect, so comparing against it excluded every bot.
+                    var newCaptain = playingCtPlayers.FirstOrDefault(p => IsPlayerConnected(p) && !IsSamePlayer(p, player));
 
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandleDisconnectedPlayer: New CT captain is {NewCaptain}",
@@ -485,7 +508,8 @@ partial class MixScrims
                         logger.LogInformation("HandleDisconnectedPlayer: Disconnected player is T captain");
 
                     AssignCaptain(Team.T, null);
-                    var newCaptain = playingTPlayers.Where(p => SafeSteamId(p) != steamId).FirstOrDefault();
+                    // See the CT twin above.
+                    var newCaptain = playingTPlayers.FirstOrDefault(p => IsPlayerConnected(p) && !IsSamePlayer(p, player));
 
                     if (cfg.DetailedLogging)
                         logger.LogInformation("HandleDisconnectedPlayer: New T captain is {NewCaptain}",
@@ -511,13 +535,15 @@ partial class MixScrims
 
         RunDisconnectCleanupStep("ready list", () =>
         {
-            if (steamId == 0 || !readyPlayers.Any(p => SafeSteamId(p) == steamId)) return;
+            // Deliberately not gated on steamId != 0: that is the one value the engine stops
+            // serving at disconnect, so gating on it skipped exactly the refs this step exists for.
+            if (FindReadyEntry(player) == null) return;
             if (cfg.DetailedLogging)
                 logger.LogInformation("HandleDisconnectedPlayer: Removing {PlayerName} from readyPlayers.", playerName);
-            RemovePlayerFromReadyList(player, true);
+            RemovePlayerFromReadyList(player, true, bypassStateCheck: true, knownName: playerName);
         });
 
-        RunDisconnectCleanupStep("leave punishment", () => PunishOnLeave(player));
+        RunDisconnectCleanupStep("leave punishment", () => PunishOnLeave(player, steamId));
 
         RunDisconnectCleanupStep("close active menu", () =>
         {
@@ -600,6 +626,9 @@ partial class MixScrims
         var playerSteamId = player.SteamID;
         if (playerSteamId == 0)
             return HookResult.Continue;
+
+        // Refresh point for the disconnect cleanup's identity fallback.
+        RememberPlayerIdentity(player.Slot, playerSteamId, SafePlayerName(player));
 
         var matchState = mixScrimsService.GetCurrentMatchState();
         bool isActive = matchState == MatchState.KnifeRound

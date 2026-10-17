@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.12.0",
+    Version = "1.12.1",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -72,6 +72,7 @@ public partial class MixScrims : BasePlugin
         LoadMainConfig();
         LoadDiscordConfig();
         LoadMapsConfig();
+        ValidateConfig();
         RegisterListeners();
         ResetVariables();
         RegisterCommands();
@@ -109,6 +110,8 @@ public partial class MixScrims : BasePlugin
             autoResetOnLeaveTimer?.Cancel();
             timeoutVoteTimer?.Cancel();
             surrenderVoteTimer?.Cancel();
+            pickTimeoutTimer?.Cancel();
+            pickTimeoutWarningTimer?.Cancel();
 
             foreach (var (steamId, cts) in _punishmentTimers)
             {
@@ -128,6 +131,23 @@ public partial class MixScrims : BasePlugin
         UnregisterCommands();
         if (cfg.DetailedLogging)
             logger?.LogInformation("MixScrims unloading.");
+    }
+
+    /// <summary>
+    /// Surfaces config combinations that silently disable a feature. Warning level on purpose:
+    /// these are wrong on a production server whether or not DetailedLogging is on.
+    /// </summary>
+    internal void ValidateConfig()
+    {
+        // A value already written to config.jsonc never picks up a changed C# default.
+        if (cfg.AutoResetOnLeave.Enabled && cfg.AutoResetOnLeave.MinimumPlayersRequired <= 0)
+        {
+            logger.LogWarning(
+                "Config: AutoResetOnLeave.Enabled is true but AutoResetOnLeave.MinimumPlayersRequired is {Value}. "
+                + "The player-count check never trips at that value, so the auto-reset can never fire. "
+                + "Set it in config.jsonc (MinimumReadyPlayers is {Suggested}).",
+                cfg.AutoResetOnLeave.MinimumPlayersRequired, cfg.MinimumReadyPlayers);
+        }
     }
 
     /// <summary>

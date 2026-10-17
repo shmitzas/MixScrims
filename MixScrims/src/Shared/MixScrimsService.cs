@@ -125,19 +125,17 @@ public class MixScrimsService : IMixScrims
 
     public IReadOnlyList<ulong> GetReadyPlayers()
     {
-        // readyPlayers holds IPlayer refs that can go stale after reconnects;
-        // SafeSteamId + the != 0 filter drop those disposed entries so callers
-        // don't see phantom 0-SteamIDs.
+        // Identity is captured at !ready time, so liveness is what keeps an unpurged entry out.
         return _mixScrims.readyPlayers
-            .Select(p => _mixScrims.SafeSteamId(p))
-            .Where(sid => sid != 0)
+            .Where(e => _mixScrims.IsPlayerConnected(e.Player))
+            .Select(e => e.SteamId)
             .ToList();
     }
 
     public bool IsPlayerReady(ulong steamId)
     {
         if (steamId == 0) return false;
-        return _mixScrims.readyPlayers.Any(p => _mixScrims.SafeSteamId(p) == steamId);
+        return _mixScrims.readyPlayers.Any(e => e.SteamId == steamId && _mixScrims.IsPlayerConnected(e.Player));
     }
 
     public int GetMinimumReadyPlayers() => _mixScrims.cfg.MinimumReadyPlayers;

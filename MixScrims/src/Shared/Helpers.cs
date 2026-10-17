@@ -24,32 +24,39 @@ public sealed partial class MixScrims
     {
         var current = team == Team.CT ? captainCt : captainT;
         var newValid = player != null && IsPlayerValid(player);
-        var oldId = current != null && IsPlayerValid(current) ? SafeSteamId(current) : 0;
-        ulong newId = 0;
-        if (newValid)
+
+        // Live read first so a slot reused by a reconnect wins, then the id captured at
+        // assignment - the only identity left once the engine stops serving a leaver's SteamID.
+        ulong oldId = 0;
+        if (current != null)
         {
-            try { newId = player!.SteamID; } catch { newId = 0; }
+            var liveId = SafeSteamId(current);
+            oldId = liveId != 0 ? liveId : (team == Team.CT ? captainCtSteamId : captainTSteamId);
         }
+
+        // Capture needs only the client; IsPlayerValid also demands a pawn, which a captain
+        // drawn between map load and spawn does not have yet.
+        ulong newId = player != null && IsPlayerConnected(player) ? SafeSteamId(player) : 0;
 
         // No-op: same non-zero SteamID reassignment on the same team. Skip event fire so
         // idempotent code paths (EnsureCaptainsAlive → PickRandomCaptain returning the
         // same player) don't spam consumers.
         if (oldId != 0 && oldId == newId)
         {
-            if (team == Team.CT) captainCt = player;
-            else if (team == Team.T) captainT = player;
+            if (team == Team.CT) { captainCt = player; captainCtSteamId = newId; }
+            else if (team == Team.T) { captainT = player; captainTSteamId = newId; }
             return;
         }
 
         // Field write first, then event dispatch — subscribers reading the
         // corresponding snapshot getter (e.g. GetCtCaptain) inside their handler
         // will see the post-assignment state.
-        if (team == Team.CT) captainCt = player;
-        else if (team == Team.T) captainT = player;
+        if (team == Team.CT) { captainCt = player; captainCtSteamId = newId; }
+        else if (team == Team.T) { captainT = player; captainTSteamId = newId; }
 
         if (oldId != 0)
             mixScrimsService.RaiseCaptainRemoved(team, oldId);
-        if (newId != 0)
+        if (newValid && newId != 0)
             mixScrimsService.RaiseCaptainAssigned(team, newId);
     }
 
@@ -297,16 +304,8 @@ public sealed partial class MixScrims
             .Where(player => !(cfg.TestMode && IsBot(player)))
             .Where(player =>
             {
-                // Cache the live player's SteamID once, and use SafeSteamId on each roster
-                // entry: readyPlayers can carry disposed IPlayer refs, and a raw .SteamID
-                // read on a disposed entry throws ObjectDisposedException. The != 0 guard
-                // skips disposed ghosts so a real player never gets falsely matched to one.
                 var playerId = player.SteamID;
-                return !readyPlayers.Any(rp =>
-                {
-                    var rpId = SafeSteamId(rp);
-                    return rpId != 0 && rpId == playerId;
-                });
+                return !readyPlayers.Any(e => e.SteamId == playerId);
             })
             .ToList();
     }
@@ -316,15 +315,18 @@ public sealed partial class MixScrims
     /// every connected bot is counted as implicitly ready on top of the human ready list, so
     /// a lone human running !forceready in a bot-filled staging lobby can finalize the match.
     /// Bots are never inserted into <see cref="readyPlayers"/> itself because they all share
-    /// SteamID 0, which would collapse them onto a single dedup slot.
+    /// SteamID 0, which would collapse them onto a single dedup slot. Recomputed from live
+    /// presence, so an unpurged roster entry cannot inflate the phase-advance threshold.
     /// </summary>
     internal int GetEffectiveReadyCount()
     {
+        int humanCount = readyPlayers.Count(e => IsPlayerConnected(e.Player));
+
         if (!cfg.TestMode)
-            return readyPlayers.Count;
+            return humanCount;
 
         int botCount = GetPlayers().Count(IsBot);
-        return readyPlayers.Count + botCount;
+        return humanCount + botCount;
     }
 
     /// <summary>

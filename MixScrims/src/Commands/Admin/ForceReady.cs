@@ -70,11 +70,8 @@ public partial class MixScrims
 
         foreach (var player in players)
         {
-            // Cache the live loop-var SteamID and use SafeSteamId on roster entries: readyPlayers
-            // can carry disposed IPlayer references and reading .SteamID on those throws
-            // ObjectDisposedException, which is the crash the log at ForceReady.cs:69 showed.
             var playerId = player.SteamID;
-            if (!readyPlayers.Any(rp => SafeSteamId(rp) == playerId))
+            if (!readyPlayers.Any(e => e.SteamId == playerId))
             {
                 if (cfg.DetailedLogging)
                     logger.LogInformation("OnForceReady: Adding {PlayerName} (SteamID={SteamID}) to ready list", SafePlayerName(player), playerId);

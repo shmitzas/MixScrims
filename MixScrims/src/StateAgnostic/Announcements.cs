@@ -65,11 +65,11 @@ public partial class MixScrims
             return;
 
         // Snapshot: !ready / !unready mutate readyPlayers.
-        foreach (var player in readyPlayers.ToList())
+        foreach (var entry in readyPlayers.ToList())
         {
-            if (IsPlayerConnected(player))
+            if (IsPlayerConnected(entry.Player))
             {
-                SetPlayerReadyStatusInScoreboard(player, true);
+                SetPlayerReadyStatusInScoreboard(entry.Player, true);
             }
         }
 

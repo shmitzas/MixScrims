@@ -16,6 +16,8 @@ public class MainConfig
     public bool MoveOverflowPlayersToSpec { get; set; } = true;
     public int DisallowVotePreviousMaps { get; set; } = 2;
     public int DefaultVoteTimeSeconds { get; set; } = 30;
+    // Seconds a captain has to pick before one is chosen for them; 0 disables the backstop.
+    public int PickTimeoutSeconds { get; set; } = 90;
     public int TimeoutDurationSeconds { get; set; } = 60;
     public int Timeouts { get; set; } = 3;
 
@@ -36,6 +38,8 @@ public class MainConfig
     public bool AllowVolunteerCaptains { get; set; } = false;
     public bool SkipMapVoting { get; set; } = false;
     public bool DisableCaptains { get; set; } = false;
+    // Captain leaving mid-pick: true resets the mix, false draws a replacement and carries on.
+    public bool ResetOnCaptainLeave { get; set; } = true;
     public bool ShowReadyStatusInChat { get; set; } = true;
     public bool ShowReadyStatusInScoreboard { get; set; } = false;
     public bool ShowReadyStatusInCenterHtml { get; set; } = true;
@@ -196,7 +200,8 @@ public class RtvConfig
 public class AutoResetOnLeaveConfig
 {
     public bool Enabled { get; set; } = false;
-    public int MinimumPlayersRequired { get; set; } = 0;
-    public int GracePeriodSeconds { get; set; } = 30;
+    // Mirrors MainConfig.MinimumReadyPlayers' default. 0 leaves the feature inert, which an
+    // existing config.jsonc on disk still carries - ValidateConfig warns about exactly that.
+    public int MinimumPlayersRequired { get; set; } = 10;    public int GracePeriodSeconds { get; set; } = 30;
 }
 

@@ -5,6 +5,30 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
+## [1.12.1] - 2026-10-17
+
+Must update to this version in order to avoid random crashes.
+
+- Fixed the server being able to crash when a player disconnected.
+- Fixed team picking freezing for good when a captain left. The turn passed to a captain
+  who was no longer on the server, no pick menu could open, and nothing ever took over -
+  the mix sat on one captain until an admin reset it by hand. Other plugins and panels are
+  now told when a captain leaves, so their pick menus no longer point at an empty slot.
+- A captain leaving during team picking now **resets the mix** by default. Set
+  `ResetOnCaptainLeave` to `false` in `config.jsonc` to draw a replacement captain and
+  carry on instead, which is the previous behaviour.
+- Added a pick timer. A captain who goes AFK mid-pick is warned, then has a player chosen
+  for them at random, so the mix no longer sits forever waiting on someone who stopped
+  clicking. `PickTimeoutSeconds`, default 90 seconds, set to `0` to switch it off.
+- Fixed a string of leftovers when someone disconnected: a `!ready` that kept counting
+  toward the start threshold, a player left on their team's roster, a rock-the-vote
+  ballot, the forced-spectator list, and `PunishPlayerLeaves` letting the leaver escape
+  the ban entirely. Bots were also wiped from the pick pool on test servers.
+- `AutoResetOnLeave.MinimumPlayersRequired` now defaults to 10 instead of 0. Servers
+  upgrading keep whatever is in their `config.jsonc`, and the server console now warns on
+  startup when the feature is enabled but the value is left at 0, where it can never
+  trigger.
+
 ## [1.12.0] - 2026-10-10
 
 Must update to this version in order to avoid random crashes.

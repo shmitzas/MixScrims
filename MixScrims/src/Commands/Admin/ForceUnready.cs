@@ -70,10 +70,8 @@ public partial class MixScrims
 
         foreach (var player in players)
         {
-            // Cache live loop-var SteamID and use SafeSteamId on roster entries: readyPlayers
-            // may hold disposed IPlayer refs (see ForceReady.cs:69 crash) so raw .SteamID throws.
             var playerId = player.SteamID;
-            if (readyPlayers.Any(rp => SafeSteamId(rp) == playerId))
+            if (readyPlayers.Any(e => e.SteamId == playerId))
             {
                 RemovePlayerFromReadyList(player, false);
             }

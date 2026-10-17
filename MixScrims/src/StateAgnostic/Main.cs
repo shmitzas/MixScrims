@@ -6,6 +6,13 @@ using SwiftlyS2.Shared.SteamAPI;
 
 namespace MixScrims;
 
+/// <summary>
+/// A ready-roster entry whose identity is captured at <c>!ready</c> time, because
+/// <see cref="IPlayer.SteamID"/> is a live slot-indexed engine read that returns 0 once the
+/// client is released - unreadable exactly when the disconnect cleanup needs it.
+/// </summary>
+internal sealed record ReadyPlayer(IPlayer Player, int Slot, ulong SteamId);
+
 public sealed partial class MixScrims
 {
     internal CancellationTokenSource? playerStatusTimer;
@@ -15,7 +22,7 @@ public sealed partial class MixScrims
     internal CancellationTokenSource? captainsAnnouncementsTimer;
     internal CancellationTokenSource? autoResetOnLeaveTimer;
 
-    internal readonly List<IPlayer> readyPlayers = [];
+    internal readonly List<ReadyPlayer> readyPlayers = [];
     internal readonly HashSet<int> freshlyJoinedPlayers = [];
     internal readonly HashSet<int> recentlyDisconnectedPlayers = [];
     internal Team previousAutoJoinedTeam = Team.None;
@@ -26,6 +33,39 @@ public sealed partial class MixScrims
     internal HashSet<ulong> playersWaitingForPunishment = [];
     internal readonly Dictionary<ulong, CancellationTokenSource> _punishmentTimers = [];
     internal bool resetMixOnFirstJoin = false;
+
+    // Last identity seen on a slot while its client was live. Bounded by the server's slot
+    // count and overwritten on reuse; see RememberPlayerIdentity for why it exists.
+    private readonly Dictionary<int, (ulong SteamId, string Name)> lastKnownIdentities = [];
+
+    /// <summary>
+    /// Records a slot's identity so the disconnect cleanup has one: by then
+    /// <see cref="IPlayer.SteamID"/> reads 0 and <see cref="IPlayer.Name"/> derefs a freed client.
+    /// </summary>
+    internal void RememberPlayerIdentity(IPlayer? player)
+    {
+        if (!IsPlayerConnected(player)) return;
+        RememberPlayerIdentity(SafePlayerId(player), SafeSteamId(player), SafePlayerName(player));
+    }
+
+    internal void RememberPlayerIdentity(int slot, ulong steamId, string? name)
+    {
+        if (slot < 0) return;
+        // Bots all read 0, so an entry keyed on it would be shared; the slot still carries a name.
+        if (steamId == 0 && string.IsNullOrEmpty(name)) return;
+
+        var existing = lastKnownIdentities.TryGetValue(slot, out var prev) ? prev : default;
+        lastKnownIdentities[slot] = (
+            steamId != 0 ? steamId : existing.SteamId,
+            !string.IsNullOrEmpty(name) ? name : existing.Name ?? string.Empty);
+    }
+
+    internal (ulong SteamId, string? Name) RecallPlayerIdentity(int slot)
+    {
+        if (slot >= 0 && lastKnownIdentities.TryGetValue(slot, out var known))
+            return (known.SteamId, string.IsNullOrEmpty(known.Name) ? null : known.Name);
+        return (0UL, null);
+    }
 
     // Set to true when warmup cvars may have drifted from mixscrims/warmup.cfg (external
     // map change while state was Warmup, plugin startup / explicit reset). Consumed by
@@ -272,7 +312,7 @@ public sealed partial class MixScrims
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
             var sid = player.SteamID;
-            if (readyPlayers.Any(p => SafeSteamId(p) == sid))
+            if (readyPlayers.Any(e => e.SteamId == sid))
             {
                 if (announce)
                 {
@@ -281,7 +321,7 @@ public sealed partial class MixScrims
                 return;
             }
 
-            readyPlayers.Add(player);
+            readyPlayers.Add(new ReadyPlayer(player, player.Slot, sid));
             mixScrimsService.RaisePlayerReadyChanged(sid, true);
             if (announce)
             {
@@ -299,23 +339,37 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
+    /// The roster entry for <paramref name="player"/>, or null when they are not ready. Object
+    /// identity is the fallback key: by disconnect time the slot can belong to the next connection.
+    /// </summary>
+    internal ReadyPlayer? FindReadyEntry(IPlayer? player)
+    {
+        if (player == null) return null;
+
+        var sid = SafeSteamId(player);
+        return sid != 0
+            ? readyPlayers.FirstOrDefault(e => e.SteamId == sid)
+            : readyPlayers.FirstOrDefault(e => ReferenceEquals(e.Player, player));
+    }
+
+    /// <summary>
     /// Removes the specified player from the ready list, optionally announcing the change.
     /// </summary>
-    internal void RemovePlayerFromReadyList(IPlayer player, bool announce = false)
+    /// <param name="bypassStateCheck">Set by the disconnect cleanup: a leaver must be purged from
+    /// every phase, not only the two where <c>!unready</c> is a legal command.</param>
+    /// <param name="knownName">Name captured while the client was live. Reading
+    /// <see cref="IPlayer.Name"/> off a released client is a SIGSEGV, not an exception.</param>
+    internal void RemovePlayerFromReadyList(IPlayer player, bool announce = false, bool bypassStateCheck = false, string? knownName = null)
     {
-        // HandleDisconnectedPlayer passes an already-disposed leaver, so Safe* reads only.
-        var name = SafePlayerName(player);
+        var name = knownName ?? (IsPlayerConnected(player) ? SafePlayerName(player) : "<gone>");
         if (cfg.DetailedLogging)
             logger.LogInformation("RemovePlayerFromReadyList: called for {Player}", name);
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
-        if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
+        if (bypassStateCheck || matchState == MatchState.Warmup || matchState == MatchState.MapChosen)
         {
-            var sid = SafeSteamId(player);
-            var existing = sid != 0
-                ? readyPlayers.FirstOrDefault(p => SafeSteamId(p) == sid)
-                : readyPlayers.FirstOrDefault(p => IsSamePlayer(p, player));
+            var existing = FindReadyEntry(player);
 
             if (existing == null)
             {
@@ -331,7 +385,7 @@ public sealed partial class MixScrims
                 PrintMessageToAllPlayers(Core.Localizer["command.unready", name]);
             }
             readyPlayers.Remove(existing);
-            mixScrimsService.RaisePlayerReadyChanged(sid, false);
+            mixScrimsService.RaisePlayerReadyChanged(existing.SteamId, false);
             CheckReadyPlayersToStart();
 
             if (cfg.ShowReadyStatusInScoreboard)
@@ -606,7 +660,9 @@ public sealed partial class MixScrims
     /// <summary>
     /// Applies a configured punishment to a player who leaves the game, if enabled.
     /// </summary>
-    internal void PunishOnLeave(IPlayer? player)
+    /// <param name="steamId">Captured by the caller while the client was live. Re-reading it here
+    /// yields 0 on a leaver, which made every punishable disconnect take the bot branch below.</param>
+    internal void PunishOnLeave(IPlayer? player, ulong steamId)
     {
         if (player == null)
         {
@@ -621,10 +677,9 @@ public sealed partial class MixScrims
             return;
         }
 
-        var steamId = SafeSteamId(player);
         if (steamId == 0)
         {
-            // Disposed reference or a bot - neither is punishable.
+            // A bot, or a client the engine released before anything captured its identity.
             return;
         }
         var matchState = mixScrimsService.GetCurrentMatchState();

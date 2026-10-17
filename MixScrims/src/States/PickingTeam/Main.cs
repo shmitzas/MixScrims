@@ -16,6 +16,10 @@ public partial class MixScrims
     internal List<IPlayer> pickedTPlayers = [];
     internal IPlayer? captainCt { get; set; }
     internal IPlayer? captainT { get; set; }
+    // SteamID captured by AssignCaptain, the sole writer of the two fields above: IPlayer.SteamID
+    // is a live slot read that returns 0 once the client is released.
+    internal ulong captainCtSteamId;
+    internal ulong captainTSteamId;
     // Snapshot fields for IMixScrims consumers (v2.0.0+). Reset in StartTeamPickingPhase
     // and cleared when the phase ends or the plugin resets.
     internal Team? activePickingTeam = null;
@@ -40,6 +44,21 @@ public partial class MixScrims
     // A captain disconnecting re-enters the phase; the backstop must not fire into its successor.
     internal int pickPhaseEpoch = 0;
 
+    // Set between a captain leaving under ResetOnCaptainLeave and the deferred reset landing.
+    internal bool pickPhaseResetPending = false;
+
+    // Turn-scoped twin of pickPhaseEpoch for the per-pick timeout. Separate because the phase
+    // epoch cannot tell turn N from turn N+1, and the first-prompt backstop relies on it not.
+    internal int pickTurnEpoch = 0;
+    internal CancellationTokenSource? pickTimeoutTimer;
+    internal CancellationTokenSource? pickTimeoutWarningTimer;
+
+    // Seconds of warning before the auto-pick; the default 90s timeout therefore warns at 60s.
+    private const int PickTimeoutWarningLeadSeconds = 30;
+
+    // Lets the rest of the disconnect cleanup finish and the engine release the client before
+    // warmup.cfg execs - a cfg exec inside the teardown window is the mp_restartgame SEGV shape.
+    private const float CaptainLeaveResetDelaySeconds = 1.5f;
     // Covers a restart that dispatched but produced no round_start; 2s scheduling + 1s
     // TerminateRound delay puts the real one at ~3s.
     private const float FirstPickPromptBackstopSeconds = 6f;
@@ -51,6 +70,8 @@ public partial class MixScrims
     internal void StartTeamPickingPhase()
     {
         teamPickingFinalized = false;
+        // A stuck latch would stop this phase prompting at all.
+        pickPhaseResetPending = false;
 
         StopPreMatchAnnouncementTimers();
 
@@ -63,15 +84,19 @@ public partial class MixScrims
         if (!cfg.DisableCaptains)
         {
             if (cfg.DetailedLogging)
-                logger.LogInformation("StartTeamPickingPhase: Current captains - CT: {CT}, T: {T}", captainCt?.Name ?? "null", captainT?.Name ?? "null");
+                logger.LogInformation("StartTeamPickingPhase: Current captains - CT: {CT}, T: {T}",
+                    IsPlayerConnected(captainCt) ? SafePlayerName(captainCt) : "null",
+                    IsPlayerConnected(captainT) ? SafePlayerName(captainT) : "null");
 
             PickCaptains();
 
             if (captainCt == null || captainT == null)
             {
                 logger.LogError("StartTeamPickingPhase: One or both captains are null.");
-                logger.LogError("captainCt: {Name}", captainCt != null ? captainCt.Name ?? "(no name)" : "null");
-                logger.LogError("captainT: {Name}", captainT != null ? captainT.Name ?? "(no name)" : "null");
+                // Validity-gated: the disconnect path reaches this with the leaver still in the
+                // field, where a raw .Name throws and aborts the re-entry.
+                logger.LogError("captainCt: {Name}", IsPlayerConnected(captainCt) ? SafePlayerName(captainCt) : "null");
+                logger.LogError("captainT: {Name}", IsPlayerConnected(captainT) ? SafePlayerName(captainT) : "null");
                 logger.LogError("StartTeamPickingPhase: Valid players in the server: {Count}", GetPlayers().Count);
                 logger.LogError("StartTeamPickingPhase: Aborting team picking phase.");
                 PrintMessageToAllPlayers(Core.Localizer["error.captain.selection_failed"]);
@@ -181,8 +206,10 @@ public partial class MixScrims
         });
         Core.Scheduler.StopOnMapChange(pickRestartToken);
 
-        SetTeamName(Team.CT, captainCt == null ? null : captainCt.Name);
-        SetTeamName(Team.T, captainT == null ? null :  captainT.Name);
+        // Connection, not IsPlayerValid: that demands a pawn, which a captain drawn right after
+        // a map change does not have yet - and the name would blank out to the engine default.
+        SetTeamName(Team.CT, IsPlayerConnected(captainCt) ? SafePlayerName(captainCt) : null);
+        SetTeamName(Team.T, IsPlayerConnected(captainT) ? SafePlayerName(captainT) : null);
 
         // Reset per-phase snapshot fields. currentPickIndex counts captains' implicit
         // self-picks as 1 and 2 — increment now. Raised for bot captains too so the
@@ -245,6 +272,114 @@ public partial class MixScrims
     {
         OpenFirstPickPrompt("round_start");
         return HookResult.Continue;
+    }
+
+    /// <summary>
+    /// Queues the <c>ResetOnCaptainLeave</c> reset. Deferred, never inline: this runs inside
+    /// player_disconnect, and ResetPluginState ends in StartWarmup -> warmup.cfg, which is the
+    /// exec-during-client-teardown shape that SEGVs the host. The delay also lets the remaining
+    /// cleanup steps run against the pre-reset rosters.
+    /// </summary>
+    internal void ScheduleCaptainLeaveReset(string captainName)
+    {
+        if (pickPhaseResetPending) return;
+        pickPhaseResetPending = true;
+
+        CancelPickTurnTimers();
+        PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.captain_left_reset", captainName]);
+        logger.LogWarning("ScheduleCaptainLeaveReset: {Captain} left during team picking; resetting the mix.", captainName);
+
+        var thisPhase = pickPhaseEpoch;
+        var resetToken = Core.Scheduler.DelayBySeconds(CaptainLeaveResetDelaySeconds, () =>
+        {
+            // ResetVariables bumps the epoch, so anything that already reset us lands here as a mismatch.
+            if (pickPhaseEpoch != thisPhase || !pickPhaseResetPending) return;
+
+            // Cleared on every remaining path: a latch left set blocks the next phase from prompting.
+            pickPhaseResetPending = false;
+            if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam) return;
+            ResetPluginState();
+        });
+        Core.Scheduler.StopOnMapChange(resetToken);
+    }
+
+    /// <summary>Drops the pick-timeout timers so a superseded turn cannot auto-pick.</summary>
+    internal void CancelPickTurnTimers()
+    {
+        pickTimeoutWarningTimer?.Cancel();
+        pickTimeoutWarningTimer = null;
+        pickTimeoutTimer?.Cancel();
+        pickTimeoutTimer = null;
+    }
+
+    /// <summary>
+    /// Arms the backstop that picks for a captain who never clicks: an AFK captain strands the
+    /// ladder exactly as a disconnected one does, and only the first prompt had a backstop.
+    /// </summary>
+    private void ArmPickTimeout(Team team, int turn)
+    {
+        var timeout = cfg.PickTimeoutSeconds;
+        if (timeout <= 0) return;
+
+        if (timeout > PickTimeoutWarningLeadSeconds)
+        {
+            pickTimeoutWarningTimer = Core.Scheduler.DelayBySeconds(timeout - PickTimeoutWarningLeadSeconds, () =>
+            {
+                if (pickTurnEpoch != turn || activePickingTeam != team) return;
+                if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam) return;
+
+                var captain = team == Team.CT ? captainCt : captainT;
+                if (!IsPlayerValid(captain)) return;
+                PrintMessageToPlayer(captain, Core.Localizer["announcement.team_picking.pick_timeout_warning", PickTimeoutWarningLeadSeconds]);
+            });
+            Core.Scheduler.StopOnMapChange(pickTimeoutWarningTimer);
+        }
+
+        pickTimeoutTimer = Core.Scheduler.DelayBySeconds(timeout, () => AutoPickForCaptain(team, turn));
+        Core.Scheduler.StopOnMapChange(pickTimeoutTimer);
+    }
+
+    /// <summary>
+    /// Picks at random on a silent captain's behalf, through the entry point their own click uses
+    /// so a consumer cannot tell the two apart.
+    /// </summary>
+    private void AutoPickForCaptain(Team team, int turn)
+    {
+        if (pickTurnEpoch != turn || activePickingTeam != team) return;
+        if (mixScrimsService.GetCurrentMatchState() != MatchState.PickingTeam) return;
+        if (pickPhaseResetPending) return;
+
+        var captain = team == Team.CT ? captainCt : captainT;
+        if (captain == null || !IsPlayerValid(captain))
+        {
+            // The disconnect path owns replacing or resetting.
+            logger.LogWarning("AutoPickForCaptain: the {Team} captain is gone; skipping the auto-pick.", team);
+            return;
+        }
+
+        var pool = BuildPickPool(captain, -1);
+        if (pool.Count == 0)
+        {
+            activePickingTeam = null;
+            Core.Scheduler.NextTick(() => CompleteTeamPicking());
+            return;
+        }
+
+        var choice = pool[Random.Shared.Next(pool.Count)];
+        var captainName = SafePlayerName(captain);
+        var choiceName = IsPlayerValid(choice) ? SafePlayerName(choice) : string.Empty;
+        var choiceSlot = SafePlayerId(choice);
+
+        logger.LogWarning("AutoPickForCaptain: {Captain} did not pick within {Seconds}s; auto-picking {Player} for {Team}.",
+            captainName, cfg.PickTimeoutSeconds, choiceName, team);
+
+        CloseMenuForPlayer(captain);
+        PrintMessageToAllPlayers(Core.Localizer["announcement.team_picking.pick_timeout", captainName]);
+
+        if (team == Team.CT)
+            AssignPickedPlayerToTeamCt(captain, choiceName, choiceSlot);
+        else
+            AssignPickedPlayerToTeamT(captain, choiceName, choiceSlot);
     }
 
     private Team? ConsumeNextPickingTeamOverride()
@@ -363,6 +498,7 @@ public partial class MixScrims
         teamPickingFinalized = true;
 
         activePickingTeam = null;
+        CancelPickTurnTimers();
 
         EnsureCaptainsAlive();
 
@@ -494,29 +630,14 @@ public partial class MixScrims
     }
 
     /// <summary>
-    /// Prompts the specified team captain to select a player for their team.
-    /// <paramref name="excludeSlot"/> drops one slot, for callers that run while a player is
-    /// leaving and still reads as valid.
+    /// The players a captain may still pick. Slot-keyed, NOT SteamID-keyed: every bot reports
+    /// SteamID 0, so a SteamID compare empties the pool in a TestMode lobby and skips the phase.
+    /// Same filter as MixScrimsService.GetUnpickedPlayerSlots, so the built-in menu,
+    /// consumer-built menus and the timeout auto-pick agree on who is pickable.
     /// </summary>
-    internal void PromptCaptainToPickPlayer(IPlayer? captain, Team team, int excludeSlot = -1)
+    private List<IPlayer> BuildPickPool(IPlayer captain, int excludeSlot)
     {
-        openPickMenuPoolSlots.Clear();
-
-        if (captain == null)
-        {
-            logger.LogError("PromptCaptainToPickPlayer: Captain is null.");
-            return;
-        }
-
-        // Track whose turn to pick is active so IMixScrims.GetActivePickingTeam reflects it.
-        activePickingTeam = team;
-
         var players = GetPlayers();
-        // Slot-keyed, NOT SteamID-keyed: every bot reports SteamID 0, so a SteamID compare
-        // wipes the whole bot pool the moment a captain is a bot or a bot lands in either
-        // picked list — which empties the pool in a TestMode lobby and skips the phase
-        // entirely. Same filter as MixScrimsService.GetUnpickedPlayerSlots, so the built-in
-        // menu and consumer-built menus agree on who is pickable.
         var captainSlot = SafePlayerId(captain);
         var pickedSlots = new HashSet<int>();
         foreach (var picked in pickedCtPlayers.Concat(pickedTPlayers))
@@ -529,6 +650,49 @@ public partial class MixScrims
             var slot = SafePlayerId(p);
             return slot < 0 || slot == captainSlot || slot == excludeSlot || pickedSlots.Contains(slot);
         });
+        return players;
+    }
+
+    /// <summary>
+    /// Prompts the specified team captain to select a player for their team.
+    /// <paramref name="excludeSlot"/> drops one slot, for callers that run while a player is
+    /// leaving and still reads as valid.
+    /// </summary>
+    internal void PromptCaptainToPickPlayer(IPlayer? captain, Team team, int excludeSlot = -1)
+    {
+        openPickMenuPoolSlots.Clear();
+        CancelPickTurnTimers();
+        var thisTurn = ++pickTurnEpoch;
+
+        // Nothing drawn here survives the reset that is already queued.
+        if (pickPhaseResetPending) return;
+
+        if (captain == null || !IsPlayerValid(captain))
+        {
+            // The ladder hands the captain field straight back in after every pick, so a captain
+            // who left between two picks arrives here. Returning would strand the phase: no menu
+            // open, nothing scheduled to reopen one, and only the first prompt has a backstop.
+            logger.LogWarning("PromptCaptainToPickPlayer: the {Team} captain is gone; re-picking before prompting.", team);
+
+            // Via PickCt/TCaptain, not EnsureCaptainsAlive: the picked roster and clan tag follow.
+            if (team == Team.CT) PickCtCaptain(null);
+            else PickTCaptain(null);
+
+            captain = team == Team.CT ? captainCt : captainT;
+
+            if (captain == null || !IsPlayerValid(captain))
+            {
+                logger.LogError("PromptCaptainToPickPlayer: no {Team} captain could be drawn; resetting.", team);
+                PrintMessageToAllPlayers(Core.Localizer["error.captain.selection_failed"]);
+                ResetPluginState();
+                return;
+            }
+        }
+
+        // Track whose turn to pick is active so IMixScrims.GetActivePickingTeam reflects it.
+        activePickingTeam = team;
+
+        var players = BuildPickPool(captain, excludeSlot);
 
         if (players.Count == 0)
         {
@@ -613,6 +777,9 @@ public partial class MixScrims
                 logger.LogInformation("PromptCaptainToPickPlayer: Displaying picking menu to {CaptainName} for team {Team}", captain.Name, team == Team.CT ? "CT" : "T");
             Core.MenusAPI.OpenMenuForPlayer(captain, menu);
         }
+
+        // Armed for a suppressed menu too: a consumer's own menu can go unanswered just as this one can.
+        ArmPickTimeout(team, thisTurn);
     }
 
     /// <summary>
@@ -700,7 +867,11 @@ public partial class MixScrims
         {
             if (matchState == MatchState.PickingTeam || matchState == MatchState.MapChosen)
             {
-                pickedCtPlayers.Add(captainCt);
+                // Slot, not SteamID: a bot captain reads 0 and would match any other bot here. A
+                // re-pick draws from this roster, and a duplicate inflates the phase's end total.
+                var repickedCtSlot = SafePlayerId(captainCt);
+                if (!pickedCtPlayers.Any(p => SafePlayerId(p) == repickedCtSlot))
+                    pickedCtPlayers.Add(captainCt);
             }
             if (matchState == MatchState.KnifeRound)
             {
@@ -780,7 +951,10 @@ public partial class MixScrims
         {
             if (matchState == MatchState.PickingTeam || matchState == MatchState.MapChosen)
             {
-                pickedTPlayers.Add(captainT);
+                // See the CT twin above.
+                var repickedTSlot = SafePlayerId(captainT);
+                if (!pickedTPlayers.Any(p => SafePlayerId(p) == repickedTSlot))
+                    pickedTPlayers.Add(captainT);
             }
             if (matchState == MatchState.KnifeRound)
             {
@@ -950,6 +1124,8 @@ public partial class MixScrims
         if (!CanApplyPickOnGameThread(Team.CT, player, nameof(AssignPickedPlayerToTeamCt)))
             return;
 
+        CancelPickTurnTimers();
+
         pickedCtPlayers.Add(player);
         currentPickIndex++;
         // Raised for bots too (SteamID 0). The roster is already updated above, so a
@@ -1016,6 +1192,8 @@ public partial class MixScrims
         // See the CT twin above.
         if (!CanApplyPickOnGameThread(Team.T, player, nameof(AssignPickedPlayerToTeamT)))
             return;
+
+        CancelPickTurnTimers();
 
         pickedTPlayers.Add(player);
         currentPickIndex++;
