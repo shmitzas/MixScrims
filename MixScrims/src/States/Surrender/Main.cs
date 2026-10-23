@@ -49,14 +49,6 @@ public partial class MixScrims
         surrenderVoters.Clear();
         { ulong seedSid = SafeSteamId(caller); if (seedSid != 0) surrenderVoters.Add(seedSid); }
 
-        mixScrimsService.RaiseSurrenderVoteStarted(team);
-        // Fire the caller's implicit YES so consumers don't have to seed from tally state.
-        {
-            ulong callerSid; try { callerSid = caller.SteamID; } catch { callerSid = 0; }
-            if (callerSid != 0)
-                mixScrimsService.RaiseSurrenderVoteCast(callerSid, true, team);
-        }
-
         var players = GetPlayersInTeam(team);
         if (players.Count == 0)
         {
@@ -70,8 +62,8 @@ public partial class MixScrims
             logger.LogInformation("StartSurrenderVote: Total players in team: {Count}. Caller will be removed from voting list", players.Count);
         }
 
-        // If team has 2 or fewer players, auto-pass the vote without showing menus
-        if (players.Count <= 2)
+        // Teams at or below the configured size surrender without a ballot.
+        if (cfg.Surrender.AutoPassTeamSize > 0 && players.Count <= cfg.Surrender.AutoPassTeamSize)
         {
             if (cfg.DetailedLogging)
             {
@@ -87,7 +79,18 @@ public partial class MixScrims
 
         if (cfg.DetailedLogging)
         {
-            logger.LogInformation("StartSurrenderVote: After removing caller, {Count} players need to vote", surrenderTotalEligibleVotes);
+            logger.LogInformation("StartSurrenderVote: After removing caller, {Count} players need to vote ({Required} yes votes carry it)",
+                surrenderTotalEligibleVotes, SurrenderRequiredVotes());
+        }
+
+        // Raised only now: both early exits above return without a matching VoteResult, which
+        // would strand a consumer's ballot, and the tally read here needs its denominator.
+        mixScrimsService.RaiseSurrenderVoteStarted(team);
+        // Fire the caller's implicit YES so consumers don't have to seed from tally state.
+        {
+            ulong callerSid; try { callerSid = caller.SteamID; } catch { callerSid = 0; }
+            if (callerSid != 0)
+                mixScrimsService.RaiseSurrenderVoteCast(callerSid, true, team);
         }
 
         var builder = Core.MenusAPI
@@ -148,20 +151,29 @@ public partial class MixScrims
         // Bots auto-vote yes, so the vote can already be settled before it opens.
         if (TryResolveSurrenderVoteEarly()) return;
 
-        surrenderVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => SurrenderVoteResult(team));
+        surrenderVoteTimer = Core.Scheduler.DelayBySeconds(SurrenderVoteSeconds(), () => SurrenderVoteResult(team));
         Core.Scheduler.StopOnMapChange(surrenderVoteTimer);
 
         if (cfg.DetailedLogging)
         {
-            logger.LogInformation("StartSurrenderVote: Vote timer scheduled for {Seconds} seconds", cfg.DefaultVoteTimeSeconds);
+            logger.LogInformation("StartSurrenderVote: Vote timer scheduled for {Seconds} seconds", SurrenderVoteSeconds());
         }
     }
 
+    internal int SurrenderVoteSeconds() =>
+        cfg.Surrender.VoteTimeSeconds > 0 ? cfg.Surrender.VoteTimeSeconds : cfg.DefaultVoteTimeSeconds;
+
     /// <summary>
-    /// Unanimous - every player in the team. The caller's implicit yes is seeded into
-    /// the yes count but excluded from the eligible count, so the team is eligible + 1.
+    /// Fraction of the whole team, which is eligible + 1: the caller's implicit yes is seeded
+    /// into the yes count but excluded from the eligible count. Clamped so a ratio above 1.0
+    /// makes the vote strict rather than unwinnable.
     /// </summary>
-    internal int SurrenderRequiredVotes() => surrenderTotalEligibleVotes + 1;
+    internal int SurrenderRequiredVotes()
+    {
+        var teamSize = surrenderTotalEligibleVotes + 1;
+        var required = ComputeVoteThreshold(teamSize, cfg.Surrender.MinimumVotesRequired, cfg.Surrender.VoteThresholdRatio);
+        return Math.Clamp(required, 1, teamSize);
+    }
 
     /// <summary>
     /// Resolves the vote the moment the outcome is settled, so players who never
@@ -361,6 +373,18 @@ public partial class MixScrims
         // surrender win panel off the screen before anyone can read it.
         var resetToken = Core.Scheduler.DelayBySeconds(matchResetDelay, () =>
         {
+            // Read at fire time, not schedule time, so a hold taken during the window counts.
+            // Any other phase - including a KnifeRound surrender, which HandleMatchEnd ignores -
+            // means no driver was signalled and skipping would strand the plugin mid-match.
+            var stateNow = mixScrimsService.GetCurrentMatchState();
+            if (mixScrimsService.IsPhaseProgressionHeld()
+                && stateNow is MatchState.Ended or MatchState.MapLoading or MatchState.MapChosen)
+            {
+                if (cfg.DetailedLogging)
+                    logger.LogInformation("Surrender: phase progression held at {State}, leaving the post-surrender reset to the driver.", stateNow);
+                return;
+            }
+
             if (cfg.DetailedLogging)
                 logger.LogInformation("Match surrendered by team {Team}, resetting plugin state.", team);
             ResetPluginState();

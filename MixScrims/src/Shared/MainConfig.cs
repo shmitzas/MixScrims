@@ -71,6 +71,12 @@ public class MainConfig
     // Rock the vote settings
     public RtvConfig Rtv { get; set; } = new();
 
+    // Surrender vote settings
+    public SurrenderConfig Surrender { get; set; } = new();
+
+    // Timeout vote settings. The timeout itself is tuned by TimeoutDurationSeconds / Timeouts.
+    public TimeoutVoteConfig TimeoutVote { get; set; } = new();
+
     // Auto reset when players leave during match
     public AutoResetOnLeaveConfig AutoResetOnLeave { get; set; } = new();
 
@@ -195,6 +201,40 @@ public class RtvConfig
     public int MinimumPlayersRequired { get; set; } = 1;
     public int MinimumVotesRequired { get; set; } = 1;
     public double VoteThresholdRatio { get; set; } = 0.5;
+}
+
+/// <summary>Surrender vote (<c>!surrender</c> / <c>!gg</c>).</summary>
+public class SurrenderConfig
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>0 falls back to <c>DefaultVoteTimeSeconds</c>.</summary>
+    public int VoteTimeSeconds { get; set; } = 0;
+
+    public int MinimumVotesRequired { get; set; } = 1;
+
+    /// <summary>Of the whole team including the caller, whose implicit yes is already counted.</summary>
+    public double VoteThresholdRatio { get; set; } = 1.0;
+
+    /// <summary>Pass without a ballot at or below this size; 0 always opens one.</summary>
+    public int AutoPassTeamSize { get; set; } = 2;
+}
+
+/// <summary>Timeout vote (<c>!timeout</c> / <c>!pause</c>); the timeout itself is <c>TimeoutDurationSeconds</c> / <c>Timeouts</c>.</summary>
+public class TimeoutVoteConfig
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>0 falls back to <c>DefaultVoteTimeSeconds</c>.</summary>
+    public int VoteTimeSeconds { get; set; } = 0;
+
+    public int MinimumVotesRequired { get; set; } = 1;
+
+    /// <summary>Of the whole team; 0.8 is "everyone but one" on the 5-man teams this plugin targets.</summary>
+    public double VoteThresholdRatio { get; set; } = 0.8;
+
+    /// <summary>Pass without a ballot at or below this size; 0 always opens one.</summary>
+    public int AutoPassTeamSize { get; set; } = 2;
 }
 
 public class AutoResetOnLeaveConfig

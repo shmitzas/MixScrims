@@ -134,6 +134,8 @@
   "command.votekick.vote_in_progress": "Uma votação de expulsão já está [red]em andamento [default]para o seu time!",
   "command.votekick.vote_in_progress.server": "Uma votação de expulsão já está [red]em andamento [default]neste servidor!",
   "command.votekick.disabled": "A votação de expulsão está [red]desativada [default]neste servidor!",
+  "command.surrender.disabled": "A rendição está [red]desativada [default]neste servidor!",
+  "command.timeout.disabled": "Os tempos limite estão [red]desativados [default]neste servidor!",
   "command.votekick.self": "Você [red]não pode [default]votar para se expulsar!",
   "command.votekick.not_teammate": "Você só pode votar para expulsar um [red]companheiro de time[default]!",
   "command.votekick.invalid_target": "Jogador [lime]{0} [red]não encontrado[default]!",

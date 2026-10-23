@@ -33,6 +33,12 @@ public partial class MixScrims
             return;
         }
 
+        if (!cfg.TimeoutVote.Enabled)
+        {
+            PrintMessageToPlayer(player, Core.Localizer["command.timeout.disabled"]);
+            return;
+        }
+
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState != MatchState.Match)

@@ -134,6 +134,8 @@
   "command.votekick.vote_in_progress": "A vote kick is [red]already in progress [default]for your team!",
   "command.votekick.vote_in_progress.server": "A vote kick is [red]already in progress [default]on this server!",
   "command.votekick.disabled": "Vote kick is [red]disabled [default]on this server!",
+  "command.surrender.disabled": "Surrendering is [red]disabled [default]on this server!",
+  "command.timeout.disabled": "Timeouts are [red]disabled [default]on this server!",
   "command.votekick.self": "You [red]cannot [default]vote kick yourself!",
   "command.votekick.not_teammate": "You can only vote kick your own [red]teammate[default]!",
   "command.votekick.invalid_target": "Player [lime]{0} [red]not found[default]!",

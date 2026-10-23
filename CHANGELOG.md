@@ -5,6 +5,33 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
+## [1.12.2] - 2026-10-23
+
+- **Surrender and timeout votes are now configurable.** Both gained a config section with
+  the same knobs `Rtv` has — `Enabled`, `VoteTimeSeconds`, `MinimumVotesRequired`,
+  `VoteThresholdRatio` and `AutoPassTeamSize`. The thresholds are a fraction of the whole
+  team, so `Surrender.VoteThresholdRatio` at `0.6` lets 3 of 5 call it off instead of
+  needing all 5. **Defaults keep today's behaviour on a 5v5**: surrender stays unanimous
+  (`1.0`) and timeout stays everyone-but-one (`0.8`). On other team sizes the timeout
+  threshold no longer tracks team−1 exactly — a 10-man team now needs 8 rather than 9.
+- Fixed the surrender and timeout ballots never opening on servers that render MixScrims'
+  UI through another plugin (`SuppressBuiltInMenus`), leaving only the chat progress line.
+  Both votes are raised straight out of a chat command and so reach a consumer off the game
+  thread, where opening a menu throws — and the throw took the live Yes/No tally down with
+  it. MixScrims-side the vote now also reports its own size before the consumer reads it,
+  so the tally no longer starts at 100%. Consumers must still marshal: see the
+  [thread affinity](https://github.com/shmitzas/MixScrims/wiki/API-Reference#thread-affinity)
+  note, which previously said every event arrived on the game thread.
+- A surrender on a team small enough to pass without a ballot no longer leaves other
+  plugins' vote menus open — the vote-started signal is now only sent when a ballot is
+  really going to open, so it always has a matching result.
+- The match no longer resets itself after a surrender when another plugin owns the
+  post-match flow (`SetPhaseProgressionHeld`). Both were tearing the match down at once,
+  which ran warmup's config in front of the map change the other plugin was staging.
+  MixScrims still resets on its own if that plugin never got the match-ended signal.
+- `!surrender` and `!timeout` can be switched off entirely with `Surrender.Enabled` /
+  `TimeoutVote.Enabled`.
+
 ## [1.12.1] - 2026-10-17
 
 Must update to this version in order to avoid random crashes.

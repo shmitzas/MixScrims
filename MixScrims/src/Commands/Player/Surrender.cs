@@ -33,6 +33,12 @@ public partial class MixScrims
             return;
         }
 
+        if (!cfg.Surrender.Enabled)
+        {
+            PrintMessageToPlayer(player, Core.Localizer["command.surrender.disabled"]);
+            return;
+        }
+
         var matchState = mixScrimsService.GetCurrentMatchState();
 
         if (matchState != MatchState.Match && matchState != MatchState.KnifeRound)

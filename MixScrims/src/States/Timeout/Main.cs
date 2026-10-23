@@ -194,15 +194,6 @@ public partial class MixScrims
         timeoutVoters.Clear();
         { ulong seedSid = SafeSteamId(caller); if (seedSid != 0) timeoutVoters.Add(seedSid); }
 
-        mixScrimsService.RaiseTimeoutVoteStarted(team);
-        // Fire the caller's implicit YES vote through the same event surface so consumers
-        // don't have to special-case a "vote started with N=1 caller yes" seed.
-        {
-            ulong callerSid; try { callerSid = caller.SteamID; } catch { callerSid = 0; }
-            if (callerSid != 0)
-                mixScrimsService.RaiseTimeoutVoteCast(callerSid, true, team);
-        }
-
         var players = GetPlayersInTeam(team);
         if (players.Count == 0)
         {
@@ -216,8 +207,8 @@ public partial class MixScrims
             logger.LogInformation("StartTimeoutVote: Total players in team: {Count}. Caller will be removed from voting list", players.Count);
         }
 
-        // If team has 2 or fewer players, auto-pass the vote without showing menus
-        if (players.Count <= 2)
+        // Teams at or below the configured size take the timeout without a ballot.
+        if (cfg.TimeoutVote.AutoPassTeamSize > 0 && players.Count <= cfg.TimeoutVote.AutoPassTeamSize)
         {
             if (cfg.DetailedLogging)
             {
@@ -246,7 +237,19 @@ public partial class MixScrims
 
         if (cfg.DetailedLogging)
         {
-            logger.LogInformation("StartTimeoutVote: After removing caller, {Count} players need to vote", timeoutTotalEligibleVotes);
+            logger.LogInformation("StartTimeoutVote: After removing caller, {Count} players need to vote ({Required} yes votes carry it)",
+                timeoutTotalEligibleVotes, TimeoutRequiredVotes());
+        }
+
+        // Raised only now: both early exits above return without a matching VoteResult, which
+        // would strand a consumer's ballot, and the tally read here needs its denominator.
+        mixScrimsService.RaiseTimeoutVoteStarted(team);
+        // Fire the caller's implicit YES vote through the same event surface so consumers
+        // don't have to special-case a "vote started with N=1 caller yes" seed.
+        {
+            ulong callerSid; try { callerSid = caller.SteamID; } catch { callerSid = 0; }
+            if (callerSid != 0)
+                mixScrimsService.RaiseTimeoutVoteCast(callerSid, true, team);
         }
 
         var builder = Core.MenusAPI
@@ -307,21 +310,29 @@ public partial class MixScrims
         // Bots auto-vote yes, so the vote can already be settled before it opens.
         if (TryResolveTimeoutVoteEarly()) return;
 
-        timeoutVoteTimer = Core.Scheduler.DelayBySeconds(cfg.DefaultVoteTimeSeconds, () => TimeoutVoteResult(team));
+        timeoutVoteTimer = Core.Scheduler.DelayBySeconds(TimeoutVoteSeconds(), () => TimeoutVoteResult(team));
         Core.Scheduler.StopOnMapChange(timeoutVoteTimer);
 
         if (cfg.DetailedLogging)
         {
-            logger.LogInformation("StartTimeoutVote: Vote timer scheduled for {Seconds} seconds", cfg.DefaultVoteTimeSeconds);
+            logger.LogInformation("StartTimeoutVote: Vote timer scheduled for {Seconds} seconds", TimeoutVoteSeconds());
         }
     }
 
+    internal int TimeoutVoteSeconds() =>
+        cfg.TimeoutVote.VoteTimeSeconds > 0 ? cfg.TimeoutVote.VoteTimeSeconds : cfg.DefaultVoteTimeSeconds;
+
     /// <summary>
-    /// Everyone in the team but one. The caller's implicit yes is seeded into the yes
-    /// count but excluded from the eligible count, so the team is eligible + 1 and the
-    /// threshold is one below that. Floored at 1 so a vote can never pass on zero yeses.
+    /// Fraction of the whole team, which is eligible + 1: the caller's implicit yes is seeded
+    /// into the yes count but excluded from the eligible count. Clamped so a ratio above 1.0
+    /// makes the vote strict rather than unwinnable.
     /// </summary>
-    internal int TimeoutRequiredVotes() => Math.Max(1, timeoutTotalEligibleVotes);
+    internal int TimeoutRequiredVotes()
+    {
+        var teamSize = timeoutTotalEligibleVotes + 1;
+        var required = ComputeVoteThreshold(teamSize, cfg.TimeoutVote.MinimumVotesRequired, cfg.TimeoutVote.VoteThresholdRatio);
+        return Math.Clamp(required, 1, teamSize);
+    }
 
     /// <summary>
     /// Resolves the vote the moment the outcome is settled, so players who never

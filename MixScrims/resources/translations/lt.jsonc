@@ -134,6 +134,8 @@
   "command.votekick.vote_in_progress": "Jūsų komandoje [red]jau vyksta [default]balsavimas dėl išmetimo!",
   "command.votekick.vote_in_progress.server": "Šiame serveryje [red]jau vyksta [default]balsavimas dėl išmetimo!",
   "command.votekick.disabled": "Balsavimas išmesti [red]išjungtas [default]šiame serveryje!",
+  "command.surrender.disabled": "Pasidavimas [red]išjungtas [default]šiame serveryje!",
+  "command.timeout.disabled": "Pertraukėlės [red]išjungtos [default]šiame serveryje!",
   "command.votekick.self": "Jūs [red]negalite [default]balsuoti išmesti save!",
   "command.votekick.not_teammate": "Galite balsuoti išmesti tik savo [red]komandos narį[default]!",
   "command.votekick.invalid_target": "Žaidėjas [lime]{0} [red]nerastas[default]!",
