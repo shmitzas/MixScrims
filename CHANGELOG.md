@@ -5,6 +5,16 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
+## [1.12.3] - 2026-11-01
+
+Requires **SwiftlyS2 1.5.0 or newer**.
+
+- The built-in menus (side pick, team pick, map vote, captain, surrender, timeout and
+  vote-kick) moved to SwiftlyS2's new menu system and look slightly different. Their keys
+  now come from `configs/menus/menus.jsonc`: with its defaults Shift moves **up** and F
+  moves **down** — the reverse of the old menus — while E still selects and Tab still
+  closes.
+
 ## [1.12.2] - 2026-10-23
 
 - Fixed the surrender and timeout vote menus never opening on servers that render the

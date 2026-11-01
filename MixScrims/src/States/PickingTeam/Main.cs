@@ -1,8 +1,9 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
-using SwiftlyS2.Core.Menus.OptionsBase;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.GameEvents;
+using SwiftlyS2.Shared.Menu;
+using SwiftlyS2.Shared.Menu.Components;
 using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
@@ -571,10 +572,10 @@ public partial class MixScrims
 
         if (captainCt != null && IsPlayerValid(captainCt))
         {
-            var ctMenu = Core.MenusAPI.GetCurrentMenu(captainCt);
-            if (ctMenu != null)
+            var ctSession = Core.Menu.GetSession(captainCt);
+            if (ctSession != null)
             {
-                Core.MenusAPI.CloseMenuForPlayer(captainCt, ctMenu);
+                ctSession.Close();
                 if (cfg.DetailedLogging)
                     logger.LogInformation("FinalizeTeamPicking: Closed open menu for CT captain {PlayerName}", captainCt.Name);
             }
@@ -582,10 +583,10 @@ public partial class MixScrims
 
         if (captainT != null && IsPlayerValid(captainT))
         {
-            var tMenu = Core.MenusAPI.GetCurrentMenu(captainT);
-            if (tMenu != null)
+            var tSession = Core.Menu.GetSession(captainT);
+            if (tSession != null)
             {
-                Core.MenusAPI.CloseMenuForPlayer(captainT, tMenu);
+                tSession.Close();
                 if (cfg.DetailedLogging)
                     logger.LogInformation("FinalizeTeamPicking: Closed open menu for T captain {PlayerName}", captainT.Name);
             }
@@ -735,39 +736,35 @@ public partial class MixScrims
             return;
         }
 
-        var builder = Core.MenusAPI
-            .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.team_picking", team == Team.CT ? "CT" : "T"])
-            .Design.SetMenuTitleVisible(true)
-            .Design.SetMenuFooterVisible(true)
-            .EnableSound()
-            .SetPlayerFrozen(false)
-            .DisableExit()
-            .SetAutoCloseDelay(0);
+        // No exit. Key bindings are stored per menu id, so no closable menu may reuse this id.
+        var builder = Core.Menu
+            .CreateMenu("mixscrims.team-pick")
+            .AddHeader(new TitleComponent(Core.Localizer["menu.team_picking", team == Team.CT ? "CT" : "T"]) { Overflow = MenuTextOverflow.None })
+            .WithAction(MenuActions.Close.Name, MenuKey.None);
 
         foreach (var player in players)
         {
             var displayName = player.Name ?? $"#{player.PlayerID}";
             var pickedSlot = SafePlayerId(player);
             openPickMenuPoolSlots.Add(pickedSlot);
-            var button = new ButtonMenuOption(displayName);
+            var button = new ButtonComponent(displayName);
             if (team == Team.CT)
             {
-                button.Click += async (sender, args) =>
+                button.OnSelect = async ctx =>
                 {
                     AssignPickedPlayerToTeamCt(captain, displayName, pickedSlot);
                 };
             }
             else
             {
-                button.Click += async (sender, args) =>
+                button.OnSelect = async ctx =>
                 {
                     AssignPickedPlayerToTeamT(captain, displayName, pickedSlot);
                 };
             }
             if (cfg.DetailedLogging)
                 logger.LogInformation("PromptCaptainToPickPlayer: Added option {PlayerName} for {CaptainName} ({Team})", displayName, captain.Name, team == Team.CT ? "CT" : "T");
-            builder.AddOption(button);
+            builder.Add(button);
         }
 
         var menu = builder.Build();
@@ -775,7 +772,7 @@ public partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("PromptCaptainToPickPlayer: Displaying picking menu to {CaptainName} for team {Team}", captain.Name, team == Team.CT ? "CT" : "T");
-            Core.MenusAPI.OpenMenuForPlayer(captain, menu);
+            menu.Open(captain);
         }
 
         // Armed for a suppressed menu too: a consumer's own menu can go unanswered just as this one can.
@@ -1095,7 +1092,7 @@ public partial class MixScrims
             return;
         }
 
-        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        // IMixScrims drivers can call this off the game thread; only PlayerID survives the hop.
         var captainSlot = captain.PlayerID;
         Core.Scheduler.NextTick(() => AssignPickedPlayerToTeamCtOnGameThread(captainSlot, pickedPlayerName, pickedSlot));
     }
@@ -1164,7 +1161,7 @@ public partial class MixScrims
             return;
         }
 
-        // Same thread-pool dispatch as the CT twin above.
+        // Same off-thread driver callers as the CT twin above.
         var captainSlot = captain.PlayerID;
         Core.Scheduler.NextTick(() => AssignPickedPlayerToTeamTOnGameThread(captainSlot, pickedPlayerName, pickedSlot));
     }
@@ -1205,10 +1202,10 @@ public partial class MixScrims
         else
             player.ChangeTeamAsync(Team.T);
 
-        var currentMenu = Core.MenusAPI.GetCurrentMenu(captain);
-        if (currentMenu != null)
+        var currentSession = Core.Menu.GetSession(captain);
+        if (currentSession != null)
         {
-            Core.MenusAPI.CloseMenuForPlayer(captain, currentMenu);
+            currentSession.Close();
         }
 
         if (cfg.DetailedLogging)

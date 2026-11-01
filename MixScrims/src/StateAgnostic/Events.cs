@@ -548,7 +548,7 @@ partial class MixScrims
         RunDisconnectCleanupStep("close active menu", () =>
         {
             if (IsPlayerValid(player))
-                Core.MenusAPI.CloseActiveMenu(player);
+                Core.Menu.CloseFor(player);
         });
 
         if (matchState == MatchState.Warmup || matchState == MatchState.MapChosen)

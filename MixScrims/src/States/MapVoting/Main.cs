@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Shared.Menus;
-using SwiftlyS2.Core.Menus.OptionsBase;
+using SwiftlyS2.Shared.Menu;
+using SwiftlyS2.Shared.Menu.Components;
 using MixScrims.Contract;
 
 namespace MixScrims;
@@ -9,7 +9,7 @@ namespace MixScrims;
 public partial class MixScrims
 {
     internal List<VotedMap> votedMaps { get; set; } = [];
-    internal IMenuAPI? mapVotingMenu { get; set; } = null;
+    internal IMenu? mapVotingMenu { get; set; } = null;
     // Rebuilt every StartMapVotingPhase and cleared when the vote closes.
     internal List<string> currentVoteMapNames = new();
     internal DateTime? mapVoteDeadline = null;
@@ -96,14 +96,9 @@ public partial class MixScrims
         mapVoteDeadline = DateTime.UtcNow.AddSeconds(voteSeconds);
         mixScrimsService.RaiseMapVotingStarted(currentVoteMapNames.AsReadOnly(), voteSeconds);
 
-        var builder = Core.MenusAPI
-            .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.map_voting"])
-            .Design.SetMenuTitleVisible(true)
-            .Design.SetMenuFooterVisible(true)
-            .EnableSound()
-            .SetPlayerFrozen(false)
-            .SetAutoCloseDelay(0);
+        var builder = Core.Menu
+            .CreateMenu("mixscrims.map-vote")
+            .AddHeader(new TitleComponent(Core.Localizer["menu.map_voting"]) { Overflow = MenuTextOverflow.None });
 
         if (cfg.DetailedLogging)
             logger.LogInformation("StartMapVotingPhase: {Count} maps available", mapsToVote.Count);
@@ -112,13 +107,12 @@ public partial class MixScrims
         {
             if (cfg.DetailedLogging)
                 logger.LogInformation("  - {Map}", map.Name);
-            var button = new ButtonMenuOption(map.Name);
-            button.Click += async (sender, args) =>
+            var button = new ButtonComponent(map.Name, async ctx =>
             {
-                RegisterMapVoteByName(args.Player, map.Name);
+                RegisterMapVoteByName(ctx.Player, map.Name);
                 await ValueTask.CompletedTask;
-            };
-            builder.AddOption(button);
+            });
+            builder.Add(button);
         }
 
         mapVotingMenu = null;
@@ -167,7 +161,7 @@ public partial class MixScrims
             return;
         }
 
-        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        // IMixScrims drivers can call this off the game thread; only PlayerID survives the hop.
         var slot = player.PlayerID;
         Core.Scheduler.NextTick(() => RegisterMapVoteOnGameThread(slot, mapDisplayName));
     }
@@ -256,7 +250,7 @@ public partial class MixScrims
 
         try
         {
-            Core.MenusAPI.OpenMenuForPlayer(player, mapVotingMenu);
+            mapVotingMenu.Open(player);
         }
         catch (Exception ex)
         {
@@ -325,10 +319,10 @@ public partial class MixScrims
                 continue;
             }
 
-            var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
-            if (mapVotingMenu != null && currentMenu != null)
+            var currentSession = Core.Menu.GetSession(player);
+            if (mapVotingMenu != null && currentSession != null)
             {
-                Core.MenusAPI.CloseMenuForPlayer(player, currentMenu);
+                currentSession.Close();
             }
         }
 

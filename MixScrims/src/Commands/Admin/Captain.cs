@@ -1,7 +1,8 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
-using SwiftlyS2.Core.Menus.OptionsBase;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.Menu;
+using SwiftlyS2.Shared.Menu.Components;
 using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
@@ -80,23 +81,18 @@ public partial class MixScrims
                 return;
             }
 
-            var builder = Core.MenusAPI
-                .CreateBuilder()
-                .Design.SetMenuTitle(Core.Localizer["menu.captain_pick", team!.ToUpper()])
-                .Design.SetMenuTitleVisible(true)
-                .Design.SetMenuFooterVisible(true)
-                .EnableSound()
-                .SetPlayerFrozen(false)
-                .SetAutoCloseDelay(0);
+            var builder = Core.Menu
+                .CreateMenu("mixscrims.captain-pick")
+                .AddHeader(new TitleComponent(Core.Localizer["menu.captain_pick", team!.ToUpper()]) { Overflow = MenuTextOverflow.None });
 
             foreach (var player in players)
             {
                 var displayName = player.Name ?? $"#{player.PlayerID}";
-                var button = new ButtonMenuOption(displayName);
+                var button = new ButtonComponent(displayName);
 
                 if (team == "t")
                 {
-                    button.Click += async (sender, args) =>
+                    button.OnSelect = async ctx =>
                     {
                         SetTCaptain(admin, displayName);
                         await ValueTask.CompletedTask;
@@ -104,20 +100,20 @@ public partial class MixScrims
                 }
                 if (team == "ct")
                 {
-                    button.Click += async (sender, args) =>
+                    button.OnSelect = async ctx =>
                     {
                         SetCtCaptain(admin, displayName);
                         await ValueTask.CompletedTask;
                     };
                 }
 
-                builder.AddOption(button);
+                builder.Add(button);
             }
 
             var menu = builder.Build();
             if (IsPlayerValid(admin))
             {
-                Core.MenusAPI.OpenMenuForPlayer(admin, menu);
+                menu.Open(admin);
             }
         }
         else

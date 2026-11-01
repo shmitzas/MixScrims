@@ -588,7 +588,7 @@ public sealed partial class MixScrims
             return;
         }
 
-        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        // Deferred a tick like the vote and pick handlers; only PlayerID survives the hop.
         var slot = admin.PlayerID;
         Core.Scheduler.NextTick(() => SetCtCaptainOnGameThread(slot, pickedPlayerName));
     }
@@ -628,7 +628,7 @@ public sealed partial class MixScrims
             return;
         }
 
-        // Same thread-pool dispatch as SetCtCaptain above.
+        // Same deferral as SetCtCaptain above.
         var slot = admin.PlayerID;
         Core.Scheduler.NextTick(() => SetTCaptainOnGameThread(slot, pickedPlayerName));
     }

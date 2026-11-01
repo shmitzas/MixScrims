@@ -304,29 +304,29 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 > `HashSet.Add` dedupe; map voting is intentionally re-entrant (re-voting removes
 > the previous vote first) — do not latch it.
 
-> **Invariant: a built-in menu click does NOT arrive on the game thread.**
-> SwiftlyS2's `MenuManagerAPI.OnClientKeyStateChanged` dispatches every
-> `ButtonMenuOption.Click` through `_ = Task.Run(() => option.OnClickAsync(player))`
-> (both the `button` and `wasd` input-mode branches). Reading `IPlayer.Name`,
-> `.SteamID`, `.IsValid`, `.Controller` or `.PlayerPawn` there is an uncatchable
-> access violation that kills the host, and a managed `try/catch` cannot save it.
+> **Invariant: the vote / pick / side handlers re-enter the game thread themselves.**
+> Built-in `Core.Menu` buttons call them from `OnSelect`, which runs on the game
+> thread — but the `IMixScrims` drivers call the same handlers, and a consumer may
+> legitimately call `CastMapVote` from its own `Task`. Reading `IPlayer.Name`,
+> `.SteamID`, `.IsValid`, `.Controller` or `.PlayerPawn` off the game thread is an
+> uncatchable access violation that kills the host, and a managed `try/catch`
+> cannot save it.
 >
-> Every handler a menu button invokes therefore re-enters the game thread itself:
-> capture `IPlayer.PlayerID` (a plain managed field — the *only* member with no
-> `ThrowIfDisposed` and no native deref), `Core.Scheduler.NextTick(...)`, then
-> re-resolve with `Core.PlayerManager.GetPlayer(slot)` and re-validate before
+> So each handler captures `IPlayer.PlayerID` (a plain managed field — the *only*
+> member with no `ThrowIfDisposed` and no native deref), `Core.Scheduler.NextTick(...)`,
+> then re-resolves with `Core.PlayerManager.GetPlayer(slot)` and re-validates before
 > touching anything native. A failed re-resolve drops the input and logs — the
-> player left between the click and the tick. See `RegisterMapVoteOnGameThread`
+> player left between the call and the tick. See `RegisterMapVoteOnGameThread`
 > in `States/MapVoting/Main.cs` for the shape; `HandleCaptainSideChoice`,
-> `HandleVoteKickVote`, `HandleSurrenderVote`, `HandleTimeoutVote`,
-> `SetCtCaptain` / `SetTCaptain` and `AssignPickedPlayerToTeamCt` / `...T` all
-> follow it. **Do not "simplify" the `NextTick` away** — the reason is invisible
-> from the call site.
+> `HandleVoteKickVote`, `HandleSurrenderVote`, `HandleTimeoutVote` and
+> `AssignPickedPlayerToTeamCt` / `...T` all follow it. `SetCtCaptain` /
+> `SetTCaptain` keep the same shape although only the admin menu reaches them.
+> **Do not "simplify" the `NextTick` away** — the reason is invisible from the
+> call site.
 >
-> The marshal sits in the handler, not the click lambda, so the `IMixScrims`
-> drivers that share those handlers are covered too: a consumer may legitimately
-> call `CastMapVote` from its own `Task`. Cost is that a driver lands one tick
-> after the call — see the wiki's Match flow drivers "Universal rules".
+> The marshal sits in the handler, not the button lambda, which is what covers
+> the drivers. Cost is that every input — menu or driver — lands one tick after
+> the call; see the wiki's Match flow drivers "Universal rules".
 >
 > **The rest of `IMixScrims` is game-thread-only, and v2.8.0 says so on the
 > interface.** The drivers are the exception, not the rule: every read that
@@ -406,7 +406,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 **Environment:**
 - `TestMode` - Loads `staging_overrides.cfg` (bots, lower reqs), sets PluginState to Staging
 - `DetailedLogging` - Verbose debug logs
-- `SuppressBuiltInMenus` (v2.0.0) - Skip every `Core.MenusAPI.OpenMenuForPlayer` site so a consumer plugin can render its own UI. Opt-in (default false). Runtime override via `IMixScrims.SetBuiltInMenusSuppressed`.
+- `SuppressBuiltInMenus` (v2.0.0) - Skip every built-in `Core.Menu` open site so a consumer plugin can render its own UI. Opt-in (default false). Runtime override via `IMixScrims.SetBuiltInMenusSuppressed`.
 - `SuppressBuiltInCenterHtml` (v2.0.0) - Skip every `SendCenterHTML` broadcast. Same opt-in pattern.
 
 **Player Leave Punishment:**
@@ -524,12 +524,12 @@ mixScrims.KickNotPlayingPlayers("Not participating");
 - `AddPlayerToReadyList` / `RemovePlayerFromReadyList` (`StateAgnostic/Main.cs`) — fires `PlayerReadyChanged`. Mass helpers (`ForceReadyAllPlayers` / `ForceUnreadyAllPlayers`) delegate here, so the event fires once per affected player without extra plumbing. The removal reports the roster entry's **captured** SteamID, so a consumer gets a real id to forget even when the leaver's own reference no longer reads one.
 - `AssignCaptain(Team, IPlayer?)` (`Shared/Helpers.cs`) — the single field-write chokepoint for `captainCt` / `captainT`. Fires `CaptainRemoved` for the outgoing captain, then `CaptainAssigned` for the incoming one. Every `captainCt = ...` / `captainT = ...` assignment across the plugin routes through this helper.
 - `StartTeamPickingPhase` (`PickingTeam/Main.cs`) — fires `TeamPickingStarted` after the coin toss, which `ConsumeNextPickingTeamOverride` can pre-empt (see v2.8 flow control above). The consume sits at the toss rather than at phase entry, so the abort paths above it — no captains drawn, `SkipTeamPicking`, `DisableCaptains` — leave a pending override for the next real ladder instead of burning it. Captains' implicit self-picks fire `PlayerPickedForTeam` with `pickIndex = 1` and `pickIndex = 2`. Every exit from picking goes through `CompleteTeamPicking` — including `SkipTeamPickingPhase` — which seals the rosters via `FinalizeTeamPicking` and then starts the knife round, unless phase progression is held, in which case it seals and stops. It is the one place that decides whether a knife round runs; calling `StartKnifeRound` from a new site bypasses that. **The held branch still seals** — `StartMatch` kicks every human outside the *playing* rosters, so a consumer calling it against unsealed ones would empty the server.
-- `AssignPickedPlayerToTeamCt` / `AssignPickedPlayerToTeamT` — fires `PlayerPickedForTeam` and increments `currentPickIndex`. Both resolve the pick through `ResolvePickTarget`, which keys on the **slot** when the caller supplies one and only falls back to the display name otherwise: two players can share a name, and name lookup handed both of their buttons to whichever one `GetPlayerByName` listed first. Both also defer the mutation a tick (menu clicks arrive off-thread) and so re-run `CanApplyPickOnGameThread` immediately before it — state, whose turn it is, and a slot-keyed duplicate check. **That re-check is also what keeps `CompleteTeamPicking` single-entry**: both sites that schedule it null `activePickingTeam` first, so a second body queued in the same tick is rejected before it can reach the threshold test and arm a second `StartKnifeRound` chain. A rejection logs and returns — it must never re-prompt, which would hand the turn back to the wrong team.
+- `AssignPickedPlayerToTeamCt` / `AssignPickedPlayerToTeamT` — fires `PlayerPickedForTeam` and increments `currentPickIndex`. Both resolve the pick through `ResolvePickTarget`, which keys on the **slot** when the caller supplies one and only falls back to the display name otherwise: two players can share a name, and name lookup handed both of their buttons to whichever one `GetPlayerByName` listed first. Both also defer the mutation a tick (`IMixScrims` drivers can call them off-thread) and so re-run `CanApplyPickOnGameThread` immediately before it — state, whose turn it is, and a slot-keyed duplicate check. **That re-check is also what keeps `CompleteTeamPicking` single-entry**: both sites that schedule it null `activePickingTeam` first, so a second body queued in the same tick is rejected before it can reach the threshold test and arm a second `StartKnifeRound` chain. A rejection logs and returns — it must never re-prompt, which would hand the turn back to the wrong team.
 - `StartMapVotingPhase`, `RegisterMapVoteByName`, `AnnouncePickedMap` (`MapVoting/Main.cs`) — fires the three map vote events. The votable map list + deadline are cached in `currentVoteMapNames` + `mapVoteDeadline` for snapshot reads.
   - **Two modes share one implementation.** `StartMapVotingPhase` and `StartDeferredMapVotePhase` both delegate to `StartMapVotingCore(deferred, voteSeconds)`. Deferred skips `SetMatchState(MapVoting)`, skips the `announcement.state_changed.map_voting` line (no phase changed, and the caller frames it), and at the deadline `AnnouncePickedMap` takes an early branch that announces the winner and raises `MapVotingEnded` but changes no state and loads no map. Everything else — ballot, menu, per-cast tally, joiner enfranchisement, disconnect withdrawal — is the same code. `deferredMapVoteActive` is **assigned** `= deferred` rather than only set, so a native vote started over a deferred one supersedes it.
   - **`MapVoteIsOpen` (`MatchState == MapVoting || deferredMapVoteActive`) is the guard every vote-path site must use**, never a bare state comparison: `Revote.cs`, `MixScrimsService.CastMapVote`, the `ScheduleMapVoteForJoiner` call site in `StateAgnostic/Events.cs`, its retry body, and `HandlePlayerDisconnectMapVote`. The four remaining `MatchState.MapVoting` comparisons (`Events.cs` ×3, `StateAgnostic/Main.cs` ×1) are team-join / spectator placement for *pre-match* states and must **not** be widened — during a deferred vote the match is live and a joiner has to be handled as a match joiner.
   - **`mapVoteEpoch` is what makes an early close safe.** Every open and every close bumps it; the deadline callback captures it and returns when it no longer matches. Cancelling the scheduler token alone cannot cover the close paths, and without this `EndDeferredMapVoteNow` would be followed by the deadline announcing a second winner. Mirrors `pickPhaseEpoch`.
-  - **A mid-vote joiner is enfranchised by `ScheduleMapVoteForJoiner`, called from `HandleClientPutInServer`** — `StartMapVotingPhase` only opens the vote for players connected at the time, and nothing else reopens it. It is scheduled rather than opened inline because the connect hook is the call stack that crashed the host, and it retries at 2 / 5 / 10 s because `IsPlayerValid` (which `OpenMenuForPlayer` hard-requires) demands a pawn the joiner does not have yet. `mapVotePendingJoiners` is what stops a later retry reopening a vote the player already answered — cleared at both voting boundaries. It routes through `DisplayMapVotingMenu`, so the suppressed path raises `MapVoteMenuRequested` and both backends are covered by one call site. The late vote needs no other change: `CastMapVote`'s guard is on the **map name** being up for vote, never on the voter being in an electorate, and the vote has no quorum.
+  - **A mid-vote joiner is enfranchised by `ScheduleMapVoteForJoiner`, called from `HandleClientPutInServer`** — `StartMapVotingPhase` only opens the vote for players connected at the time, and nothing else reopens it. It is scheduled rather than opened inline because the connect hook is the call stack that crashed the host, and it retries at 2 / 5 / 10 s because `IsPlayerValid` (which `DisplayMapVotingMenu` gates on, and without which `Core.Menu` drops the session on its next tick) demands a pawn the joiner does not have yet. `mapVotePendingJoiners` is what stops a later retry reopening a vote the player already answered — cleared at both voting boundaries. It routes through `DisplayMapVotingMenu`, so the suppressed path raises `MapVoteMenuRequested` and both backends are covered by one call site. The late vote needs no other change: `CastMapVote`'s guard is on the **map name** being up for vote, never on the voter being in an electorate, and the vote has no quorum.
 - `StartKnifeRound`, `PromptWinnerTCaptainoChoseStartingSide`, `SwitchStartingSides` / `StayStartingSides` (`KnifeRound/Main.cs`) — fires `KnifeRoundStarted` / `KnifeRoundWon` / `PickingStartingSideStarted` / `StartingSideChosen`. `PickingStartingSideStarted` is intentionally suppressed when `DisableCaptains` is true.
 - `StartTimeout`, `EndTimeout`, `BroadcastRemainingTimeoutTime` (`Timeout/Main.cs`) — fires `TimeoutStarted` / `TimeoutTick` / `TimeoutEnded`. Snapshot fields `activeTimeoutTeam` + `activeTimeoutRemainingSeconds` mirror the per-tick counter for consumers.
 - Timeout / Surrender / VoteKick vote flows fire `*VoteStarted`, `*VoteCast` (including the caller's implicit YES seed), and `*VoteResult`.
@@ -547,7 +547,7 @@ mixScrims.KickNotPlayingPlayers("Not participating");
 
 **Built-in presentation suppression gates** (never remove — consumers set `suppressBuiltInMenus` / `suppressBuiltInCenterHtml` to render their own UI):
 
-- 9 menu sites gate on `if (!suppressBuiltInMenus)` before `Core.MenusAPI.OpenMenuForPlayer`: `Commands/Admin/Captain.cs`, `States/KnifeRound/Main.cs` (winner CT + winner T + DisableCaptains team-vote), `States/MapVoting/Main.cs` (`DisplayMapVotingMenu`), `States/PickingTeam/Main.cs` (`PromptCaptainToPickPlayer`), `States/Surrender/Main.cs`, `States/Timeout/Main.cs`, `States/Match/VoteKick.cs`. `Commands/Admin/Captain.cs` early-returns on the suppressed branch (raising `CaptainMenuRequested`) rather than building a menu it would discard.
+- 9 menu sites gate on `if (!suppressBuiltInMenus)` before the built-in menu's `Open`: `Commands/Admin/Captain.cs`, `States/KnifeRound/Main.cs` (winner CT + winner T + DisableCaptains team-vote), `States/MapVoting/Main.cs` (`DisplayMapVotingMenu`), `States/PickingTeam/Main.cs` (`PromptCaptainToPickPlayer`), `States/Surrender/Main.cs`, `States/Timeout/Main.cs`, `States/Match/VoteKick.cs`. `Commands/Admin/Captain.cs` early-returns on the suppressed branch (raising `CaptainMenuRequested`) rather than building a menu it would discard.
 - 6 CenterHTML sites gate on `if (!suppressBuiltInCenterHtml)` (early return where the method has nothing else to do, per-call gate where the surrounding code still runs): `StateAgnostic/Announcements.cs` (`DisplayReadyAndNotReadyPlayersInCenterHtml`), `States/Timeout/Main.cs` (`BroadcastRemainingTimeoutTime`), `States/Match/VoteKick.cs` (`SendVoteKickProgressCenterHtml`), `States/Surrender/Main.cs` (both CT + T success paths, one gate per team).
 
 ### Discord Webhooks

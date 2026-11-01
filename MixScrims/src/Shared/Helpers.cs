@@ -508,13 +508,13 @@ public sealed partial class MixScrims
     }
 
     /// <summary>
-    /// Closes the currently open menu for the specified player, if one exists.
+    /// Closes the player's open menu if it is one of this plugin's.
     /// </summary>
     internal void CloseMenuForPlayer(IPlayer player)
     {
         if (!IsBot(player) && IsPlayerValid(player))
         {
-            Core.MenusAPI.CloseActiveMenu(player);
+            Core.Menu.CloseFor(player);
         }
     }
 

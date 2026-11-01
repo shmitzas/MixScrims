@@ -48,10 +48,10 @@ public partial class MixScrims
 
         if (!IsBot(player) && IsPlayerValid(player))
         {
-            var menu = Core.MenusAPI.GetCurrentMenu(player);
-            if (menu != null)
+            var session = Core.Menu.GetSession(player);
+            if (session != null)
             {
-                Core.MenusAPI.CloseMenuForPlayer(player, menu);
+                session.Close();
             }
         }
 

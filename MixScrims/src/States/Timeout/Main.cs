@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Core.Menus.OptionsBase;
+using SwiftlyS2.Shared.Menu;
+using SwiftlyS2.Shared.Menu.Components;
 using MixScrims.Contract;
 
 namespace MixScrims;
@@ -252,30 +253,23 @@ public partial class MixScrims
                 mixScrimsService.RaiseTimeoutVoteCast(callerSid, true, team);
         }
 
-        var builder = Core.MenusAPI
-            .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.timeout_vote"])
-            .Design.SetMenuTitleVisible(true)
-            .Design.SetMenuFooterVisible(true)
-            .EnableSound()
-            .SetPlayerFrozen(false)
-            .SetAutoCloseDelay(0);
+        var builder = Core.Menu
+            .CreateMenu("mixscrims.timeout-vote")
+            .AddHeader(new TitleComponent(Core.Localizer["menu.timeout_vote"]) { Overflow = MenuTextOverflow.None });
 
-        var yesBtn = new ButtonMenuOption("Yes");
-        yesBtn.Click += async (sender, args) =>
+        var yesBtn = new ButtonComponent("Yes", async ctx =>
         {
-            HandleTimeoutVote(args.Player, "Yes");
+            HandleTimeoutVote(ctx.Player, "Yes");
             await ValueTask.CompletedTask;
-        };
-        builder.AddOption(yesBtn);
+        });
+        builder.Add(yesBtn);
 
-        var noBtn = new ButtonMenuOption("No");
-        noBtn.Click += async (sender, args) =>
+        var noBtn = new ButtonComponent("No", async ctx =>
         {
-            HandleTimeoutVote(args.Player, "No");
+            HandleTimeoutVote(ctx.Player, "No");
             await ValueTask.CompletedTask;
-        };
-        builder.AddOption(noBtn);
+        });
+        builder.Add(noBtn);
 
         var menu = builder.Build();
 
@@ -294,7 +288,7 @@ public partial class MixScrims
             if (IsPlayerValid(player))
             {
                 if (!suppressBuiltInMenus)
-                    Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                    menu.Open(player);
                 menuOpenCount++;
             }
         }
@@ -369,7 +363,7 @@ public partial class MixScrims
             return;
         }
 
-        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        // IMixScrims drivers can call this off the game thread; only PlayerID survives the hop.
         var slot = player.PlayerID;
         Core.Scheduler.NextTick(() => HandleTimeoutVoteOnGameThread(slot, choice));
     }
@@ -396,10 +390,10 @@ public partial class MixScrims
                 player.Name, choice, timeoutVoteYesCount, timeoutVoteNoCount, timeoutTotalEligibleVotes);
         }
 
-        var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
-        if (currentMenu != null)
+        var currentSession = Core.Menu.GetSession(player);
+        if (currentSession != null)
         {
-            Core.MenusAPI.CloseMenuForPlayer(player, currentMenu);
+            currentSession.Close();
         }
 
         if (player.PlayerPawn == null)
@@ -465,10 +459,10 @@ public partial class MixScrims
             if (!IsPlayerValid(player) || IsBot(player))
                 continue;
 
-            var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
-            if (currentMenu != null)
+            var currentSession = Core.Menu.GetSession(player);
+            if (currentSession != null)
             {
-                Core.MenusAPI.CloseMenuForPlayer(player, currentMenu);
+                currentSession.Close();
             }
         }
 

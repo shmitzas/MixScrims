@@ -1,7 +1,8 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
-using SwiftlyS2.Core.Menus.OptionsBase;
 using SwiftlyS2.Shared.GameEventDefinitions;
+using SwiftlyS2.Shared.Menu;
+using SwiftlyS2.Shared.Menu.Components;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using System.Numerics;
@@ -93,30 +94,23 @@ public partial class MixScrims
                 mixScrimsService.RaiseSurrenderVoteCast(callerSid, true, team);
         }
 
-        var builder = Core.MenusAPI
-            .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.surrender_vote"])
-            .Design.SetMenuTitleVisible(true)
-            .Design.SetMenuFooterVisible(true)
-            .EnableSound()
-            .SetPlayerFrozen(false)
-            .SetAutoCloseDelay(0);
+        var builder = Core.Menu
+            .CreateMenu("mixscrims.surrender-vote")
+            .AddHeader(new TitleComponent(Core.Localizer["menu.surrender_vote"]) { Overflow = MenuTextOverflow.None });
 
-        var yesBtn = new ButtonMenuOption("Yes");
-        yesBtn.Click += async (sender, args) =>
+        var yesBtn = new ButtonComponent("Yes", async ctx =>
         {
-            HandleSurrenderVote(args.Player, "Yes");
+            HandleSurrenderVote(ctx.Player, "Yes");
             await ValueTask.CompletedTask;
-        };
-        builder.AddOption(yesBtn);
+        });
+        builder.Add(yesBtn);
 
-        var noBtn = new ButtonMenuOption("No");
-        noBtn.Click += async (sender, args) =>
+        var noBtn = new ButtonComponent("No", async ctx =>
         {
-            HandleSurrenderVote(args.Player, "No");
+            HandleSurrenderVote(ctx.Player, "No");
             await ValueTask.CompletedTask;
-        };
-        builder.AddOption(noBtn);
+        });
+        builder.Add(noBtn);
 
         var menu = builder.Build();
 
@@ -135,7 +129,7 @@ public partial class MixScrims
             if (IsPlayerValid(player))
             {
                 if (!suppressBuiltInMenus)
-                    Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                    menu.Open(player);
                 menuOpenCount++;
             }
         }
@@ -210,7 +204,7 @@ public partial class MixScrims
             return;
         }
 
-        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        // IMixScrims drivers can call this off the game thread; only PlayerID survives the hop.
         var slot = player.PlayerID;
         Core.Scheduler.NextTick(() => HandleSurrenderVoteOnGameThread(slot, choice));
     }
@@ -237,10 +231,10 @@ public partial class MixScrims
                 player.Name, choice, surrenderVoteYesCount, surrenderVoteNoCount, surrenderTotalEligibleVotes);
         }
 
-        var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
-        if (currentMenu != null)
+        var currentSession = Core.Menu.GetSession(player);
+        if (currentSession != null)
         {
-            Core.MenusAPI.CloseMenuForPlayer(player, currentMenu);
+            currentSession.Close();
         }
 
         if (player.PlayerPawn == null)
@@ -306,10 +300,10 @@ public partial class MixScrims
             if (!IsPlayerValid(player) || IsBot(player))
                 continue;
 
-            var currentMenu = Core.MenusAPI.GetCurrentMenu(player);
-            if (currentMenu != null)
+            var currentSession = Core.Menu.GetSession(player);
+            if (currentSession != null)
             {
-                Core.MenusAPI.CloseMenuForPlayer(player, currentMenu);
+                currentSession.Close();
             }
         }
 

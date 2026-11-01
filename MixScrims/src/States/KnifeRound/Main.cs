@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
-using SwiftlyS2.Shared.Menus;
-using SwiftlyS2.Core.Menus.OptionsBase;
+using SwiftlyS2.Shared.Menu;
+using SwiftlyS2.Shared.Menu.Components;
 using MixScrims.Contract;
 
 namespace MixScrims;
@@ -20,7 +20,7 @@ public partial class MixScrims
     internal CancellationTokenSource? startingSidePickTimeoutTimer;
 
     // The built-in Stay/Switch menu for the current phase, closed when the phase ends.
-    internal IMenuAPI? sidePickMenu;
+    internal IMenu? sidePickMenu;
 
     // Matches the DisableCaptains vote window below; a captain who never picks must not leave
     // the parked restart (and the server) frozen indefinitely.
@@ -171,7 +171,7 @@ public partial class MixScrims
                 if (player != null && IsPlayerValid(player) && !IsBot(player))
                 {
                     if (!suppressBuiltInMenus)
-                        Core.MenusAPI.OpenMenuForPlayer(player, sidePickMenu ??= BuildSidePickingMenu());
+                        (sidePickMenu ??= BuildSidePickingMenu()).Open(player);
                 }
             }
 
@@ -226,7 +226,7 @@ public partial class MixScrims
 
             if (IsPlayerValid(captainCt) && !suppressBuiltInMenus)
             {
-                Core.MenusAPI.OpenMenuForPlayer(captainCt, sidePickMenu ??= BuildSidePickingMenu());
+                (sidePickMenu ??= BuildSidePickingMenu()).Open(captainCt);
             }
         }
 
@@ -259,7 +259,7 @@ public partial class MixScrims
 
             if (IsPlayerValid(captainT) && !suppressBuiltInMenus)
             {
-                Core.MenusAPI.OpenMenuForPlayer(captainT, sidePickMenu ??= BuildSidePickingMenu());
+                (sidePickMenu ??= BuildSidePickingMenu()).Open(captainT);
             }
         }
     }
@@ -267,33 +267,27 @@ public partial class MixScrims
     /// <summary>
     /// Builds and returns a menu that allows the user to choose between switching or staying on their current side.
     /// </summary>
-    internal IMenuAPI BuildSidePickingMenu()
+    internal IMenu BuildSidePickingMenu()
     {
-        var builder = Core.MenusAPI
-            .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.side_picking"])
-            .Design.SetMenuTitleVisible(true)
-            .Design.SetMenuFooterVisible(true)
-            .EnableSound()
-            .DisableExit()
-            .SetPlayerFrozen(false)
-            .SetAutoCloseDelay(0);
+        // No exit. Key bindings are stored per menu id, so no closable menu may reuse this id.
+        var builder = Core.Menu
+            .CreateMenu("mixscrims.knife-side-pick")
+            .AddHeader(new TitleComponent(Core.Localizer["menu.side_picking"]) { Overflow = MenuTextOverflow.None })
+            .WithAction(MenuActions.Close.Name, MenuKey.None);
 
-        var switchBtn = new ButtonMenuOption("Switch");
-        switchBtn.Click += async (sender, args) =>
+        var switchBtn = new ButtonComponent("Switch", async ctx =>
         {
-            HandleCaptainSideChoice(args.Player, "Switch");
+            HandleCaptainSideChoice(ctx.Player, "Switch");
             await ValueTask.CompletedTask;
-        };
-        builder.AddOption(switchBtn);
+        });
+        builder.Add(switchBtn);
 
-        var stayBtn = new ButtonMenuOption("Stay");
-        stayBtn.Click += async (sender, args) =>
+        var stayBtn = new ButtonComponent("Stay", async ctx =>
         {
-            HandleCaptainSideChoice(args.Player, "Stay");
+            HandleCaptainSideChoice(ctx.Player, "Stay");
             await ValueTask.CompletedTask;
-        };
-        builder.AddOption(stayBtn);
+        });
+        builder.Add(stayBtn);
 
         return builder.Build();
     }
@@ -309,7 +303,7 @@ public partial class MixScrims
             return;
         }
 
-        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        // IMixScrims drivers can call this off the game thread; only PlayerID survives the hop.
         var slot = captain.PlayerID;
         Core.Scheduler.NextTick(() => HandleCaptainSideChoiceOnGameThread(slot, choice));
     }
@@ -432,7 +426,7 @@ public partial class MixScrims
     {
         if (!TryCommitStartingSide(nameof(SwitchStartingSides))) return;
 
-        // Whole body runs on the main game thread — native schema reads (captain.PlayerPawn, TeamNum, Controller) and StartMatch downstream are not safe on the menu Click dispatch thread.
+        // Whole body runs on the main game thread — native schema reads (captain.PlayerPawn, TeamNum, Controller) and StartMatch downstream are not safe off it.
         var switchSidesToken = Core.Scheduler.DelayBySeconds(0.2f, () =>
         {
             if (captain != null && captain.PlayerPawn == null)
@@ -576,7 +570,7 @@ public partial class MixScrims
         sidePickMenu = null;
         try
         {
-            Core.MenusAPI.CloseMenu(menu);
+            menu.CloseAll();
         }
         catch (Exception ex)
         {

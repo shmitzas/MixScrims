@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
-using SwiftlyS2.Core.Menus.OptionsBase;
+using SwiftlyS2.Shared.Menu;
+using SwiftlyS2.Shared.Menu.Components;
 using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
@@ -203,30 +204,23 @@ public partial class MixScrims
             callerName, targetName]);
 
         // Build vote menu
-        var builder = Core.MenusAPI
-            .CreateBuilder()
-            .Design.SetMenuTitle(Core.Localizer["menu.votekick", targetName])
-            .Design.SetMenuTitleVisible(true)
-            .Design.SetMenuFooterVisible(true)
-            .EnableSound()
-            .SetPlayerFrozen(false)
-            .SetAutoCloseDelay(0);
+        var builder = Core.Menu
+            .CreateMenu("mixscrims.vote-kick")
+            .AddHeader(new TitleComponent(Core.Localizer["menu.votekick", targetName]) { Overflow = MenuTextOverflow.None });
 
-        var yesBtn = new ButtonMenuOption("Yes");
-        yesBtn.Click += async (sender, args) =>
+        var yesBtn = new ButtonComponent("Yes", async ctx =>
         {
-            HandleVoteKickVote(args.Player, team, true);
+            HandleVoteKickVote(ctx.Player, team, true);
             await ValueTask.CompletedTask;
-        };
-        builder.AddOption(yesBtn);
+        });
+        builder.Add(yesBtn);
 
-        var noBtn = new ButtonMenuOption("No");
-        noBtn.Click += async (sender, args) =>
+        var noBtn = new ButtonComponent("No", async ctx =>
         {
-            HandleVoteKickVote(args.Player, team, false);
+            HandleVoteKickVote(ctx.Player, team, false);
             await ValueTask.CompletedTask;
-        };
-        builder.AddOption(noBtn);
+        });
+        builder.Add(noBtn);
 
         var menu = builder.Build();
 
@@ -234,7 +228,7 @@ public partial class MixScrims
         foreach (var player in menuPlayers.Where(p => !IsBot(p)))
         {
             if (IsPlayerValid(player) && !suppressBuiltInMenus)
-                Core.MenusAPI.OpenMenuForPlayer(player, menu);
+                menu.Open(player);
         }
 
         // Show initial vote progress (caller has already voted)
@@ -259,7 +253,7 @@ public partial class MixScrims
             return;
         }
 
-        // Built-in menu clicks arrive off the game thread; only PlayerID survives the hop.
+        // IMixScrims drivers can call this off the game thread; only PlayerID survives the hop.
         var slot = voter.PlayerID;
         Core.Scheduler.NextTick(() => HandleVoteKickVoteOnGameThread(slot, team, voteYes));
     }
