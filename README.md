@@ -1,41 +1,70 @@
-﻿<div align="center">
-  <img src="https://pan.samyyc.dev/s/VYmMXE" />
+<div align="center">
   <h1><strong>MixScrims</strong></h1>
-  <p>Faceit-style PUG matches for CS2 - managed entirely in-game, no external tools required</p>
+  <p>FACEIT-style PUG matches for CS2 — run entirely in game, no external tools.</p>
 </div>
 
 <p align="center">
-  <a href="https://forum.swiftlys2.net/t/mixscrims-og-way-to-play-mix-pugs-scrims/87"><img src="https://img.shields.io/badge/SwiftlyS2-Forum-blue?style=flat&logo=discourse" alt="SwiftlyS2 Forum"></a>
   <img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build Status">
-  <img src="https://img.shields.io/github/downloads/Shmitzas/MixScrims-SwiftlyS2/total?style=flat&logo=github&cacheSeconds=3600" alt="Downloads">
-  <img src="https://img.shields.io/github/stars/Shmitzas/MixScrims-SwiftlyS2?style=flat&logo=github&cacheSeconds=3600" alt="Stars">
-  <img src="https://img.shields.io/github/license/Shmitzas/MixScrims-SwiftlyS2" alt="License">
+  <a href="https://github.com/shmitzas/MixScrims/releases/latest"><img src="https://img.shields.io/github/v/release/shmitzas/MixScrims?style=flat&logo=github&cacheSeconds=3600" alt="Latest Release"></a>
+  <img src="https://img.shields.io/github/downloads/shmitzas/MixScrims/total?style=flat&logo=github&cacheSeconds=3600" alt="Downloads">
+  <img src="https://img.shields.io/github/stars/shmitzas/MixScrims?style=flat&logo=github&cacheSeconds=3600" alt="Stars">
 </p>
 
 ---
 
-# :rocket: You can now create Custom Panorama HUD plugins to handle MixScrims match flow
-### For more details on how to create such a plugin using MixScrims API check out **[API Integration](../../wiki/API-Integration)** in WIKI
-Legacy CenterHTML menus and announcements are still supported, so creating a Custom HUD plugin to manage MixScrims match flow is 100% optional!
+## ✨ Features
+
+A whole mix, from warmup to the final score, run by the server.
+
+- 🗳️ **Map vote** — your pool of official and Workshop maps, leaving out recent ones
+- 🧢 **Captains and team picking** — admin, volunteer or random captains, picking on a timer
+- 🔪 **Knife round** — the winners pick the starting side
+- ⏸️ **Timeouts, surrender and vote kick** — team votes with tunable thresholds
+- 🛡️ **FACEIT-style damage** — no teammate bullet, knife or Zeus damage
+- 🚪 **Leavers handled** — optional bans, and a reset when too few players remain
+- 📣 **Discord invites** — `!invite` asks your Discord for the players still needed
+- ⚙️ **Your rules** — a cfg file per phase; skip the map vote, captains, team picking or knife round
+- 🌍 **Translations** — English, Lithuanian, Portuguese and Chinese
+- 🧩 **Plugin API** — drive the match, or replace the menus with your own HUD
 
 ## 🚀 Getting Started
 
 | Guide | Description |
 |-------|-------------|
-| **[Installation](../../wiki/Installation)** | Install and configure the plugin |
+| **[Features](../../wiki/Features)** | Everything MixScrims does |
+| **[Installation](../../wiki/Installation)** | Install and verify |
 | **[Commands](../../wiki/Commands)** | Player and admin commands |
-| **[Configuration](../../wiki/Configuration)** | Customize server settings |
+| **[Menus](../../wiki/Menus)** | The in-game menus and their keys |
+| **[Configuration](../../wiki/Configuration)** | Every setting, with defaults |
 
-## 📚 Documentation
+## ⚙️ Tuning Matches
 
 | Topic | Description |
 |-------|-------------|
-| **[Features](../../wiki/Features)** | What the plugin can do |
-| **[Match Flow](../../wiki/Match-Flow)** | How matches progress through phases |
-| **[Localization](../../wiki/Localization)** | Multi-language support |
+| **[Match Flow](../../wiki/Match-Flow)** | Phases, captains, picking and the cfg files |
+| **[Votes](../../wiki/Votes)** | Rock the vote, timeouts, surrender and vote kick |
+| **[Maps](../../wiki/Maps)** | The map pool and the map vote |
+| **[Discord Invites](../../wiki/Discord-Invites)** | `!invite` webhooks |
+| **[Localization](../../wiki/Localization)** | Languages and message text |
+
+---
+
+## 📚 Reference
+
+| Topic | Description |
+|-------|-------------|
+| **[API Reference](../../wiki/API-Reference)** | Every member of `IMixScrims` |
+| **[API Integration](../../wiki/API-Integration)** | Build a plugin on MixScrims |
+| **[Replacing the Built-in UI](../../wiki/Replacing-The-Built-In-UI)** | Draw the menus and HUD yourself |
 | **[Building](../../wiki/Building)** | Build from source |
-| **[API Integration](../../wiki/API-Integration)** | Use the plugin API |
-| **[Contributing](../../wiki/Contributing)** | Contribute to the project |
+| **[Troubleshooting](../../wiki/Troubleshooting)** | Symptoms, causes and fixes |
+
+---
+
+## 🤝 Report issues or request features
+
+- **Issues**: [GitHub Issues](https://github.com/shmitzas/MixScrims/issues)
+- **Forum**: [SwiftlyS2 forum thread](https://forum.swiftlys2.net/t/mixscrims-og-way-to-play-mix-pugs-scrims/87)
 
 ---
 
@@ -44,12 +73,6 @@ Legacy CenterHTML menus and announcements are still supported, so creating a Cus
   <p><em>This plugin is and will remain completely free! If you find it useful and want to support development, tips are always appreciated &lt;3</em></p>
   <a href='https://ko-fi.com/J3J21Q4PP2' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
 </div>
-
----
-
-## 🤝 Report issues or request features
-
-- **Issues**: [GitHub Issues](https://github.com/Shmitzas/MixScrims-SwiftlyS2/issues)
 
 ---
 

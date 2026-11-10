@@ -9,14 +9,14 @@ MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches wit
 - **Architecture**: State-based partial classes with shared service layer
 - **Key Components**: Main plugin (`MixScrims`), Contract API (`MixScrims.Contract`), state handlers, shared services, announcement system
 
-**Contract v2.0.0 additions (2026-09):** Events, snapshot queries, presentation suppression toggles, and config value getters — see wiki [Events](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/Events) + [API Integration](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Integration). All v1.x methods preserved verbatim; the shared interface key stays `"MixScrims.API"` so existing consumers keep working.
+**Contract v2.0.0 additions (2026-09):** Events, snapshot queries, presentation suppression toggles, and config value getters — see wiki [Events](https://github.com/shmitzas/MixScrims/wiki/API-Reference#events) + [API Integration](https://github.com/shmitzas/MixScrims/wiki/API-Integration). All v1.x methods preserved verbatim; the shared interface key stays `"MixScrims.API"` so existing consumers keep working.
 
 **Contract v2.1.0 additions (2026-09):** Six **match flow drivers** (`CastMapVote`, `CastTimeoutVote`, `CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `VolunteerAsCaptain`) that close the input hole left by menu suppression, plus two **menu request events** (`CaptainMenuRequested`, `VolunteerCaptainMenuRequested`). Still purely additive.
 
-**Contract v2.8.0 flow-control additions (2026-10):** `SetPhaseProgressionHeld(bool)` / `IsPhaseProgressionHeld()` — see wiki [Flow control](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/API-Reference#flow-control). These are **not** suppression: suppression moves presentation, these move authority. Keep the two families apart in docs and naming. v2.8.0 also adds `GetConfiguredMapPool()` returning `MapPoolEntry` records — the `maps.jsonc` pool, state-independent and re-read per call, so it is readable during a match where `GetVoteableMapDisplayNames()` (vote-scoped) is empty. `MapPoolEntry` is `Name` + `Id`; `Id` is never empty, carries the bare workshop id with any `ws:` prefix stripped or an official map name, feeds `ChangeMap()` directly for either kind of map, and `IsWorkshop` is derived from it.
+**Contract v2.8.0 flow-control additions (2026-10):** `SetPhaseProgressionHeld(bool)` / `IsPhaseProgressionHeld()` — see wiki [Flow control](https://github.com/shmitzas/MixScrims/wiki/API-Reference#flow-control). These are **not** suppression: suppression moves presentation, these move authority. Keep the two families apart in docs and naming. v2.8.0 also adds `GetConfiguredMapPool()` returning `MapPoolEntry` records — the `maps.jsonc` pool, state-independent and re-read per call, so it is readable during a match where `GetVoteableMapDisplayNames()` (vote-scoped) is empty. `MapPoolEntry` is `Name` + `Id`; `Id` is never empty, carries the bare workshop id with any `ws:` prefix stripped or an official map name, feeds `ChangeMap()` directly for either kind of map, and `IsWorkshop` is derived from it.
 
 **Documentation:**
-- [Project Wiki](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki) - Comprehensive guides for installation, configuration, features, and contributing
+- [Project Wiki](https://github.com/shmitzas/MixScrims/wiki) - Operator guides (installation, configuration, match flow, votes, maps) and the API reference
 - [SwiftlyS2 API Reference](https://swiftlys2.net/llms-full.txt) - Framework API documentation
 
 **Jump to:** [Quick Reference](#quick-reference) • [Match Flow](#match-flow-overview) • [Architecture](#critical-architecture-patterns) • [Development](#development-workflows) • [Config](#config-features-by-category) • [API](#shared-api-pattern) • [Commands](#available-commands) • [Testing](#testing--debugging) • [Pitfalls](#common-pitfalls)
@@ -326,7 +326,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 >
 > The marshal sits in the handler, not the button lambda, which is what covers
 > the drivers. Cost is that every input — menu or driver — lands one tick after
-> the call; see the wiki's Match flow drivers "Universal rules".
+> the call; see the wiki's [Drivers](https://github.com/shmitzas/MixScrims/wiki/API-Reference#drivers) rules.
 >
 > **The rest of `IMixScrims` is game-thread-only, and v2.8.0 says so on the
 > interface.** The drivers are the exception, not the rule: every read that
@@ -452,6 +452,9 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - [CHANGELOG.md](CHANGELOG.md) - Operator-facing release notes; needs a `## [x.y.z]` section per version (see Versioning & Changelog)
 - [.github/workflows/release.yml](.github/workflows/release.yml) - Reads the version out of `Main.cs`, tags, and extracts the matching changelog section. Only runs on `[release]` in the commit message or a manual dispatch
 
+**Docs:**
+- [docs/testing-guide.md](docs/testing-guide.md) - Manual test plan, one section per phase and feature. Operator docs are the wiki; the README mirrors its Home page
+
 ## Available Commands
 
 **Admin Commands** (require `managemix` permission):
@@ -568,7 +571,7 @@ Optional Discord notifications via `DiscordService.cs` — sends rich embed mess
 bot_add_ct; bot_add_ct; bot_add_t; bot_add_t  // Add 4 bots for testing
 ```
 
-**Key Test Scenarios:** Default flow (all features), `SkipMapVoting`, `SkipTeamPicking`, `DisableCaptains`, edge cases (player disconnects during picking, odd player counts). See [Testing Guide](https://github.com/shmitzas/MixScrims-SwiftlyS2/wiki/%F0%9F%A7%AA-Testing-Guide) for comprehensive scenarios.
+**Key Test Scenarios:** Default flow (all features), `SkipMapVoting`, `SkipTeamPicking`, `DisableCaptains`, edge cases (player disconnects during picking, odd player counts). See [docs/testing-guide.md](docs/testing-guide.md) for comprehensive scenarios.
 
 ## Common Pitfalls
 
