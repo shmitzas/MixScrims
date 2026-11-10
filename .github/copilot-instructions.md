@@ -246,7 +246,7 @@ what it means in game. Not file names, method names or refactor notes.
   - Framework provides `ISwiftlyCore` accessed via `Core` property in plugins
 - **MixScrims.Contract**: Separate project for plugin API exposure
   - Set `<Private>false</Private>` in ProjectReference to prevent .dll export
-- Microsoft.Extensions.* packages: All require `ExcludeAssets="runtime"` pattern
+- Microsoft.Extensions.* packages: never referenced directly — `SwiftlyS2.CS2` brings them in, and a pinned version fails restore with `NU1605` whenever SwiftlyS2 raises its own
 
 ## Project-Specific Conventions
 
