@@ -17,6 +17,8 @@ public partial class MixScrims
     internal CancellationTokenSource? surrenderVoteTimer = null;
     internal Team surrenderVoteTeam = Team.None;
     internal bool isSurrenderVoteInProgress = false;
+    internal ulong surrenderVoteCallerSteamId;
+    internal DateTime? surrenderVoteDeadline;
     // Who has already voted in the current surrender vote. See timeoutVoters for why.
     internal HashSet<ulong> surrenderVoters = new();
 
@@ -46,6 +48,9 @@ public partial class MixScrims
         surrenderVoteTimer?.Cancel();
         surrenderVoteTimer = null;
         surrenderVoteTeam = team;
+        // Set before SurrenderVoteStarted, whose handlers read them; the timer below uses the same length.
+        surrenderVoteCallerSteamId = SafeSteamId(caller);
+        surrenderVoteDeadline = DateTime.UtcNow.AddSeconds(SurrenderVoteSeconds());
         // Seed with the caller so their implicit YES can't be cast a second time.
         surrenderVoters.Clear();
         { ulong seedSid = SafeSteamId(caller); if (seedSid != 0) surrenderVoters.Add(seedSid); }
@@ -102,14 +107,14 @@ public partial class MixScrims
         {
             HandleSurrenderVote(ctx.Player, "Yes");
             await ValueTask.CompletedTask;
-        });
+        }) { Tag = true };
         builder.Add(yesBtn);
 
         var noBtn = new ButtonComponent("No", async ctx =>
         {
             HandleSurrenderVote(ctx.Player, "No");
             await ValueTask.CompletedTask;
-        });
+        }) { Tag = false };
         builder.Add(noBtn);
 
         var menu = builder.Build();

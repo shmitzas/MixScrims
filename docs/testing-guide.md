@@ -68,7 +68,7 @@ A structured reference for verifying correct plugin behaviour across every match
 **With `RequireAllConnectedPlayersToBeReady: false`:**
 - [ ] With `MinimumReadyPlayers: 4`, ready exactly 4 players → voting / next state triggers immediately.
 - [ ] With 3 ready players, count stays at 3/4 — no state transition.
-- [ ] Admin command `!forceready` (`!fr`) marks all connected players ready and triggers transition.
+- [ ] Admin command `!forceready` (`!fr`) with at least 4 players connected → voting / next state triggers immediately (who it marks ready: Section 14).
 - [ ] Admin command `!forceunready` (`!fur`) unmarks everyone.
 
 **With `RequireAllConnectedPlayersToBeReady: true`:**
@@ -98,8 +98,10 @@ A structured reference for verifying correct plugin behaviour across every match
 
 **Goal:** Confirm `!captain` sets captains before team picking starts.
 
-- [ ] Admin `!captain PlayerName t` → chat confirms "PlayerName set as T captain". `captainT` field populated.
-- [ ] Admin `!captain PlayerName ct` → confirms "PlayerName set as CT captain". `captainCt` field populated.
+- [ ] Admin `!captain t` → **Pick T captain** opens with **CT captain: …** and **T captain: …** rows on top (the holder, or **none**), then every player who is not a captain.
+- [ ] Clicking a player → chat "Admin changed T Captain to Player". `captainT` field populated.
+- [ ] Clicking the **CT captain** row → the page switches to **Pick CT captain**; clicking a player sets `captainCt`.
+- [ ] Two players with the **same name** → clicking either one makes that player captain, not whichever is listed first.
 - [ ] Setting captain for a player not on the server returns an error (invalid player).
 - [ ] Captains set this way survive through the MapChosen → TeamPicking transition (they are inserted into picked lists on state start).
 
@@ -500,16 +502,34 @@ A structured reference for verifying correct plugin behaviour across every match
 **Goal:** Validate all admin-only commands work correctly.
 
 - [ ] `!mix_reset` (`!reset`) — resets plugin to Warmup from any state. All lists cleared. Warmup CFG reloaded.
-- [ ] `!mix_start` (`!start`) — force-starts the match from any state (jumps to `StartMatch()`). Confirm no crash if called from Warmup.
-- [ ] `!forceready` (`!fr`) — adds all connected non-bot players to ready list, triggers `CheckReadyPlayersToStart`.
+- [ ] `!mix_start` (`!start`) — from Warmup, MapLoading or MapChosen, seals the current teams and starts the match with no knife round (`StartMatchWithoutKnifeRound()`). Any other state → "can't be used at this moment".
+- [ ] `!forceready` (`!fr`) — adds every connected player who is not ready yet, each addition running `CheckReadyPlayersToStart` (nobody added, no check). In `TestMode` bots count as ready and are not added; otherwise they are, but all bots share SteamID 0, so only the first gets an entry.
 - [ ] `!forceunready` (`!fur`) — removes all players from ready list.
-- [ ] `!captain PlayerName ct` — sets CT captain. Valid name → success. Invalid name → error.
-- [ ] `!captain PlayerName t` — sets T captain. Valid name → success. Invalid name → error.
+- [ ] `!captain ct` / `!captain t` — opens the captain page on that side (see Section 3).
 - [ ] `!map mapname` (`!changemap`) — changes to specified map regardless of current state.
 - [ ] `!maps` (`!maplist`) — prints voteable map list to admin.
 - [ ] `!maplist_all` (`!allmaps`, `!maps_all`) — prints all configured maps to admin.
 - [ ] Non-admin player attempts any admin command → denied by permission check (`managemix`).
 - [ ] Admin commands work from console (server/RCON) as well as in-game chat.
+
+### Control panel (`!mix`)
+
+- [ ] `!mix` in warmup → **Match control**: phase and ready count on top (cannot be selected), then Start match now, Hold phase changes, Reset to warmup, Force everyone ready, Force everyone unready, Captains, Block late joiners, Kick spectators, Change map, Map pool.
+- [ ] Each row behaves as its command, refusals included: Start = `!mix_start` (try it below `MinimumReadyPlayers`), Reset = `!mix_reset`, the force rows = `!forceready` / `!forceunready`, Change map = `!map`.
+- [ ] Start and both force rows are greyed out outside warmup and the second ready-up (Start also during the map change); Captains is greyed out with `DisableCaptains`, and outside warmup, the map change and the second ready-up (the map vote included). Too few players greys nothing out: the row answers as its command does.
+- [ ] Kick spectators is greyed out until the teams are sealed (knife round on) with a human on them, then kicks every human outside the teams except the admin who pressed it; bots stay. TestMode with `DisableCaptains` + `SkipTeamPicking` and only bots on the teams → still greyed out.
+- [ ] Hold phase changes switches on only in warmup, the second ready-up and the knife round; in any other phase it is greyed out unless switched on from the panel, and then it can only be switched off.
+- [ ] Hold on in warmup → enough players ready does not open the map vote; off again → the map vote opens at once (in the second ready-up, team picking starts). Hold on in the knife round → the knife round replays; off again → the next knife round end opens the side choice.
+- [ ] Hold on in warmup, then Start match now → 10 s after the match ends MixScrims is still ended, and switching Hold off after that changes nothing; Reset to warmup resets, with Hold still on. (Switched off within those 10 s, the reset and map reload run.)
+- [ ] Two admins with the panel open: one flips Hold or Block late joiners → the other's row follows at once.
+- [ ] A plugin holds progression (`SetPhaseProgressionHeld(true)`) → Hold shows ✔ greyed out in every phase, on a panel already open too, and clicking it changes nothing. The same once a plugin holds it after the panel switched it on. The plugin's `SetPhaseProgressionHeld(false)` → the row follows and nothing starts.
+- [ ] In warmup with enough players, Start match now, Force everyone ready and switching Hold off each play the select sound, not the fail sound, as the match moves on.
+- [ ] Block late joiners shows and flips `PreventNotPickedPlayersFromJoiningOngoingMatch` (see 13c).
+- [ ] Captains → the captain page; picking a player returns to the panel.
+- [ ] Change map → every configured map; one click changes map as `!map` would and returns to the panel. Map pool lists every map as `Name (Id)`.
+- [ ] A captain whose pick menu is open types `!mix` → refused; the pick menu stays.
+- [ ] `SuppressBuiltInMenus: true` → `!mix` answers "can't be used at this moment".
+- [ ] `sw_mix` from the server console → nothing opens, a warning is logged.
 
 ---
 
@@ -749,6 +769,7 @@ A structured reference for verifying correct plugin behaviour across every match
 
 | Command | Aliases to test |
 |---------|-----------------|
+| `!mix` | none by default |
 | `!mix_reset` | `!reset` |
 | `!mix_start` | `!start` |
 | `!forceready` | `!fr` |

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
 
@@ -10,9 +11,11 @@ public partial class MixScrims
     ///Forcefully marks all players as ready and starts the next mix state
     ///</summary>
     [Command("forceready", false, "managemix", HelpText = "Forces all connected players into the ready state. Usage: !forceready")]
-    public void OnForceReady(ICommandContext context)
+    public void OnForceReady(ICommandContext context) => ForceReadyByAdmin(context.Sender);
+
+    /// <summary><c>!forceready</c>, shared with the control panel's force-ready row, which passes <paramref name="deferred"/>.</summary>
+    internal void ForceReadyByAdmin(IPlayer? admin, bool deferred = false)
     {
-        var admin = context.Sender;
         var connectedPlayers = GetPlayers().Count;
 
         if (!cfg.AdminCommandsBypassPlayerLimit && connectedPlayers < cfg.MinimumReadyPlayers)
@@ -31,13 +34,24 @@ public partial class MixScrims
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
-        if (matchState != MatchState.Warmup && matchState != MatchState.MapChosen)
+        if (!IsForceReadyState(matchState))
         {
             logger.LogWarning("OnForceReady: Invalid match state, must be MatchState.Warmup or MatchState.MapChosen");
             if (admin != null)
             {
                 PrintMessageToPlayer(admin, Core.Localizer["command.invalid_state", "forceready"]);
             }
+            return;
+        }
+
+        if (deferred)
+        {
+            // A phase moving on inside a menu click makes its sound Fail, so it reruns whole next tick, checks included.
+            Core.Scheduler.NextTick(() =>
+            {
+                if (IsPlayerConnected(admin))
+                    ForceReadyByAdmin(admin);
+            });
             return;
         }
 
@@ -58,6 +72,10 @@ public partial class MixScrims
             PrintMessageToAllPlayers(Core.Localizer["command.force.ready", admin.Name]);
         }
     }
+
+    /// <summary>The states <c>!forceready</c> and <c>!forceunready</c> accept.</summary>
+    internal static bool IsForceReadyState(MatchState state) =>
+        state is MatchState.Warmup or MatchState.MapChosen;
 
     internal void ForceReadyAllPlayers()
     {

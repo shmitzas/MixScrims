@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
 
@@ -44,6 +45,12 @@ public partial class MixScrims
             return;
         }
 
+        ChangeMapByAdmin(admin, map);
+    }
+
+    /// <summary><c>!map</c> once the map is resolved, shared with the control panel's change-map page.</summary>
+    internal void ChangeMapByAdmin(IPlayer? admin, MapDetails map)
+    {
         if (admin == null)
         {
             if (cfg.DetailedLogging)

@@ -27,6 +27,8 @@ internal sealed class VoteKickSlot
     internal int TotalVotesCast;
     internal CancellationTokenSource? Timer;
     internal HashSet<ulong> Voters = [];
+    internal ulong CallerSteamId;
+    internal DateTime? Deadline;
 
     internal void Reset()
     {
@@ -39,6 +41,8 @@ internal sealed class VoteKickSlot
         Timer?.Cancel();
         Timer = null;
         Voters.Clear();
+        CallerSteamId = 0;
+        Deadline = null;
     }
 }
 
@@ -129,6 +133,9 @@ public partial class MixScrims
         slot.Voters = [caller.SteamID];
         slot.Timer?.Cancel();
         slot.Timer = null;
+        // Set before VoteKickStarted, whose handlers read them; the expiry timer below uses the same length.
+        slot.CallerSteamId = SafeSteamId(caller);
+        slot.Deadline = DateTime.UtcNow.AddSeconds(cfg.VoteKick.VoteKickTime);
 
         // Eligible voters = everyone the vote is put to, except the target
         var audience = GetVoteKickAudience(team);
@@ -212,17 +219,19 @@ public partial class MixScrims
         {
             HandleVoteKickVote(ctx.Player, team, true);
             await ValueTask.CompletedTask;
-        });
+        }) { Tag = true };
         builder.Add(yesBtn);
 
         var noBtn = new ButtonComponent("No", async ctx =>
         {
             HandleVoteKickVote(ctx.Player, team, false);
             await ValueTask.CompletedTask;
-        });
+        }) { Tag = false };
         builder.Add(noBtn);
 
         var menu = builder.Build();
+        // CT, T and server-wide kicks share this menu id, so the menu names its vote.
+        menu.Tag = team;
 
         // Open menu for human eligible voters (excluding caller and bots)
         foreach (var player in menuPlayers.Where(p => !IsBot(p)))

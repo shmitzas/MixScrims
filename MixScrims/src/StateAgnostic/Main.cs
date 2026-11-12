@@ -580,7 +580,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Assigns the Counter-Terrorist (CT) captain role to the specified player.
     /// </summary>
-    internal void SetCtCaptain(IPlayer admin, string pickedPlayerName)
+    internal void SetCtCaptain(IPlayer admin, string pickedPlayerName, int pickedSlot, ulong pickedSteamId)
     {
         if (admin is null)
         {
@@ -590,10 +590,10 @@ public sealed partial class MixScrims
 
         // Deferred a tick like the vote and pick handlers; only PlayerID survives the hop.
         var slot = admin.PlayerID;
-        Core.Scheduler.NextTick(() => SetCtCaptainOnGameThread(slot, pickedPlayerName));
+        Core.Scheduler.NextTick(() => SetCtCaptainOnGameThread(slot, pickedPlayerName, pickedSlot, pickedSteamId));
     }
 
-    private void SetCtCaptainOnGameThread(int adminSlot, string pickedPlayerName)
+    private void SetCtCaptainOnGameThread(int adminSlot, string pickedPlayerName, int pickedSlot, ulong pickedSteamId)
     {
         var admin = Core.PlayerManager.GetPlayer(adminSlot);
         if (admin is null || !IsPlayerValid(admin))
@@ -602,7 +602,7 @@ public sealed partial class MixScrims
             return;
         }
 
-        var player = GetPlayerByName(pickedPlayerName);
+        var player = ResolveCaptainRowTarget(pickedPlayerName, pickedSlot, pickedSteamId);
 
         if (player == null || !IsPlayerValid(player))
         {
@@ -620,7 +620,7 @@ public sealed partial class MixScrims
     /// <summary>
     /// Assigns the Terrorist team captain to the specified player, as selected by an administrator.
     /// </summary>
-    internal void SetTCaptain(IPlayer admin, string pickedPlayerName)
+    internal void SetTCaptain(IPlayer admin, string pickedPlayerName, int pickedSlot, ulong pickedSteamId)
     {
         if (admin is null)
         {
@@ -630,10 +630,10 @@ public sealed partial class MixScrims
 
         // Same deferral as SetCtCaptain above.
         var slot = admin.PlayerID;
-        Core.Scheduler.NextTick(() => SetTCaptainOnGameThread(slot, pickedPlayerName));
+        Core.Scheduler.NextTick(() => SetTCaptainOnGameThread(slot, pickedPlayerName, pickedSlot, pickedSteamId));
     }
 
-    private void SetTCaptainOnGameThread(int adminSlot, string pickedPlayerName)
+    private void SetTCaptainOnGameThread(int adminSlot, string pickedPlayerName, int pickedSlot, ulong pickedSteamId)
     {
         var admin = Core.PlayerManager.GetPlayer(adminSlot);
         if (admin is null || !IsPlayerValid(admin))
@@ -642,7 +642,7 @@ public sealed partial class MixScrims
             return;
         }
 
-        var player = GetPlayerByName(pickedPlayerName);
+        var player = ResolveCaptainRowTarget(pickedPlayerName, pickedSlot, pickedSteamId);
 
         if (player == null || !IsPlayerValid(player))
         {
@@ -656,6 +656,11 @@ public sealed partial class MixScrims
 
         CloseMenuForPlayer(admin);
     }
+
+    /// <summary>A captain row's player while its slot still reads the row's SteamID, as nothing rebuilds the page on a
+    /// disconnect. Every bot reads 0, so a bot row matches by slot alone.</summary>
+    private IPlayer? ResolveCaptainRowTarget(string pickedPlayerName, int pickedSlot, ulong pickedSteamId) =>
+        ResolvePickTarget(pickedPlayerName, pickedSlot) is { } player && SafeSteamId(player) == pickedSteamId ? player : null;
 
     /// <summary>
     /// Applies a configured punishment to a player who leaves the game, if enabled.

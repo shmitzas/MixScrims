@@ -37,11 +37,15 @@
 		            identify a bot captain and the SteamID events never fire for one. It also
 		            adds SetFaceitLikeDamageControlSuppressed / IsFaceitLikeDamageControlSuppressed,
 		            which replace a hardcoded MatchState.KnifeRound carve-out in the damage hook.
+		     v2.10.0 adds the reads a menu renderer needs: pick order, pick timer and picked
+		            slots; knife-round winner, side timer and side-vote tally; timeout-vote team,
+		            tally, timer and caller; surrender and vote-kick timers and callers; and
+		            IsNewPlayerJoiningPrevented.
 		     All existing v1.x methods are preserved for backward compatibility. -->
 		<GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-		<Version>2.9.0</Version>
-		<AssemblyVersion>2.9.0.0</AssemblyVersion>
-		<FileVersion>2.9.0.0</FileVersion>
+		<Version>2.10.0</Version>
+		<AssemblyVersion>2.10.0.0</AssemblyVersion>
+		<FileVersion>2.10.0.0</FileVersion>
 		<GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
 	</PropertyGroup>
 

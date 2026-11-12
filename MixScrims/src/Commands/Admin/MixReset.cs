@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
 
@@ -9,9 +10,11 @@ public partial class MixScrims
     ///Forcefully resets mix state to the warmup state
     ///</summary>
     [Command("mix_reset", false, "managemix", HelpText = "Forcefully resets the plugin to the warmup state. Usage: !mix_reset")]
-    public void OnResetPlugin(ICommandContext context)
+    public void OnResetPlugin(ICommandContext context) => ResetMixByAdmin(context.Sender);
+
+    /// <summary><c>!mix_reset</c>, shared with the control panel's reset row.</summary>
+    internal void ResetMixByAdmin(IPlayer? admin)
     {
-        var admin = context.Sender;
         if (admin == null)
         {
             if (cfg.DetailedLogging)

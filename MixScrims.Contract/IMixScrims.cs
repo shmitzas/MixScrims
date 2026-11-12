@@ -136,6 +136,19 @@ public interface IMixScrims : IDisposable
     /// <summary>SteamID64 of the captain entitled to choose the starting side, or null when nobody is.</summary>
     ulong? GetStartingSidePicker();
 
+    /// <summary>Side the knife-round winners are on, as <see cref="KnifeRoundWon"/> carried it, or null outside PickingStartingSide. Game thread only.</summary>
+    Team? GetKnifeRoundWinner();
+
+    /// <summary>Seconds left to choose the starting side, captain or team vote, or 0 outside PickingStartingSide and once a side is chosen. Game thread only.</summary>
+    int GetStartingSideSecondsRemaining();
+
+    /// <summary>
+    /// Captains-disabled side vote as (switch votes, stay votes, eligible voters), where eligible is
+    /// the winning team's connected humans the vote waits on. All zero in captain mode, outside
+    /// PickingStartingSide and once a side is chosen. Game thread only.
+    /// </summary>
+    (int Switch, int Stay, int Eligible) GetStartingSideVoteTally();
+
     /// <summary>Current CT team display name, or the CS2 default when unset.</summary>
     string GetCtTeamName();
 
@@ -172,6 +185,25 @@ public interface IMixScrims : IDisposable
     /// <summary>1-based pick counter within the current PickingTeam phase, or 0 outside it.</summary>
     int GetCurrentPickIndex();
 
+    /// <summary>
+    /// Team of every non-captain pick in order: those made, then those still to come, projected from
+    /// the strict CT/T alternation and capped by the players left to pick. Empty outside PickingTeam
+    /// and once <see cref="IsTeamPickingFinalized"/>. Game thread only.
+    /// </summary>
+    IReadOnlyList<Team> GetPickOrder();
+
+    /// <summary>Seconds a captain has for each pick (<c>PickTimeoutSeconds</c>), where 0 means no limit.</summary>
+    int GetPickTimeoutSeconds();
+
+    /// <summary>Seconds left on the current pick turn, or 0 when no pick timer is running. Game thread only.</summary>
+    int GetPickSecondsRemaining();
+
+    /// <summary>Slot-keyed <see cref="GetPickedCtPlayers"/> in the same order, bots included. Game thread only.</summary>
+    IReadOnlyList<int> GetPickedCtPlayerSlots();
+
+    /// <summary>Slot-keyed <see cref="GetPickedTPlayers"/> in the same order, bots included. Game thread only.</summary>
+    IReadOnlyList<int> GetPickedTPlayerSlots();
+
     /// <summary>Seconds remaining on the active timeout, or 0 when none is running.</summary>
     int GetActiveTimeoutRemainingSeconds();
 
@@ -183,6 +215,18 @@ public interface IMixScrims : IDisposable
 
     /// <summary>Timeouts T has left for this match.</summary>
     int GetRemainingTimeoutsT();
+
+    /// <summary>Team whose timeout vote is open, or null when none is. Game thread only.</summary>
+    Team? GetActiveTimeoutVoteTeam();
+
+    /// <summary>Timeout vote tally as (yes, cast, eligible), where eligible is the Yes votes needed to pass; all zero when no vote is open. Game thread only.</summary>
+    (int Yes, int Cast, int Eligible) GetTimeoutVoteTally();
+
+    /// <summary>Seconds left on the open timeout vote, or 0 when none is open. Game thread only.</summary>
+    int GetTimeoutVoteSecondsRemaining();
+
+    /// <summary>SteamID64 of the player who called the open timeout vote, or null when none is open. Game thread only.</summary>
+    ulong? GetTimeoutVoteCaller();
 
     /// <summary>Current CT vote-kick target SteamID64, or null when none is active.</summary>
     ulong? GetVoteKickTargetCt();
@@ -221,11 +265,23 @@ public interface IMixScrims : IDisposable
     /// </summary>
     (int Yes, int Cast, int Eligible) GetVoteKickTallyServerWide();
 
+    /// <summary>Seconds left on that team's vote kick, <see cref="Team.None"/> for the server-wide one, or 0 when none is open. Game thread only.</summary>
+    int GetVoteKickSecondsRemaining(Team team);
+
+    /// <summary>SteamID64 of the player who started that team's vote kick, <see cref="Team.None"/> for the server-wide one, or null when none is open. Game thread only.</summary>
+    ulong? GetVoteKickCaller(Team team);
+
     /// <summary>Team whose surrender vote is in progress, or null when none is active.</summary>
     Team? GetActiveSurrenderVoteTeam();
 
     /// <summary>Surrender vote tally as (yes, cast, eligible), all zero when no vote is active.</summary>
     (int Yes, int Cast, int Eligible) GetSurrenderVoteTally();
+
+    /// <summary>Seconds left on the open surrender vote, or 0 when none is open. Game thread only.</summary>
+    int GetSurrenderVoteSecondsRemaining();
+
+    /// <summary>SteamID64 of the player who called the open surrender vote, or null when none is open. Game thread only.</summary>
+    ulong? GetSurrenderVoteCaller();
 
     /// <summary>Resolves a key through MixScrims' translation files, using the player's locale when they are connected.</summary>
     string GetLocalizedString(ulong steamId, string key, params object[] args);
@@ -465,4 +521,7 @@ public interface IMixScrims : IDisposable
 
     /// <summary>Blocks or allows new players joining the match, and is disabled automatically when the match ends.</summary>
     void PreventNewPlayersJoining(bool value = false);
+
+    /// <summary>Current value of the <see cref="PreventNewPlayersJoining"/> switch, seeded from <c>PreventNotPickedPlayersFromJoiningOngoingMatch</c>.</summary>
+    bool IsNewPlayerJoiningPrevented();
 }
