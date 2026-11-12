@@ -1,11 +1,11 @@
-# MixScrims CS2 Plugin - AI Coding Agent Instructions
+# MixScrims - Guide for Contributors and Coding Agents
 
 ## Project Overview
 
 MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches with in-game management. It's a **state machine-driven plugin** that progresses through match phases: Warmup → MapVoting → MapChosen → PickingTeam → KnifeRound → PickingStartingSide → Match.
 
-- **Plugin Framework**: [SwiftlyS2](https://swiftlys2.net) - CS2 server modification framework for .NET 10.0
- - **Plugin Version**: 1.12.1 (Contract API: 2.9.0)
+- **Plugin Framework**: [SwiftlyS2](https://swiftlys2.net) - CS2 server modification framework for .NET 10.0; its docs are cited below by page name
+- **Plugin Version**: 1.13.0 (Contract API: 2.10.0)
 - **Architecture**: State-based partial classes with shared service layer
 - **Key Components**: Main plugin (`MixScrims`), Contract API (`MixScrims.Contract`), state handlers, shared services, announcement system
 
@@ -15,9 +15,10 @@ MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches wit
 
 **Contract v2.8.0 flow-control additions (2026-10):** `SetPhaseProgressionHeld(bool)` / `IsPhaseProgressionHeld()` — see wiki [Flow control](https://github.com/shmitzas/MixScrims/wiki/API-Reference#flow-control). These are **not** suppression: suppression moves presentation, these move authority. Keep the two families apart in docs and naming. v2.8.0 also adds `GetConfiguredMapPool()` returning `MapPoolEntry` records — the `maps.jsonc` pool, state-independent and re-read per call, so it is readable during a match where `GetVoteableMapDisplayNames()` (vote-scoped) is empty. `MapPoolEntry` is `Name` + `Id`; `Id` is never empty, carries the bare workshop id with any `ws:` prefix stripped or an official map name, feeds `ChangeMap()` directly for either kind of map, and `IsWorkshop` is derived from it.
 
+**Contract v2.10.0 menu-renderer additions (2026-11):** read-only members a plugin needs to draw MixScrims' `Core.Menu` menus its own way (see [Integration Points](#shared-api-pattern)), plus typed row data on those menus and the `!mix` control panel. MixScrims stays renderer-agnostic: no renderer ids, raw nodes or markup for one renderer, only component ids, `Tag` values and `IMixScrims` reads.
+
 **Documentation:**
 - [Project Wiki](https://github.com/shmitzas/MixScrims/wiki) - Operator guides (installation, configuration, match flow, votes, maps) and the API reference
-- [SwiftlyS2 API Reference](https://swiftlys2.net/llms-full.txt) - Framework API documentation
 
 **Jump to:** [Quick Reference](#quick-reference) • [Match Flow](#match-flow-overview) • [Architecture](#critical-architecture-patterns) • [Development](#development-workflows) • [Config](#config-features-by-category) • [API](#shared-api-pattern) • [Commands](#available-commands) • [Testing](#testing--debugging) • [Pitfalls](#common-pitfalls)
 
@@ -26,15 +27,15 @@ MixScrims is a **SwiftlyS2 plugin** that implements FACEIT-style PUG matches wit
 **When you need to:**
 - **Modify state logic**: Check `src/States/{StateName}/` (Main.cs or Events.cs)
 - **Add cross-state features**: Edit `src/StateAgnostic/Main.cs` or `Announcements.cs`
-- **Add new commands**: Update `src/Commands/` + `Config.Commands` dictionary
+- **Add new commands**: `[Command]` handler in `src/Commands/` + its aliases in `MainConfig.Commands`
 - **Extend public API**: Add methods to `IMixScrims.cs` + implement in `MixScrimsService.cs`
 - **Change announcements**: Modify `resources/translations/{lang}.jsonc`
 - **Adjust match flow**: Edit CFG files in `csgo_configs/` + config.jsonc
 
 **Critical Rules:**
 - Always use `mixScrimsService.SetMatchState()` - never modify state directly
-- Check player validity: `if (!player.IsValid || !player.IsConnected || player.IsBot)`
-- Store scheduler tokens: `Core.Scheduler.StopOnMapChange(token)`
+- Check players through the disposal-safe helpers in `Shared/Helpers.cs` (see [Player Management](#player-management))
+- *Existing exception* marks code that breaks a rule stated here — not a pattern to copy
 
 ## Match Flow Overview
 
@@ -59,6 +60,7 @@ The main `MixScrims` class is split across **multiple partial class files** orga
 - `src/StateAgnostic/Main.cs` - Cross-state logic (ready checks, team management, player punishment)
 - `src/StateAgnostic/Announcements.cs` - Ready status announcements, scoreboard/center HTML display
 - `src/StateAgnostic/Events.cs` - Cross-state event handlers
+- `src/StateAgnostic/VoteReconcile.cs` - Re-points votes and roster-driven menus after a disconnect
 - `src/States/{StateName}/Main.cs` - State-specific logic (when needed)
 - `src/States/{StateName}/Events.cs` - State-specific event handlers
 
@@ -74,8 +76,7 @@ The main `MixScrims` class is split across **multiple partial class files** orga
 | Reset | ✅ | ❌ | — | Plugin state reset & cleanup |
 | Surrender | ✅ | ❌ | — | Team surrender voting |
 | Timeout | ✅ | ✅ | — | Pause/resume logic & timer |
-| VoteKick | ❌ | ❌ | — | Reserved folder (logic lives in Match/VoteKick.cs) |
-| Warmup | ✅ | ✅ | — | Initial ready check & player join handling |
+| Warmup | ✅ | ✅ | `Rtv.cs` | Initial ready check, player join handling & rock the vote |
 
 When modifying functionality, **always check if related code exists in other partial files** before adding new methods.
 
@@ -88,47 +89,24 @@ mixScrimsService.SetMatchState(MatchState.MapVoting);  // native vote only - the
 **Never modify state directly** - always use the service. State changes trigger phase transitions that execute CFG files and update game rules.
 
 ### Command Registration Pattern
-Commands are **config-driven** with dynamic aliases:
-```csharp
-// Config defines: command name → permissions + aliases
-{ "ready", new() { Permission = "", Aliases = ["r"] } }
-
-// Registration uses config lookup
-Core.Command.RegisterCommand(commandName, handler, true, commandInfo.Permission);
-foreach (var alias in commandInfo.Aliases)
-    Core.Command.RegisterCommandAlias(commandName, alias);
-```
-When adding commands: (1) Add handler to `commandHandlers` dict in `RegisterCommands()`, (2) Add config entry to `Config.Commands`.
+Every command is a `[Command]` handler in `src/Commands/{Admin,Player}/` carrying `HelpText` (the framework default is a placeholder); only the **aliases** are config-driven. `RegisterCommands()` (`Main.cs`) registers each `MainConfig.Commands` alias with `Core.Command.RegisterCommandAlias`, skipping those of a disabled feature (`volunteer_captain`, `votekick`, `rtv` — their handlers re-check the flag), and `UnregisterCommands()` removes them in `Unload()`. An entry's `Permission` field is never read: the permission is the attribute's, `managemix` on every admin command — an *existing exception* to SwiftlyS2's dotted `plugin.scope.action` naming, and a contract, so renaming it needs approval (SwiftlyS2 docs: Commands, Permissions).
 
 ### Event Handling Pattern
-Events use **two registration patterns**:
-```csharp
-// 1. Delegate subscription (lifecycle events)
-Core.Event.OnClientPutInServer += HandleClientPutInServer;
-Core.Event.OnMapLoad += WarmupHandleOnMapStart;
-
-// 2. Attribute-based hooks (game events)
-[ClientCommandHookHandler]
-public HookResult OnClientCommand(int playerId, string commandLine) { ... }
-
-[GameEventHandler]
-public HookResult HandleRoundEnd(EventRoundEnd @event) { ... }
-```
-Game event handlers **must return `HookResult.Continue`** to allow event propagation. Register listeners in `RegisterXListeners()` methods per state.
+`Core.Event` subscriptions are made only in `RegisterWarmupListeners()`, `RegisterMapChosenListeners()` and `RegisterStateAgnosticListeners()` (each in its folder's `Events.cs`), all called from `RegisterListeners()` in `Main.cs`, whose `Unload()` holds the matching `-=` list. Game events are `[GameEventHandler]` methods, mostly in the state's `Events.cs`; `StateAgnostic/Events.cs` also holds the `[ClientCommandHookHandler]` that takes over `jointeam`. Return `HookResult.Continue` unless blocking: `Handled` skips later hooks yet the original runs, `CancelOriginal` cancels the original, `Stop` both, and neither `Stop` nor `Handled` works in a post hook — MixScrims blocks only with `Stop`, in pre hooks and the `jointeam` hook (SwiftlyS2 docs: HookResult).
 
 ### Configuration & Localization
-- **Config**: Three separate JSONC files, each bound via `IOptions<T>`:
+- **Config**: Three separate JSONC files, each bound via `IOptionsMonitor<T>` and read through the `cfg` / `mapsConfig` / `discordConfig` properties (defaults if its loader threw):
   - `config.jsonc` → `MainConfig` (section `MixScrims`) — match settings, timers, commands
   - `maps.jsonc` → `MapsConfig` (section `MapsConfig`) — map pool definitions
   - `discord_config.jsonc` → `DiscordConfig` (section `DiscordConfig`) — Discord webhook settings
-- **Translations**: Localized strings in `resources/translations/{lang}.jsonc`, accessed via `Core.Localizer["key"]`
-- Config reloads on change but **requires plugin reload** for structural changes (maps, commands)
+- **Translations**: `en`, `lt`, `pt-BR` and `zh-CN` in `resources/translations/`, one flat, dot-separated key set — a new key goes into all four, since a missing key falls back to `en.jsonc` and, missing there too, renders as `{lang}.{key}`. Text goes through `Core.Localizer[key, args]` (server default language, `{0}` placeholders); `GetPlayerLocalizer` resolves only SwiftlyS2's player languages, never `lt` — `IMixScrims.GetLocalizedString` uses it for a connected player (SwiftlyS2 docs: Translations)
+- Most edits apply live, `maps.jsonc` included. Command aliases are bound once in `RegisterCommands()` and need a plugin reload. `SuppressBuiltInMenus`, `SuppressBuiltInCenterHtml` and `PreventNotPickedPlayersFromJoiningOngoingMatch` are seeded once in `LoadMainConfig()` and deliberately never re-seeded, so a consumer's runtime override survives a config edit
 
 ### CS2 Server Control
 Match phases execute **CFG files to configure game rules**, loaded from `csgo_configs/`:
 ```csharp
 Core.Engine.ExecuteCommand("exec mixscrims/warmup.cfg");      // mp_warmuptime unlimited
-Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");  // mp_give_player_c4 0, mp_ct_default_grenades "weapon_knife"
+Core.Engine.ExecuteCommand("exec mixscrims/knife_round.cfg");  // mp_give_player_c4 0, mp_ct_default_secondary ""
 ```
 CFG files **must exist on CS2 server** at `csgo/cfg/mixscrims/`. Environment-specific overrides use `staging_overrides.cfg` or `production_overrides.cfg` (controlled by `cfg.TestMode`).
 
@@ -145,8 +123,7 @@ CFG files **must exist on CS2 server** at `csgo/cfg/mixscrims/`. Environment-spe
 >   actually change and therefore has to be restored.
 >
 > Adding a cvar to `match_start.cfg` is only correct if a pre-match cfg sets it to a *different*
-> value; otherwise it belongs in `match_base.cfg`. Diagnosis in repo memory
-> `mixscrims-match-start-cfg-exec-freeze.md`.
+> value; otherwise it belongs in `match_base.cfg`.
 
 > **Invariant: phase cfgs are cvars-only. Never add `mp_restartgame` to one.**
 > Every round transition is driven from C# via `RestartRoundManually(callSite, RoundEndReason.GameCommencing, delay)`
@@ -163,29 +140,28 @@ CFG files **must exist on CS2 server** at `csgo/cfg/mixscrims/`. Environment-spe
 >    therefore cannot use it at all — it uses `mp_warmup_start` + `ResetWarmupState()`.
 >
 > `mp_restartgame` also runs `CleanUpMap()`, which deletes plugin-spawned entities (CustomHUD
-> layouts). See repo memory `mixscrims-mp-restartgame-team-limits-segv.md`.
+> layouts).
 
 ## Development Workflows
 
 ### Common Development Tasks
 
 **Adding a New Command:**
-1. Add handler method to `src/Commands/Admin/` or `src/Commands/Player/` (one file per command)
-2. Register in `commandHandlers` dict in `Main.cs` `RegisterCommands()`
-3. Add config entry to `MainConfig.Commands` with aliases & permissions
-4. Add localization key to `resources/translations/en.jsonc`
+1. Add handler method to `src/Commands/Admin/` or `src/Commands/Player/` (one file per command), declared with `[Command]`
+2. Add its aliases to `MainConfig.Commands` (see [Command Registration Pattern](#command-registration-pattern))
+3. Add its translation keys to all four files in `resources/translations/`
 
 **Adding State-Specific Behavior:**
 1. Navigate to `src/States/{StateName}/`
 2. Add logic to `Main.cs` (if it exists) or create `Events.cs`
 3. For events, use `[GameEventHandler]` attribute
-4. Register listeners in `Register{StateName}Listeners()` in Main.cs
+4. Put `Core.Event` subscriptions in a `Register{StateName}Listeners()` in that state's `Events.cs`, called from `RegisterListeners()` in `Main.cs`
 
 **Modifying Ready System Display:**
 - **Chat announcements**: Edit `PrintReadyAndNotReadyPlayers()` in `StateAgnostic/Announcements.cs`
 - **Scoreboard**: Edit `ShowReadyAndNotReadyPlayersInScoreboard()` in same file
 - **Center HTML**: Edit `DisplayReadyAndNotReadyPlayersInCenterHtml()` in same file
-- **Localization**: Update keys in `resources/translations/en.jsonc`
+- **Localization**: Update keys in all four `resources/translations/` files
 
 **Extending the Public API:**
 1. Add method signature to `MixScrims.Contract/IMixScrims.cs`
@@ -241,12 +217,8 @@ what it means in game. Not file names, method names or refactor notes.
 4. **API contracts**: Extend `MixScrims.Contract/IMixScrims.cs` (shared with other plugins)
 
 ### Dependency Notes
-- **SwiftlyS2.CS2**: NuGet package providing framework API (use wildcard version `*`)
-  - **Must use** `ExcludeAssets="runtime" PrivateAssets="all"` to avoid bundling
-  - Framework provides `ISwiftlyCore` accessed via `Core` property in plugins
-- **MixScrims.Contract**: Separate project for plugin API exposure
-  - Set `<Private>false</Private>` in ProjectReference to prevent .dll export
-- Microsoft.Extensions.* packages: never referenced directly — `SwiftlyS2.CS2` brings them in, and a pinned version fails restore with `NU1605` whenever SwiftlyS2 raises its own
+- **SwiftlyS2.CS2**: `Version="*" ExcludeAssets="runtime" PrivateAssets="all"` in both projects, as the server supplies it. No `Microsoft.Extensions.*` references: `SwiftlyS2.CS2` brings them, and a pinned one fails restore with `NU1605` once SwiftlyS2 raises its own (SwiftlyS2 docs: Getting Started)
+- **MixScrims.Contract**: Separate project for plugin API exposure. It builds straight into `MixScrims/resources/exports/` (its `OutputPath`), which is how the contract DLL ships. `MixScrims.csproj`'s `ProjectReference` to it sets `<Private>false</Private>`, but its `HintPath` `<Reference>` to that DLL does not, so a copy also lands beside `MixScrims.dll`, release zip included
 
 ## Project-Specific Conventions
 
@@ -259,10 +231,11 @@ Players are tracked via `IPlayer` from SwiftlyS2. **Four lifecycle stages**:
 
 These four stay `List<IPlayer>`, so **never purge them on `SafeSteamId(p) == 0`** — bots read 0 too, and that predicate emptied the pick pool of every bot on any disconnect in a TestMode lobby. Sweep on `IsPlayerConnected`, and target one leaver with `IsSamePlayer`, which falls back to the slot when the SteamID has already gone.
 
-Lists clear at phase transitions (e.g., `readyPlayers.Clear()` when knife starts). **Always check player validity**:
-```csharp
-if (!player.IsValid || !player.IsConnected || player.IsBot) return;
-```
+Lists clear at phase transitions (e.g., `readyPlayers.Clear()` in `FinalizeTeamPicking()`, just before the knife round).
+
+`IPlayer.IsValid` requires a pawn ("has controller, is not HLTV, is connected and has pawn"), so join, disconnect, chat, menu and map-load code checks the controller instead; gameplay paths keep `IsValid` (SwiftlyS2 docs: IPlayer). Player checks go through the disposal-safe `Shared/Helpers.cs` wrappers: `IsPlayerConnected` (controller only, no pawn; bots pass — add `!IsFakeClient` where only a human will do) and `IsPlayerValid` (`IPlayer.IsValid`, pawn required), plus `SafeSteamId` / `SafePlayerId` / `IsSamePlayer` for tracked references. `SafePlayerName` is not native-safe (`IPlayer.Name` derefs the client unguarded): call it behind `IsPlayerValid`, on the game thread.
+
+Game state (`IPlayer`, pawns, controllers, entities) is game-thread only: capture slot or SteamID before leaving the game thread, return through `Core.Scheduler.NextTick` / `NextWorldUpdate`, then re-resolve and re-validate (SwiftlyS2 docs: Thread Safety).
 
 **Captain Selection:** Volunteers (`!volunteer_captain t/ct` if enabled) take priority, else random from ready players. Team names set to captain names unless `DisableCaptains` is true.
 
@@ -273,20 +246,16 @@ The pick ladder alternates by handing the captain field straight back to `Prompt
 **Punishment System:** When `PunishPlayerLeaves` is enabled, players who disconnect during active phases are added to `playersWaitingForPunishment`. After `WaitBeforePunishmentSeconds` (default 300s), the configured `ServerCommand` executes (e.g., `sw_ban {steamId} {duration} {reason}`). Sensitivity levels determine which match states trigger punishment.
 
 ### Timer/Scheduler Pattern
-Use `Core.Scheduler` (ISchedulerService) for async operations:
-```csharp
-var token = Core.Scheduler.DelayBySeconds(5, () => StartMatch());
-Core.Scheduler.StopOnMapChange(token); // Auto-cleanup on map change
-```
-Available methods: `DelayBySeconds()`, `RepeatBySeconds()`, `NextTick()`, `NextWorldUpdate()`. **Always store CancellationTokenSource** for manual cleanup.
+`Repeat` / `RepeatBySeconds` run their first callback immediately, so a timer that walks players or entities, writes or pays out uses `DelayAndRepeat*`, or that run lands inside `Load` or a map load. Keep each timer's `CancellationTokenSource`, `StopOnMapChange` it and `Cancel()` it in `Unload()` too, as map change does not cover unload; never `Dispose()` one (SwiftlyS2 docs: Scheduler).
 
 **Announcement Timers:** Plugin uses repeating timers for periodic announcements:
 - `playerStatusTimer` - Prints ready/not ready status to chat (interval: `cfg.ChatAnnouncementTimers.PlayersReadyStatus`, default 30s)
+- `readyScoreboardTimer` - Re-applies the ready/not ready clan tag every 1s (only if `ShowReadyStatusInScoreboard` enabled)
 - `playerStatusTimerCenterHtml` - Updates center HTML ready display every 1s (only if `ShowReadyStatusInCenterHtml` enabled)
 - `commandRemindersTimer` - Shows command help reminders (interval: `cfg.ChatAnnouncementTimers.CommandReminders`, default 320s)
 - `captainsAnnouncementsTimer` - Announces captain names (interval: `cfg.ChatAnnouncementTimers.CaptainsAnnouncements`, default 30s)
 
-All timers are created in `StartAnnouncementTimers()` and automatically stopped on map change.
+The first four are created in `StartAnnouncementTimers()`, which runs at the end of every `LoadWarmupConfig()`, the one `Load()` triggers included. They use `RepeatBySeconds`, so each fires once immediately — an *existing exception* to the `DelayAndRepeat*` rule for timers that walk players, not a pattern to copy. `captainsAnnouncementsTimer` is created in `HandleMapChosenNewMapLoad()` (`States/MapChosen/Events.cs`) with `DelayAndRepeatBySeconds`, on purpose. All five are `StopOnMapChange`d and cancelled in `Unload()`.
 
 > **Invariant: a `MatchState` check is not a guard while a transition is in flight.**
 > Several drivers defer their whole body (`DelayBySeconds` / `NextTick`) and only
@@ -307,13 +276,12 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 > **Invariant: the vote / pick / side handlers re-enter the game thread themselves.**
 > Built-in `Core.Menu` buttons call them from `OnSelect`, which runs on the game
 > thread — but the `IMixScrims` drivers call the same handlers, and a consumer may
-> legitimately call `CastMapVote` from its own `Task`. Reading `IPlayer.Name`,
-> `.SteamID`, `.IsValid`, `.Controller` or `.PlayerPawn` off the game thread is an
-> uncatchable access violation that kills the host, and a managed `try/catch`
-> cannot save it.
+> legitimately call `CastMapVote` from its own `Task`, where reading `IPlayer.Name`,
+> `.SteamID`, `.IsValid`, `.Controller` or `.PlayerPawn` is an access violation that
+> kills the host, and a managed `try/catch` cannot save it.
 >
-> So each handler captures `IPlayer.PlayerID` (a plain managed field — the *only*
-> member with no `ThrowIfDisposed` and no native deref), `Core.Scheduler.NextTick(...)`,
+> So each handler captures `IPlayer.PlayerID` (an alias of `Slot`, a plain managed
+> property — no `ThrowIfDisposed`, no native deref), `Core.Scheduler.NextTick(...)`,
 > then re-resolves with `Core.PlayerManager.GetPlayer(slot)` and re-validates before
 > touching anything native. A failed re-resolve drops the input and logs — the
 > player left between the call and the tick. See `RegisterMapVoteOnGameThread`
@@ -339,9 +307,9 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 > modified". **Do not add a `foreach` or a LINQ projection to those three.**
 
 ### Logging Strategy
-- `cfg.DetailedLogging` flag enables verbose logs
-- Use structured logging: `logger.LogInformation("Message {Param}", value)`
-- State transitions should always log
+- `LogInformation` / `LogDebug` only inside `if (cfg.DetailedLogging)`; `LogWarning` / `LogError` never gated, so faults surface with it off. Structured placeholders (`{SteamId}`), never interpolated messages
+- `DetailedLogging` is a `MainConfig` key; with it on, `SetMatchState` logs every transition with the roster counts
+- *Existing exceptions* — `LogInformation` left ungated on purpose, each site's comment saying why: `SetPhaseProgressionHeld`, the drift line in `ResyncPlayingListsFromEngine`, and the console output of `!maps` / `!maplist_all`
 
 ### Team Enum Gotcha
 `Team` enum: `None = 0, Spectator = 1, T = 2, CT = 3`
@@ -377,7 +345,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - `TimeoutDurationSeconds` - Timeout length (default 60s)
 
 **Team votes** (`config.jsonc` → `Surrender` / `TimeoutVote`):
-- Same shape as `Rtv`: `Enabled`, `VoteTimeSeconds` (0 → `DefaultVoteTimeSeconds`), `MinimumVotesRequired`, `VoteThresholdRatio`, `AutoPassTeamSize`.
+- Keys: `Enabled`, `VoteTimeSeconds` (0 → `DefaultVoteTimeSeconds`), `MinimumVotesRequired`, `VoteThresholdRatio`, `AutoPassTeamSize`.
 - **The ratio is of the whole team, not of the players still to answer.** `Surrender/TimeoutRequiredVotes()` feed `teamSize = *TotalEligibleVotes + 1` through the shared `ComputeVoteThreshold` and clamp to `[1, teamSize]`, because the caller's implicit yes sits in the yes count but outside the eligible count. A ratio above 1.0 would otherwise make the vote unwinnable rather than merely strict.
 - Defaults reproduce the pre-config rule **on a 5-man team only**: surrender `1.0` is unanimous everywhere, but timeout `0.8` only equals the old `team - 1` at 5 (10 needs 8, not 9). `MinimumReadyPlayers` is 10, so 5v5 is the shape that matters here.
 - `AutoPassTeamSize` (default 2) reproduces the old hardcoded `players.Count <= 2` shortcut; `0` always opens a ballot.
@@ -389,8 +357,8 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 **Map Pool** (`maps.jsonc` → `MapsConfig.Maps`):
 - Configured separately in `maps.jsonc` as a list of `MapDetails` objects
 - Each entry: `Name` (display) and `Id` (official map name or workshop item id). There is no per-entry voteable flag — the file is `.jsonc`, so commenting an entry out is how a map is taken out of rotation temporarily
-- **One identifier, mirroring MapChooser's `Map` model.** `Id` is nullable and falls back to `Name`, so `{ "Name": "de_nuke" }` is complete. `MapDetails.ResolveWorkshopId` is the one normaliser (accepts `ws:3070596702` and `3070596702`); `IsWorkshop` and `CanonicalId` hang off it, and `LoadMap` / `GetMapByName` / `GetMapByWorkshopId` / `GetRunningMap` / `GetConfiguredMapPool` all read those rather than re-deriving. There is deliberately **no legacy alias or dual-shape binder** for the superseded `MapName` / `DisplayName` / `WorkshopId` properties — carrying both shapes is what this removed. A file still written that way binds to blank entries rather than throwing, so `ReportUnusableMapEntries` logs an Error at load and on reload; do not replace that with a silent fallback.
-- **`GetRunningMap` is the only way to resolve the loaded map to its entry**, and both `GetMapsToVote` (current-map exclusion) and `StartMatch` (`playedMaps` history) go through it. It tries `IEngineService.WorkshopId` before `GlobalVars.MapName` because the engine names a workshop map by an internal name no `Name` / `Id` / `CanonicalId` carries, and reports a stock map's workshop id as blank or `"0"`. Matching on the name alone silently no-ops on every workshop map — which is the whole fleet here.
+- **One identifier, mirroring the SwiftlyS2 MapChooser plugin's `Map` model.** `Id` is nullable and falls back to `Name`, so `{ "Name": "de_nuke" }` is complete. `MapDetails.ResolveWorkshopId` is the one normaliser (accepts `ws:3070596702` and `3070596702`); `IsWorkshop` and `CanonicalId` hang off it, and `LoadMap` / `GetMapByName` / `GetMapByWorkshopId` / `GetRunningMap` / `GetConfiguredMapPool` all read those rather than re-deriving. There is deliberately **no legacy alias or dual-shape binder** for the superseded `MapName` / `DisplayName` / `WorkshopId` properties — carrying both shapes is what this removed. A file still written that way binds to blank entries rather than throwing, so `ReportUnusableMapEntries` logs an Error at load and on reload; do not replace that with a silent fallback.
+- **`GetRunningMap` is the only way to resolve the loaded map to its entry**, and both `GetMapsToVote` (current-map exclusion) and `StartMatch` (`playedMaps` history) go through it. It tries `IEngineService.WorkshopId` before `GlobalVars.MapName` because the engine names a workshop map by an internal name no `Name` / `Id` / `CanonicalId` carries, and reports a stock map's workshop id as blank or `"0"`. Matching on the name alone silently no-ops on every workshop map.
 - `LoadMap` issues `nextlevel {canonical}` **before** `host_workshop_map` / `changelevel`. `nextlevel` is a server-wide convar any plugin or the built-in end-of-match vote can leave set, and a stale value overrides the change issued after it — see the comment at that call site.
 
 **Vote Kick** (`config.jsonc` → `VoteKick`):
@@ -401,7 +369,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - `ChatAnnouncementTimers.PlayersReadyStatus` - Ready status chat interval (default 30s)
 - `ChatAnnouncementTimers.CaptainsAnnouncements` - Captain announcement interval (default 30s)
 - `ChatAnnouncementTimers.CommandReminders` - Command help interval (default 320s)
-- `CommandRemindersLocalization` - List of localization keys shown in command reminder messages (default: `["timeout", "ready", "invite"]`)
+- `CommandRemindersLocalization` - List of localization keys shown in command reminder messages (default: `["timeout", "ready", "invite", "rtv"]`)
 
 **Environment:**
 - `TestMode` - Loads `staging_overrides.cfg` (bots, lower reqs), sets PluginState to Staging
@@ -415,7 +383,7 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
   - `0` = Match/Timeout only (lenient)
   - `1` = + KnifeRound/PickingStartingSide (moderate)
   - `2` = + PickingTeam (strict)
-- `PlayerLeavePunishment.ServerCommand` - Command template (e.g., `sw_ban {steamId} {duration} {reason}`)
+- `PlayerLeavePunishment.ServerCommand` - Server command with placeholders (e.g., `sw_ban {steamId} {duration} {reason}`)
 - `PlayerLeavePunishment.BanDurationMinutes` - Ban length (default 15)
 - `PlayerLeavePunishment.BanReason` - Reason shown to player
 - `PlayerLeavePunishment.WaitBeforePunishmentSeconds` - Grace period before punishment (default 300s)
@@ -434,19 +402,19 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 - [MixScrims/src/Shared/Helpers.cs](MixScrims/src/Shared/Helpers.cs) - Utility functions
 
 **Contract API:**
-- [MixScrims.Contract/IMixScrims.cs](MixScrims.Contract/IMixScrims.cs) - Public API interface (v2.1.0: match flow drivers + menu request events on top of v2.0.0's events + snapshot queries + suppression toggles + config getters, all on top of the v1.x method surface)
+- [MixScrims.Contract/IMixScrims.cs](MixScrims.Contract/IMixScrims.cs) - Public API interface (contract 2.10.0; the comment in `MixScrims.Contract.csproj` lists what each version added on top of the v1.x method surface)
 - [MixScrims.Contract/VoteKickCastEventArgs.cs](MixScrims.Contract/VoteKickCastEventArgs.cs) - Payload record for the `VoteKickCast` event (only event with >3 payload fields)
 - [MixScrims.Contract/MatchState.cs](MixScrims.Contract/MatchState.cs) - Match state enum (`Ended`, `KnifeRound`, `MapChosen`, `MapLoading`, `MapVoting`, `Match`, `PickingStartingSide`, `PickingTeam`, `Timeout`, `Reset`, `Warmup`)
 - [MixScrims.Contract/PluginState.cs](MixScrims.Contract/PluginState.cs) - Plugin state enum (Staging/Production)
-- [MixScrims.Contract/MixScrims.Contract.csproj](MixScrims.Contract/MixScrims.Contract.csproj) - Now references `SwiftlyS2.CS2` (`ExcludeAssets="runtime" PrivateAssets="all"`) so the contract can expose `SwiftlyS2.Shared.Players.Team` directly. Assembly version pinned at `2.8.0`.
+- [MixScrims.Contract/MapPoolEntry.cs](MixScrims.Contract/MapPoolEntry.cs) - `GetConfiguredMapPool()` record (`Name`, `Id`, derived `IsWorkshop`)
+- [MixScrims.Contract/MixScrims.Contract.csproj](MixScrims.Contract/MixScrims.Contract.csproj) - Now references `SwiftlyS2.CS2` (`ExcludeAssets="runtime" PrivateAssets="all"`) so the contract can expose `SwiftlyS2.Shared.Players.Team` directly. Assembly version pinned at `2.10.0`.
 
 **Commands:**
-- [MixScrims/src/Commands/Admin/](MixScrims/src/Commands/Admin/) - Admin command handlers (one file per command: Captain, ForceReady, ForceUnready, Map, MaplistAll, Maps, MixReset, MixStart)
-- [MixScrims/src/Commands/Player/](MixScrims/src/Commands/Player/) - Player command handlers (one file per command: Invite, Ready, Revote, Stay, Surrender, Switch, Timeout, Unready, VolunteerCaptain, VoteKick)
+- [MixScrims/src/Commands/Admin/](MixScrims/src/Commands/Admin/) - Admin command handlers (one file per command: Captain, ForceReady, ForceUnready, Map, MaplistAll, Maps, Mix, MixReset, MixStart)
+- [MixScrims/src/Commands/Player/](MixScrims/src/Commands/Player/) - Player command handlers (one file per command: Invite, Ready, Revote, Rtv, Stay, Surrender, Switch, Timeout, Unready, VolunteerCaptain, VoteKick)
 
 **Localization:**
-- [MixScrims/resources/translations/en.jsonc](MixScrims/resources/translations/en.jsonc) - English localization keys
-- [MixScrims/resources/translations/pt-BR.jsonc](MixScrims/resources/translations/pt-BR.jsonc) - Portuguese (Brazil) localization
+- [MixScrims/resources/translations/](MixScrims/resources/translations/) - `en`, `lt`, `pt-BR` and `zh-CN` `.jsonc` files, all with the same key set
 
 **Release:**
 - [CHANGELOG.md](CHANGELOG.md) - Operator-facing release notes; needs a `## [x.y.z]` section per version (see Versioning & Changelog)
@@ -457,26 +425,30 @@ All timers are created in `StartAnnouncementTimers()` and automatically stopped 
 
 ## Available Commands
 
+Aliases are the `config.jsonc` defaults.
+
 **Admin Commands** (require `managemix` permission):
+- `!mix` - Open the match control panel (`mixscrims.control`); no default alias
 - `!mix_reset` / `!reset` - Reset plugin state to warmup
 - `!mix_start` / `!start` - Force start match
 - `!forceready` / `!fr` - Force all players ready
 - `!forceunready` / `!fur` - Force all players unready
-- `!captain <name> <t/ct>` - Set captain manually (team arg optional when `SuppressBuiltInMenus` is on — the bare form raises `CaptainMenuRequested` with a null side)
-- `!map <mapname>` - Change to specific map
-- `!maps` - List voteable maps
-- `!maplist_all` - List all configured maps
+- `!captain <t/ct>` / `!cap` / `!capt` - Pick that side's captain from a player menu (team arg optional when `SuppressBuiltInMenus` is on — the bare form raises `CaptainMenuRequested` with a null side)
+- `!map <mapname>` / `!changemap` - Change to specific map
+- `!maps` / `!maplist` - List voteable maps
+- `!maplist_all` / `!allmaps` / `!maps_all` - List all configured maps
 
 **Player Commands:**
 - `!ready` / `!r` - Mark yourself ready
 - `!unready` / `!u` / `!ur` - Mark yourself not ready
 - `!revote` / `!rv` - Change map vote
+- `!rtv` / `!rockthevote` - Vote in warmup to open a map vote (if `Rtv.Enabled`, default off)
 - `!timeout` / `!pause` - Vote for team timeout
 - `!surrender` / `!gg` - Vote to surrender
 - `!invite` / `!inv` - Send Discord invite
 - `!stay` / `!st` - Stay on current side (knife winner)
 - `!switch` / `!swap` - Switch sides (knife winner)
-- `!volunteer_captain <t/ct>` - Volunteer as captain (if `AllowVolunteerCaptains` enabled; team arg optional when `SuppressBuiltInMenus` is on)
+- `!volunteer_captain <t/ct>` / `!volcap` / `!selfcapt` - Volunteer as captain (if `AllowVolunteerCaptains` enabled; team arg optional when `SuppressBuiltInMenus` is on)
 - `!votekick <name>` / `!vk` - Vote to kick a player (if `VoteKick.Enabled`, during match)
 
 ## Integration Points
@@ -486,27 +458,22 @@ This plugin exposes `IMixScrims` for other plugins via Swiftly's shared interfac
 ```csharp
 // Provider (this plugin)
 interfaceManager.AddSharedInterface<IMixScrims, MixScrimsService>("MixScrims.API", mixScrimsService);
-
-// Consumer (other plugins)
-var mixScrims = interfaceManager.GetSharedInterface<IMixScrims>("MixScrims.API");
-var matchState = mixScrims.GetCurrentMatchState();
-var pluginState = mixScrims.GetCurrentPluginState(); // Staging or Production
-mixScrims.AddPlayerToPickedCtPlayers(steamId);
-mixScrims.KickNotPlayingPlayers("Not participating");
 ```
+Consumers bind `"MixScrims.API"` as a **soft** dependency. Without `MixScrims.Contract.dll`, any method naming `IMixScrims` — even a `TryGetSharedInterface<IMixScrims>` call or an `IMixScrims?` field read — throws `FileNotFoundException` when JIT-compiled, in the caller's frame and past its try/catch, and SwiftlyS2 stops every plugin with `Hosting failed to start`. Hold the API as `object?` plus a `volatile bool`, probe `HasSharedInterface("MixScrims.API")` inside the try/catch, and name the type only in `[MethodImpl(MethodImplOptions.NoInlining)]` methods reached after it, `Unload()`'s `-=` included. Reference the contract with `<Private>false</Private>` + `<ExcludeAssets>runtime</ExcludeAssets>` and never ship a copy: two copies are two type identities, and the cast fails (SwiftlyS2 docs: Shared API).
 
 **API Methods** (v2.0.0 — 39 v1.x methods preserved + events + snapshot queries + suppression toggles + config getters):
 
 - **v1.x preserved** — everything below stays working for existing consumers.
 - **v2 events** — `MatchStateChanged`, `PluginStateChanged`, `PlayerReadyChanged`, `CaptainAssigned`, `CaptainRemoved`, `TeamPickingStarted`, `PlayerPickedForTeam`, `MapVotingStarted`, `MapVoteCast`, `MapVotingEnded`, `KnifeRoundStarted`, `KnifeRoundWon`, `PickingStartingSideStarted`, `StartingSideChosen`, `TimeoutStarted`, `TimeoutTick`, `TimeoutEnded`, `TimeoutVoteStarted`, `TimeoutVoteCast`, `TimeoutVoteResult`, `SurrenderVoteStarted`, `SurrenderVoteCast`, `SurrenderVoteResult`, `VoteKickStarted`, `VoteKickCast`, `VoteKickResult`, `MatchEnded`. Only `VoteKickCast` uses a payload record (`VoteKickCastEventArgs`).
-- **Events are raised synchronously on whatever thread performed the mutation, which is not guaranteed to be the game thread.** The three vote families (`TimeoutVote*`, `SurrenderVote*`, `VoteKick*`) are the only ones raised straight out of a player chat command (`!timeout` / `!surrender` / `!votekick`); everything else comes from a state transition, a scheduler callback or a game-event hook, which are on it. `SafeInvoke` swallows whatever a subscriber throws, so a consumer that opens a menu without marshalling loses that surface **silently** — which is how MixScrimsManager's surrender ballot *and* its Yes/No tally both went missing while the chat progress kept printing (MixScrims' own `PrintMessageToPlayer` wraps `NextTick`, so chat survives the same hop). Do not "simplify" a consumer's `RunOnGameThread` wrapper away; it costs nothing when the call is already on the game thread.
+- **Events are raised synchronously on whatever thread performed the mutation, which is not guaranteed to be the game thread.** The three vote families (`TimeoutVote*`, `SurrenderVote*`, `VoteKick*`) are the only ones raised straight out of a player chat command (`!timeout` / `!surrender` / `!votekick`); everything else comes from a state transition, a scheduler callback or a game-event hook, which are on it. `SafeInvoke` swallows whatever a subscriber throws, so a consumer that opens a menu without marshalling loses that surface **silently** — which is how one consumer's surrender ballot *and* its Yes/No tally both went missing while the chat progress kept printing (MixScrims' own `PrintMessageToPlayer` wraps `NextTick`, so chat survives the same hop). Do not "simplify" a consumer's game-thread marshal away; it costs nothing when the call is already on the game thread.
 - **`*VoteStarted` is raised only once a ballot will actually open** — below the no-players bail, below the `AutoPassTeamSize` shortcut, and below the `*TotalEligibleVotes` assignment. The first two guarantee every started event has a matching `*VoteResult` (otherwise a consumer's ballots stay open with nothing to close them); the third is what makes `GetSurrenderVoteTally().Eligible` already final when the caller's implicit `*VoteCast` lands on the next line, instead of reporting `1/1` and latching a 100% tally for the whole vote.
 - **v2 snapshot queries** — `GetReadyPlayers`, `IsPlayerReady`, `GetMinimumReadyPlayers`, `GetRequireAllConnectedPlayersToBeReady`, `GetCtCaptain`, `GetTCaptain`, `GetCtTeamName`, `GetTTeamName`, `GetMatchScore`, `GetMapVoteTallies`, `GetVoteableMapDisplayNames`, `GetMapVoteSecondsRemaining`, `GetPlayerMapVote`, `GetActivePickingTeam`, `GetUnpickedPlayers`, `GetCurrentPickIndex`, `GetActiveTimeoutRemainingSeconds`, `GetActiveTimeoutTeam`, `GetRemainingTimeoutsCt`, `GetRemainingTimeoutsT`, `GetVoteKickTargetCt`, `GetVoteKickTargetT`, `GetVoteKickTallyCt`, `GetVoteKickTallyT`, `GetActiveSurrenderVoteTeam`, `GetSurrenderVoteTally`, `GetLocalizedString`.
 - **v2 built-in presentation suppression** — config keys `SuppressBuiltInMenus` + `SuppressBuiltInCenterHtml`, runtime overrides `SetBuiltInMenusSuppressed` / `SetBuiltInCenterHtmlSuppressed` / `AreBuiltInMenusSuppressed` / `IsBuiltInCenterHtmlSuppressed`. Config seeded at load; runtime setters override until unload.
 - **v2 config value getters** — `GetCaptainsEnabled`, `GetSkipTeamPickingEnabled`, `GetSkipMapVotingEnabled`, `GetAllowVolunteerCaptainsEnabled`, `GetTimeoutDurationSeconds`, `GetTotalTimeoutsPerTeam`, `GetDefaultVoteTimeSeconds`.
 - **v2.1 match flow drivers** — `CastMapVote`, `CastTimeoutVote`, `CastSurrenderVote`, `CastVoteKickVote`, `PickPlayerForTeam`, `VolunteerAsCaptain`. Guarded pass-throughs in `MixScrimsService` to `RegisterMapVoteByName` / `HandleTimeoutVote` / `HandleSurrenderVote` / `HandleVoteKickVote` / `AssignPickedPlayerToTeamCt|T` / `TryVolunteerCaptain`. Every rejection logs Warning and no-ops — never throw back into a consumer callback, never re-implement handler logic in the service layer.
 - **v2.1 menu request events** — `CaptainMenuRequested` / `VolunteerCaptainMenuRequested` (payload: requester SteamID64, `Team?` side). Fired from `Commands/Admin/Captain.cs` and `Commands/Player/VolunteerCaptain.cs` **only when `suppressBuiltInMenus` is true**, after all permission / state / arg validation. Under suppression both commands also accept a bare arg-less form (`side = null`) and stop acting themselves; with suppression off behaviour is byte-for-byte unchanged.
-- **v2.8 flow control** — `SetPhaseProgressionHeld` / `IsPhaseProgressionHeld` plus `SetNextPickingTeam` / `GetNextPickingTeam`. The hold flag gates four sites only: the early return in `CheckReadyPlayersToStart`, the early return in `HandleRoundEndOnKnifeRound`, the branch in `CompleteTeamPicking`, and the post-surrender reset in `Surrender()`. It has no config key on purpose — a server with no consumer loaded would never leave warmup. `SetNextPickingTeam` writes `nextPickingTeamOverride`, a sentinel `int` rather than a `Team?` so a cross-thread set cannot tear; `ConsumeNextPickingTeamOverride` swaps it out at the coin toss, which is why **every** entry into `StartTeamPickingPhase` honours it and a captain disconnect cannot re-roll a pick order the consumer already announced. One-shot by design: a consumer that dies without clearing it costs one biased toss, not every toss. Anything but CT / T (including `Team.None`) is rejected as a no-op and logged — `null` is the only spelling of "clear".
+- **v2.8 flow control** — `SetPhaseProgressionHeld` / `IsPhaseProgressionHeld` plus `SetNextPickingTeam` / `GetNextPickingTeam`. The hold flag gates five sites only: the early return in `CheckReadyPlayersToStart`, the early return in `HandleRoundEndOnKnifeRound`, the branch in `CompleteTeamPicking`, the post-match reset in `HandleMatchEnd`, and the post-surrender reset in `Surrender()`. It has no config key on purpose — a server with no consumer loaded would never leave warmup. `SetNextPickingTeam` writes `nextPickingTeamOverride`, a sentinel `int` rather than a `Team?` so a cross-thread set cannot tear; `ConsumeNextPickingTeamOverride` swaps it out at the coin toss, which is why **every** entry into `StartTeamPickingPhase` honours it and a captain disconnect cannot re-roll a pick order the consumer already announced. One-shot by design: a consumer that dies without clearing it costs one biased toss, not every toss. Anything but CT / T (including `Team.None`) is rejected as a no-op and logged — `null` is the only spelling of "clear".
+- **v2.10 menu renderer reads** — `GetPickOrder`, `GetPickTimeoutSeconds`, `GetPickSecondsRemaining`, `GetPickedCtPlayerSlots` / `GetPickedTPlayerSlots`, `GetKnifeRoundWinner`, `GetStartingSideSecondsRemaining`, `GetStartingSideVoteTally`, `GetActiveTimeoutVoteTeam`, `GetTimeoutVoteTally`, `GetTimeoutVoteSecondsRemaining`, `GetTimeoutVoteCaller`, `GetSurrenderVoteSecondsRemaining`, `GetSurrenderVoteCaller`, `GetVoteKickSecondsRemaining(Team)`, `GetVoteKickCaller(Team)`, `IsNewPlayerJoiningPrevented`. All game-thread only. Each deadline and caller is written **before** its `*VoteStarted` raise, and the knife-round winner, side deadline and `startingSideCommitted` reset before `PickingStartingSide`'s `MatchStateChanged`, so a handler reading them sees the new vote; `pickOrderMade` lives exactly as long as the picked rosters (cleared in `FinalizeTeamPicking` and `ResetVariables`), and `GetPickOrder` projects the rest from the strict CT/T alternation, from the *other* team while `pickTurnPassPending` is set: `PlayerPickedForTeam` is raised before the turn passes, while `activePickingTeam` still names the picker. `GetPickSecondsRemaining` reads the deadline only while `pickTimeoutTimer` is uncancelled, because `StopOnMapChange` kills the timer without clearing it. `GetStartingSideVoteTally` reads `knifeRoundWinner`, not `sideVoteWinnerTeam`, because the latter is written after `KnifeRoundWon`.
 - **State Management**: `GetCurrentMatchState()`, `SetMatchState()`, `GetCurrentPluginState()`, `SetPluginState()`
 - **Team Names**: `SetCounterTerroristsTeamName()`, `SetTerroristsTeamName()`
 - **Phase Control**: `StartWarmup()`, `StartMapVoting()`, `StartDeferredMapVote(int)`, `EndDeferredMapVote()`, `StartTeamPicking()`, `StartKnifeRound()`, `StartMatch()`, `CancelMatch()`
@@ -537,21 +504,25 @@ mixScrims.KickNotPlayingPlayers("Not participating");
 - `StartTimeout`, `EndTimeout`, `BroadcastRemainingTimeoutTime` (`Timeout/Main.cs`) — fires `TimeoutStarted` / `TimeoutTick` / `TimeoutEnded`. Snapshot fields `activeTimeoutTeam` + `activeTimeoutRemainingSeconds` mirror the per-tick counter for consumers.
 - Timeout / Surrender / VoteKick vote flows fire `*VoteStarted`, `*VoteCast` (including the caller's implicit YES seed), and `*VoteResult`.
 - `ReconcileVotesAfterDisconnect` (`StateAgnostic/VoteReconcile.cs`) — last call in `HandleDisconnectedPlayer`, and the only place any vote or roster-driven menu is re-pointed at the roster a disconnect leaves behind. Seven branches, each individually try/caught so one throwing surface can't strand the rest; it runs last because resolving a vote can end the round, queue a timeout or kick someone.
-  - **`HandleDisconnectedPlayer` itself runs every step through `RunDisconnectCleanupStep`, for the same reason.** The steps clean up independent state, so one throw must not abort the rest — an abort leaves the leaver in rosters, votes and menus for the remainder of the match. The historical aborts were `RemovePlayerFromReadyList` and `PunishOnLeave`, which read `player.Name` / `player.SteamID` raw; both now use the `Safe*` helpers. **`player.Slot` / `.PlayerID` were never part of this** — they are plain auto-properties on SwiftlyS2's `Player` with no `ThrowIfDisposed` and no native call, so they cannot throw on a disposed reference. Any note claiming otherwise is stale.
+  - **`HandleDisconnectedPlayer` itself runs every step through `RunDisconnectCleanupStep`, for the same reason.** The steps clean up independent state, so one throw must not abort the rest — an abort leaves the leaver in rosters, votes and menus for the remainder of the match. The historical aborts were `RemovePlayerFromReadyList` and `PunishOnLeave`, which read `player.Name` / `player.SteamID` raw; both now use the `Safe*` helpers. **`player.Slot` / `.PlayerID` were never part of this** — they are plain auto-properties on SwiftlyS2's `Player` with no `ThrowIfDisposed` and no native call, so they cannot throw on a disposed reference. Any comment claiming otherwise is stale.
   - **Ready list** — the step calls `RemovePlayerFromReadyList(player, true, bypassStateCheck: true)`. Both halves are load-bearing. It is **not** gated on `SafeSteamId(player) != 0` (the gate it carried until 1.12.1): that is the one value the engine stops serving at disconnect, so the gate skipped exactly the references it existed for and left the leaver counted as ready. And `bypassStateCheck` is required because the command-path state gate only admits `Warmup` / `MapChosen`, while `readyPlayers` is still populated through `MapVoting`, `MapLoading` and `PickingTeam` — a leaver in those phases was never purged at all. Lookup goes through `FindReadyEntry`, which keys on the captured SteamID and falls back to object identity, never to the slot (by disconnect time the slot can belong to the next connection).
   - **Surrender / timeout / vote kick** — the electorate is re-sized as "votes already cast + team members who can still answer", **recomputed, never decremented**: `SafeSteamId` reads 0 off a disposed reference, so a decrement keyed on the leaver's SteamID no-ops exactly when it is needed, and recomputing is also what keeps the count right when the *caller* is the one leaving. It then re-runs `TryResolve*VoteEarly` / the vote-kick pass check, so a vote the disconnect just settled closes now rather than at timer expiry. A vote kick whose target leaves exits through `VoteKickResult(team, false)` — never inline, every exit must raise its `*VoteResult`.
   - **Map vote** (`HandlePlayerDisconnectMapVote`) — withdraws the leaver's vote (`Votes` and `VotedBy` together, matching the revote path). `VotedBy` holds player **slots**, so a vote left behind makes the next connection into that slot read as a revote in `RegisterMapVoteByName` and silently decrement a map it never chose. The map vote itself cannot hang — it closes on a fixed `DefaultVoteTimeSeconds` timer with no quorum.
   - **Starting-side vote** (`HandlePlayerDisconnectSideVote`, `DisableCaptains` only) — delegates to `TryCloseTeamSideVote` in `KnifeRound/Main.cs`, which is also what `HandleCaptainSideChoice` calls, so the purge and the quorum rule exist once. It drops `sideVotes` entries whose slot is no longer a live human on the winning team and closes the vote when the remainder have all answered. Ghost votes count toward both the quorum **and** the Switch/Stay tally, so leaving one in lets a departed player decide the side.
-  - **Team pick menu** (`HandlePlayerDisconnectTeamPickMenu`) — rebuilds the open menu via `PromptCaptainToPickPlayer(captain, team, excludeSlot)` when the leaver was one of its options, tracked in `openPickMenuPoolSlots`. The leaver is excluded explicitly because the disconnect event can still read them as valid. This is also the only thing that reaches the empty-pool `CompleteTeamPicking()` escape without a captain click — there is **no timeout on the pick menu**, so an AFK captain still stalls the phase indefinitely.
+  - **Team pick menu** (`HandlePlayerDisconnectTeamPickMenu`) — rebuilds the open menu via `PromptCaptainToPickPlayer(captain, team, excludeSlot)` when the leaver was one of its options, tracked in `openPickMenuPoolSlots`. The leaver is excluded explicitly because the disconnect event can still read them as valid. This is also the only thing that reaches the empty-pool `CompleteTeamPicking()` escape without a captain click. The pick menu's only timeout is `PickTimeoutSeconds` (`ArmPickTimeout`, one per turn); at `0` an AFK captain still stalls the phase indefinitely.
   - **The three vote electorate conventions differ on purpose — do not unify them.** Surrender and timeout store the team *minus the caller*, whose implicit yes is already in the tally, so both `SurrenderRequiredVotes()` and `TimeoutRequiredVotes()` add the 1 back to get the team size before applying their configured ratio. Vote kick stores the team *minus the target*, caller included, and compares the yes count straight against it.
-- `GetSurrenderVoteTally().Eligible` returns `SurrenderRequiredVotes()`, **not** the stored `surrenderTotalEligibleVotes`. That field excludes the caller while `Yes` / `Cast` both carry their implicit yes, so a consumer using it as a denominator reached 100% a whole vote early (MixScrimsManager's HUD read `3/3 · 100%` on a 4-man team still needing one more). `GetVoteKickTallyCt/T().Eligible` already includes its caller and needs no adjustment.
+- `GetSurrenderVoteTally().Eligible` returns `SurrenderRequiredVotes()`, **not** the stored `surrenderTotalEligibleVotes`. That field excludes the caller while `Yes` / `Cast` both carry their implicit yes, so a consumer using it as a denominator reached 100% a whole vote early (one consumer's HUD read `3/3 · 100%` on a 4-man team still needing one more). `GetVoteKickTallyCt/T().Eligible` already includes its caller and needs no adjustment.
 - `HandleMatchEnd` (`Match/Events.cs`) — fires `MatchEnded(winner, ctScore, tScore)` synchronously (BEFORE the 10s post-match delayed callback) using `Core.Game.MatchData.CTScoreTotal` / `TerroristScoreTotal`. Winner is derived from the higher score; equal scores yield `Team.None`. Then sets `MatchState.Ended` — the only site that assigns it. `Ended` must stay out of that callback's `MapLoading` / `MapChosen` bail list, which is what lets the reset it schedules still run.
 - `Surrender()` (`Surrender/Main.cs`) sends the match down CS2's own surrender path (`mp_warmup_end` → `TerminateRound(CTsSurrender | TerroristsSurrender)` → `GoToIntermission`), which is what raises `cs_win_panel_match` and therefore `MatchEnded`. Its own 10s `ResetPluginState` is then skipped when progression is held **and** the state has moved to `Ended` / `MapLoading` / `MapChosen` — both halves matter: the hold alone would strand a knife-round surrender (`HandleMatchEnd` ignores anything but `Match`, so no driver was ever signalled), and testing for `Ended` alone would miss the driver having already staged its level change. Without the gate, MixScrims and the driver tear the match down at once and `warmup.cfg` execs in front of the loading screen.
 
 **Built-in presentation suppression gates** (never remove — consumers set `suppressBuiltInMenus` / `suppressBuiltInCenterHtml` to render their own UI):
 
-- 9 menu sites gate on `if (!suppressBuiltInMenus)` before the built-in menu's `Open`: `Commands/Admin/Captain.cs`, `States/KnifeRound/Main.cs` (winner CT + winner T + DisableCaptains team-vote), `States/MapVoting/Main.cs` (`DisplayMapVotingMenu`), `States/PickingTeam/Main.cs` (`PromptCaptainToPickPlayer`), `States/Surrender/Main.cs`, `States/Timeout/Main.cs`, `States/Match/VoteKick.cs`. `Commands/Admin/Captain.cs` early-returns on the suppressed branch (raising `CaptainMenuRequested`) rather than building a menu it would discard.
+- 14 menu sites gate on `suppressBuiltInMenus` before the built-in menu's `Open`: `Commands/Admin/Captain.cs` (the command + the slot rows' reopen), `Commands/Admin/Mix.cs` (`!mix` + the captains / change-map / map-pool submenu factories, which return null to cancel), `States/KnifeRound/Main.cs` (winner CT + winner T + DisableCaptains team-vote), `States/MapVoting/Main.cs` (`DisplayMapVotingMenu`), `States/PickingTeam/Main.cs` (`PromptCaptainToPickPlayer`), `States/Surrender/Main.cs`, `States/Timeout/Main.cs`, `States/Match/VoteKick.cs`. `Commands/Admin/Captain.cs` early-returns on the suppressed branch (raising `CaptainMenuRequested`) rather than building a menu it would discard; `!mix` has no request event and answers `command.invalid_state`.
 - 6 CenterHTML sites gate on `if (!suppressBuiltInCenterHtml)` (early return where the method has nothing else to do, per-call gate where the surrounding code still runs): `StateAgnostic/Announcements.cs` (`DisplayReadyAndNotReadyPlayersInCenterHtml`), `States/Timeout/Main.cs` (`BroadcastRemainingTimeoutTime`), `States/Match/VoteKick.cs` (`SendVoteKickProgressCenterHtml`), `States/Surrender/Main.cs` (both CT + T success paths, one gate per team).
+
+**Menu row data is a renderer contract** (the full table is the wiki's [Menus](https://github.com/shmitzas/MixScrims/wiki/Menus#for-plugin-authors) page). A server can route MixScrims' menus to another renderer plugin by menu id, which then draws each row from its component `Id` and `Tag` plus the `IMixScrims` reads above, never from label text. So menu ids, the control panel's component ids, the captain page's `slot-ct` / `slot-t` rows and every row's `Tag` type are as binding as an interface member: change one and a renderer silently draws the wrong thing. The two `mixscrims.*` menus with no close key (`team-pick`, `knife-side-pick`) are why `!mix` refuses while one is open — opening a menu replaces the player's current one.
+
+The control panel's rows call the commands' own bodies (`ForceMatchStartByAdmin`, `ResetMixByAdmin`, `ForceReadyByAdmin`, `ForceUnreadyByAdmin`, `ChangeMapByAdmin`, the captain page) and share their state predicates (`IsForceStartState`, `IsForceReadyState`, `IsCaptainPickerState`) for the rows' enabled state, so a row cannot drift from its command. They carry no permission check of their own: the panel's authority is `!mix`'s, so a `command_overrides.jsonc` entry for one of those commands does not reach its row. `kick-spectators` is enabled only once picking has sealed playing rosters holding a human: `KickNotPlayingPlayers` keeps roster SteamIDs and every bot reads 0, so bot-only or empty rosters kick every human. The row passes the pressing admin's SteamID to the internal `KickNotPlayingPlayers(reason, sparedSteamId)` overload, so it never kicks that admin; the public member is unchanged. `hold` switches on only in `Warmup` / `MapChosen` / `KnifeRound`, where releasing lets the match carry on, and switches off only a hold the panel set: `SetHoldFromPanel` marks its own in the internal `phaseProgressionHeldByPanel`, and the public `SetPhaseProgressionHeld` clears that flag on every call, so a plugin's hold, or a plugin re-setting the panel's, shows ✔ greyed out and stays that plugin's to release — it drives the phases it holds back. `SetHoldFromPanel` repeats the check because a click can land on a row not yet redrawn after a plugin's release. Releasing the panel's hold in `Warmup` / `MapChosen` queues `CheckReadyPlayersToStart`, and a held knife round replays until a round ends unheld. Nothing else touches the flag, so the panel can still release its hold after `!mix_reset`. That ready check and the `start` and `force-ready` rows (`deferred: true`) move the phase a tick after the click, which runs the checks, and re-check the state then (`ForceReadyByAdmin` re-runs whole): `MenuInputRouter` picks the click sound from `IsEnabled` after the handler returns, so a phase change inside the click would play Fail on success. `!mix_start` and `!forceready` themselves act at once. A hold that reaches `CompleteTeamPicking` or the post-match reset parks the match until `!mix_reset`, which leaves the hold on, and releasing re-runs neither: the post-match path is an inline lambda in `HandleMatchEnd`, and `Ended` reads the same while its 10 s timer is pending as after a held skip. Do not make `SetPhaseProgressionHeld(false)` itself start phases, as consumers that hold progression drive them themselves. The `status` header overrides `NeedsRedraw` to rebuild its text once a second: a plain `TextComponent` runs `TextProvider` every tick and, with `Overflow.None`, never redraws for new text. The two toggles (`LiveToggle`) override it too, writing the live value straight into the session's `MenuValueState<bool>` and also redrawing when their enabled state changes, as a plugin re-setting the panel's hold greys `hold` without changing its value: `DefaultValueProvider` seeds a session only once, `SetValue` would fire `OnChanged` and re-apply the value, and a component renderer registered for `ToggleComponent` replaces `Render`.
 
 ### Discord Webhooks
 Optional Discord notifications via `DiscordService.cs` — sends rich embed messages to configured webhooks when players use `!invite`. Configured in `discord_config.jsonc` (`DiscordConfig` section): `EnableDiscordInvites`, `DiscordInviteDelayMinutes`, and a list of `Invites` (each with `WebhookUrl`, `Username`, `AvatarUrl`, `Content`, and an `Embed` with title/description/color/fields).
@@ -577,8 +548,7 @@ bot_add_ct; bot_add_ct; bot_add_t; bot_add_t  // Add 4 bots for testing
 
 1. **Forgetting partial class scope** - Methods may already exist in other partial files
 2. **Direct state modification** - Always use `mixScrimsService.SetMatchState()`
-3. **Missing config entries** - New commands need both code + config entries
+3. **Config-only aliases** - A command's aliases come only from its `MainConfig.Commands` entry, whose `Permission` field is never read
 4. **CFG file deployment** - Changes to `.cfg` files require manual server deployment
-5. **Player validity checks** - Always verify `IsValid` and `IsConnected` before operations
-6. **ExcludeAssets confusion** - SwiftlyS2 packages must not bundle runtime assemblies
-7. **Side selection modes** - Captain mode (`DisableCaptains: false`) shows menu to winner captain; team mode (`DisableCaptains: true`) requires majority vote from winning team
+5. **Raw reads on roster entries** - They can be disposed `IPlayer` references; read them through `SafeSteamId` / `SafePlayerId` / `IsSamePlayer` (see [Player Management](#player-management))
+6. **Side selection modes** - Captain mode (`DisableCaptains: false`) shows menu to winner captain; team mode (`DisableCaptains: true`) requires majority vote from winning team

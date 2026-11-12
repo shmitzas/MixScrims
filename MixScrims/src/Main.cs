@@ -11,7 +11,7 @@ namespace MixScrims;
 
 [PluginMetadata(
     Id = "MixScrims",
-    Version = "1.12.3",
+    Version = "1.13.0",
     Name = "MixScrims",
     Author = "Shmitzas",
     Description = "A plugin for PUGS style matches, with in-game match management."
@@ -54,6 +54,8 @@ public partial class MixScrims : BasePlugin
     internal bool suppressFaceitLikeDamageControl = false;
 
     internal bool phaseProgressionHeld = false;
+    // Set only by the control panel, cleared by every SetPhaseProgressionHeld call: the panel never releases a plugin's hold.
+    internal bool phaseProgressionHeldByPanel = false;
 
     public MixScrims(ISwiftlyCore core) : base(core)
     {

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
 
@@ -10,9 +11,11 @@ public partial class MixScrims
     ///Forcefully marks all players as not ready
     ///</summary>
     [Command("forceunready", false, "managemix", HelpText = "Forces all connected players into the unready state. Usage: !forceunready")]
-    public void OnForceUnready(ICommandContext context)
+    public void OnForceUnready(ICommandContext context) => ForceUnreadyByAdmin(context.Sender);
+
+    /// <summary><c>!forceunready</c>, shared with the control panel's force-unready row.</summary>
+    internal void ForceUnreadyByAdmin(IPlayer? admin)
     {
-        var admin = context.Sender;
         var connectedPlayers = GetPlayers().Count;
 
         if (!cfg.AdminCommandsBypassPlayerLimit && connectedPlayers < cfg.MinimumReadyPlayers)
@@ -31,7 +34,7 @@ public partial class MixScrims
 
         var matchState = mixScrimsService.GetCurrentMatchState();
 
-        if (matchState != MatchState.Warmup && matchState != MatchState.MapChosen)
+        if (!IsForceReadyState(matchState))
         {
             logger.LogWarning("OnForceUnready: Invalid match state, must be MatchState.Warmup or MatchState.MapChosen");
             if (admin != null)

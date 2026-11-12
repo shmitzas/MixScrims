@@ -40,6 +40,8 @@ public partial class MixScrims
         SetTeamName(Team.T);
         pickedCtPlayers.Clear();
         pickedTPlayers.Clear();
+        pickOrderMade.Clear();
+        pickTurnPassPending = false;
         activePickingTeam = null;
         currentPickIndex = 0;
         teamPickingFinalized = false;
@@ -60,6 +62,8 @@ public partial class MixScrims
         sideVotes.Clear();
         sideVoteWinnerTeam = Team.None;
         startingSideCommitted = false;
+        knifeRoundWinner = null;
+        startingSideDeadline = null;
         timeoutCountCt = cfg.Timeouts;
         timeoutCountT = cfg.Timeouts;
         timeoutPending = TimeoutPending.None;

@@ -227,14 +227,9 @@ public class MixScrimsService : IMixScrims
         var result = new List<MapPoolEntry>(maps.Count);
         foreach (var m in maps)
         {
-            if (m == null) continue;
-            // The resolved id, so a consumer never has to strip a `ws:` prefix itself.
-            var id = m.CanonicalId;
-            // An entry carrying no identifier at all is one ChangeMap could never resolve.
-            if (id.Length == 0) continue;
-            // An entry may legally carry only an Id; a blank menu label would be unrenderable.
-            var name = string.IsNullOrWhiteSpace(m.Name) ? id : m.Name;
-            result.Add(new MapPoolEntry(name, id));
+            // Same projection as the map menus' row tags, so the two cannot drift.
+            if (m?.ToPoolEntry() is { } entry)
+                result.Add(entry);
         }
         return result;
     }
@@ -357,6 +352,74 @@ public class MixScrimsService : IMixScrims
             _mixScrims.SurrenderRequiredVotes());
     }
 
+    // =========================================================================
+    // Menu renderer reads (v2.10.0+)
+    // =========================================================================
+
+    public IReadOnlyList<Team> GetPickOrder() => _mixScrims.BuildPickOrder();
+    public int GetPickTimeoutSeconds() => Math.Max(0, _mixScrims.cfg.PickTimeoutSeconds);
+    // StopOnMapChange cancels the pick timer but leaves its deadline set.
+    public int GetPickSecondsRemaining() =>
+        _mixScrims.pickTimeoutTimer is { IsCancellationRequested: false } ? SecondsUntil(_mixScrims.pickTimeoutDeadline) : 0;
+    public IReadOnlyList<int> GetPickedCtPlayerSlots() => SafePlayerIds(_mixScrims.pickedCtPlayers);
+    public IReadOnlyList<int> GetPickedTPlayerSlots() => SafePlayerIds(_mixScrims.pickedTPlayers);
+
+    public Team? GetKnifeRoundWinner() =>
+        _mixScrims.MatchState == MatchState.PickingStartingSide ? _mixScrims.knifeRoundWinner : null;
+
+    public int GetStartingSideSecondsRemaining() =>
+        _mixScrims.MatchState == MatchState.PickingStartingSide && !_mixScrims.startingSideCommitted
+            ? SecondsUntil(_mixScrims.startingSideDeadline)
+            : 0;
+
+    public (int Switch, int Stay, int Eligible) GetStartingSideVoteTally() => _mixScrims.CountStartingSideVotes();
+
+    public Team? GetActiveTimeoutVoteTeam() => _mixScrims.isTimeoutVoteInProgress ? _mixScrims.timeoutVoteTeam : null;
+
+    public (int Yes, int Cast, int Eligible) GetTimeoutVoteTally()
+    {
+        if (!_mixScrims.isTimeoutVoteInProgress) return (0, 0, 0);
+        return (
+            _mixScrims.timeoutVoteYesCount,
+            _mixScrims.timeoutVoteYesCount + _mixScrims.timeoutVoteNoCount,
+            // Yes votes needed, for the reason GetSurrenderVoteTally gives.
+            _mixScrims.TimeoutRequiredVotes());
+    }
+
+    public int GetTimeoutVoteSecondsRemaining() =>
+        _mixScrims.isTimeoutVoteInProgress ? SecondsUntil(_mixScrims.timeoutVoteDeadline) : 0;
+
+    public ulong? GetTimeoutVoteCaller() =>
+        _mixScrims.isTimeoutVoteInProgress && _mixScrims.timeoutVoteCallerSteamId != 0 ? _mixScrims.timeoutVoteCallerSteamId : null;
+
+    public int GetSurrenderVoteSecondsRemaining() =>
+        _mixScrims.isSurrenderVoteInProgress ? SecondsUntil(_mixScrims.surrenderVoteDeadline) : 0;
+
+    public ulong? GetSurrenderVoteCaller() =>
+        _mixScrims.isSurrenderVoteInProgress && _mixScrims.surrenderVoteCallerSteamId != 0 ? _mixScrims.surrenderVoteCallerSteamId : null;
+
+    public int GetVoteKickSecondsRemaining(Team team) =>
+        OpenVoteKickSlot(team) is { } slot ? SecondsUntil(slot.Deadline) : 0;
+
+    public ulong? GetVoteKickCaller(Team team) =>
+        OpenVoteKickSlot(team) is { CallerSteamId: not 0 } slot ? slot.CallerSteamId : null;
+
+    /// <summary>The open vote kick for CT, T or <see cref="Team.None"/> (server-wide), or null.</summary>
+    private VoteKickSlot? OpenVoteKickSlot(Team team)
+    {
+        // GetVoteKickSlot maps every other team onto the server-wide slot.
+        if (team is not (Team.CT or Team.T or Team.None)) return null;
+        var slot = _mixScrims.GetVoteKickSlot(team);
+        return slot.InProgress ? slot : null;
+    }
+
+    private static int SecondsUntil(DateTime? deadline)
+    {
+        if (deadline is not { } d) return 0;
+        var remaining = (int)Math.Ceiling((d - DateTime.UtcNow).TotalSeconds);
+        return remaining < 0 ? 0 : remaining;
+    }
+
     public string GetLocalizedString(ulong steamId, string key, params object[] args)
     {
         if (string.IsNullOrEmpty(key)) return string.Empty;
@@ -412,6 +475,7 @@ public class MixScrimsService : IMixScrims
 
     public void SetPhaseProgressionHeld(bool held)
     {
+        _mixScrims.phaseProgressionHeldByPanel = false;
         _mixScrims.phaseProgressionHeld = held;
         // Ungated: this silences every phase transition, so it must surface without DetailedLogging.
         _mixScrims.logger?.LogInformation("SetPhaseProgressionHeld: {Held}", held);
@@ -1181,6 +1245,14 @@ public class MixScrimsService : IMixScrims
         KickPlayersOutside(SafeSteamIds(_mixScrims.playingCtPlayers).Concat(SafeSteamIds(_mixScrims.playingTPlayers)).ToHashSet(), reason);
     }
 
+    // The control panel's kick, which spares the admin who pressed it.
+    internal void KickNotPlayingPlayers(string? reason, ulong sparedSteamId)
+    {
+        var keep = SafeSteamIds(_mixScrims.playingCtPlayers).Concat(SafeSteamIds(_mixScrims.playingTPlayers)).ToHashSet();
+        keep.Add(sparedSteamId);
+        KickPlayersOutside(keep, reason);
+    }
+
     public void KickNotPickedPlayers(string? reason = "")
     {
         KickPlayersOutside(SafeSteamIds(_mixScrims.pickedCtPlayers).Concat(SafeSteamIds(_mixScrims.pickedTPlayers)).ToHashSet(), reason);
@@ -1204,6 +1276,8 @@ public class MixScrimsService : IMixScrims
     {
         _mixScrims.preventNotPickedPlayersFromJoiningOngoingMatch = value;
     }
+
+    public bool IsNewPlayerJoiningPrevented() => _mixScrims.preventNotPickedPlayersFromJoiningOngoingMatch;
 
     public void Dispose()
     {

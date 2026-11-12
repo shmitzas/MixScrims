@@ -18,6 +18,7 @@ A whole mix, from warmup to the final score, run by the server.
 
 - 🗳️ **Map vote** — your pool of official and Workshop maps, leaving out recent ones
 - 🧢 **Captains and team picking** — admin, volunteer or random captains, picking on a timer
+- 🎛️ **Admin control panel** — `!mix` starts, holds or resets the match, sets captains and changes map from one menu
 - 🔪 **Knife round** — the winners pick the starting side
 - ⏸️ **Timeouts, surrender and vote kick** — team votes with tunable thresholds
 - 🛡️ **FACEIT-style damage** — no teammate bullet, knife or Zeus damage
@@ -78,6 +79,5 @@ A whole mix, from warmup to the final score, run by the server.
 
 <div align="center">
 <p>Made with ❤️ by Shmitzas</p>
-<p>To play in my CS2 servers go to <a href="https://rampage.lt">Rampage.lt</a></p>
 <p>⭐ Star this repository if you find it useful!</p>
 </div>

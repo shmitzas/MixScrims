@@ -27,6 +27,8 @@ public partial class MixScrims
     internal CancellationTokenSource? timeoutVoteTimer = null;
     internal bool isTimeoutVoteInProgress = false;
     internal Team timeoutVoteTeam = Team.None;
+    internal ulong timeoutVoteCallerSteamId;
+    internal DateTime? timeoutVoteDeadline;
     // Who has already voted in the current timeout vote. The built-in menu closes after a
     // click so this never fires there; it exists because IMixScrims.CastTimeoutVote lets a
     // consumer call in repeatedly. Mirrors voteKickVotersCt/T.
@@ -189,6 +191,9 @@ public partial class MixScrims
         timeoutTotalEligibleVotes = 0;
         isTimeoutVoteInProgress = true;
         timeoutVoteTeam = team;
+        // Set before TimeoutVoteStarted, whose handlers read them; the timer below uses the same length.
+        timeoutVoteCallerSteamId = SafeSteamId(caller);
+        timeoutVoteDeadline = DateTime.UtcNow.AddSeconds(TimeoutVoteSeconds());
         timeoutVoteTimer?.Cancel();
         timeoutVoteTimer = null;
         // Seed with the caller so their implicit YES can't be cast a second time.
@@ -261,14 +266,14 @@ public partial class MixScrims
         {
             HandleTimeoutVote(ctx.Player, "Yes");
             await ValueTask.CompletedTask;
-        });
+        }) { Tag = true };
         builder.Add(yesBtn);
 
         var noBtn = new ButtonComponent("No", async ctx =>
         {
             HandleTimeoutVote(ctx.Player, "No");
             await ValueTask.CompletedTask;
-        });
+        }) { Tag = false };
         builder.Add(noBtn);
 
         var menu = builder.Build();

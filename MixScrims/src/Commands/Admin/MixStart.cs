@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using MixScrims.Contract;
 using SwiftlyS2.Shared.Commands;
+using SwiftlyS2.Shared.Players;
 
 namespace MixScrims;
 
@@ -10,9 +11,11 @@ public partial class MixScrims
     ///Forcefully starts the match regardless of how many players are ready
     ///</summary>
     [Command("mix_start", false, "managemix", HelpText = "Forcefully starts the match regardless of how many players are ready. Usage: !mix_start")]
-    public void OnForceMatchStart(ICommandContext context)
+    public void OnForceMatchStart(ICommandContext context) => ForceMatchStartByAdmin(context.Sender, context.IsSentByPlayer);
+
+    /// <summary><c>!mix_start</c>, shared with the control panel's start row, which passes <paramref name="deferred"/>.</summary>
+    internal void ForceMatchStartByAdmin(IPlayer? admin, bool sentByPlayer, bool deferred = false)
     {
-        var admin = context.Sender;
         var connectedPlayers = GetPlayers().Count;
 
         if (!cfg.AdminCommandsBypassPlayerLimit && connectedPlayers < cfg.MinimumReadyPlayers)
@@ -29,7 +32,7 @@ public partial class MixScrims
             return;
         }
 
-        if (context.IsSentByPlayer)
+        if (sentByPlayer)
         {
             if (admin == null)
             {
@@ -53,9 +56,7 @@ public partial class MixScrims
 
         // Past picking the rosters are sealed, so re-entering would restart a live match.
         var currentState = mixScrimsService.GetCurrentMatchState();
-        if (currentState != MatchState.Warmup
-            && currentState != MatchState.MapChosen
-            && currentState != MatchState.MapLoading)
+        if (!IsForceStartState(currentState))
         {
             logger.LogWarning("OnForceMatchStart: ignored, current state is {State} (only allowed from Warmup/MapChosen).", currentState);
             if (admin != null)
@@ -65,6 +66,26 @@ public partial class MixScrims
             return;
         }
 
-        StartMatchWithoutKnifeRound();
+        if (!deferred)
+        {
+            StartMatchWithoutKnifeRound();
+            return;
+        }
+
+        // A phase moving on inside a menu click makes its sound Fail. Re-checked, as another start may land first.
+        Core.Scheduler.NextTick(() =>
+        {
+            if (IsForceStartState(MatchState))
+            {
+                StartMatchWithoutKnifeRound();
+                return;
+            }
+
+            logger.LogWarning("OnForceMatchStart: dropped, the state moved to {State} before the start ran.", MatchState);
+            PrintMessageToPlayer(admin, Core.Localizer["command.invalid_state", "warmup"]);
+        });
     }
+
+    internal static bool IsForceStartState(MatchState state) =>
+        state is MatchState.Warmup or MatchState.MapChosen or MatchState.MapLoading;
 }

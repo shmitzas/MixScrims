@@ -53,6 +53,13 @@ public partial class MixScrims
     internal int pickTurnEpoch = 0;
     internal CancellationTokenSource? pickTimeoutTimer;
     internal CancellationTokenSource? pickTimeoutWarningTimer;
+    internal DateTime? pickTimeoutDeadline;
+
+    // Team of each non-captain pick, kept exactly as long as the picked rosters it describes.
+    internal readonly List<Team> pickOrderMade = [];
+
+    // Set from a pick landing until the next turn opens: PlayerPickedForTeam is raised while the picker is still active.
+    internal bool pickTurnPassPending = false;
 
     // Seconds of warning before the auto-pick; the default 90s timeout therefore warns at 60s.
     private const int PickTimeoutWarningLeadSeconds = 30;
@@ -231,6 +238,7 @@ public partial class MixScrims
         var pickFirst = ConsumeNextPickingTeamOverride()
             ?? (Random.Shared.Next(2, 4) == 3 ? Team.CT : Team.T);
         activePickingTeam = pickFirst;
+        pickTurnPassPending = false;
         mixScrimsService.RaiseTeamPickingStarted(pickFirst);
 
         // The menu waits for the restart above to land, so captains pick over a round that has
@@ -311,6 +319,7 @@ public partial class MixScrims
         pickTimeoutWarningTimer = null;
         pickTimeoutTimer?.Cancel();
         pickTimeoutTimer = null;
+        pickTimeoutDeadline = null;
     }
 
     /// <summary>
@@ -338,6 +347,7 @@ public partial class MixScrims
 
         pickTimeoutTimer = Core.Scheduler.DelayBySeconds(timeout, () => AutoPickForCaptain(team, turn));
         Core.Scheduler.StopOnMapChange(pickTimeoutTimer);
+        pickTimeoutDeadline = DateTime.UtcNow.AddSeconds(timeout);
     }
 
     /// <summary>
@@ -500,6 +510,7 @@ public partial class MixScrims
 
         activePickingTeam = null;
         CancelPickTurnTimers();
+        pickOrderMade.Clear();
 
         EnsureCaptainsAlive();
 
@@ -636,7 +647,7 @@ public partial class MixScrims
     /// Same filter as MixScrimsService.GetUnpickedPlayerSlots, so the built-in menu,
     /// consumer-built menus and the timeout auto-pick agree on who is pickable.
     /// </summary>
-    private List<IPlayer> BuildPickPool(IPlayer captain, int excludeSlot)
+    private List<IPlayer> BuildPickPool(IPlayer? captain, int excludeSlot)
     {
         var players = GetPlayers();
         var captainSlot = SafePlayerId(captain);
@@ -652,6 +663,29 @@ public partial class MixScrims
             return slot < 0 || slot == captainSlot || slot == excludeSlot || pickedSlots.Contains(slot);
         });
         return players;
+    }
+
+    /// <summary>
+    /// The picks made, then the rest of the ladder as it will run: strict CT/T alternation from the
+    /// team picking next until <c>MinimumReadyPlayers</c> are picked or the pool runs dry.
+    /// </summary>
+    internal List<Team> BuildPickOrder()
+    {
+        if (MatchState != MatchState.PickingTeam || teamPickingFinalized) return [];
+
+        List<Team> order = [.. pickOrderMade];
+        if (activePickingTeam is not { } team) return order;
+        if (pickTurnPassPending) team = team == Team.CT ? Team.T : Team.CT;
+
+        var remaining = Math.Min(
+            cfg.MinimumReadyPlayers - (pickedCtPlayers.Count + pickedTPlayers.Count),
+            BuildPickPool(team == Team.CT ? captainCt : captainT, -1).Count);
+        for (var i = 0; i < remaining; i++)
+        {
+            order.Add(team);
+            team = team == Team.CT ? Team.T : Team.CT;
+        }
+        return order;
     }
 
     /// <summary>
@@ -692,6 +726,7 @@ public partial class MixScrims
 
         // Track whose turn to pick is active so IMixScrims.GetActivePickingTeam reflects it.
         activePickingTeam = team;
+        pickTurnPassPending = false;
 
         var players = BuildPickPool(captain, excludeSlot);
 
@@ -747,7 +782,7 @@ public partial class MixScrims
             var displayName = player.Name ?? $"#{player.PlayerID}";
             var pickedSlot = SafePlayerId(player);
             openPickMenuPoolSlots.Add(pickedSlot);
-            var button = new ButtonComponent(displayName);
+            var button = new ButtonComponent(displayName) { Tag = pickedSlot };
             if (team == Team.CT)
             {
                 button.OnSelect = async ctx =>
@@ -1125,6 +1160,8 @@ public partial class MixScrims
 
         pickedCtPlayers.Add(player);
         currentPickIndex++;
+        pickOrderMade.Add(Team.CT);
+        pickTurnPassPending = true;
         // Raised for bots too (SteamID 0). The roster is already updated above, so a
         // consumer re-reading GetUnpickedPlayerSlots() from this event sees the pool
         // without the pick. Suppressing it for bots left consumer-built pick menus
@@ -1194,6 +1231,8 @@ public partial class MixScrims
 
         pickedTPlayers.Add(player);
         currentPickIndex++;
+        pickOrderMade.Add(Team.T);
+        pickTurnPassPending = true;
         // Raised for bots too — see the CT twin above.
         mixScrimsService.RaisePlayerPickedForTeam(Team.T, SafeSteamId(player), currentPickIndex);
 

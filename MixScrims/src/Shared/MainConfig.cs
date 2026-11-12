@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using MixScrims.Contract;
 
 namespace MixScrims;
 
@@ -88,6 +89,7 @@ public class MainConfig
     public Dictionary<string, CommandInfo> Commands { get; set; } = new()
     {
         // Admin commands
+        { "mix", new() { Permission = "managemix", Aliases = [] } },
         { "mix_reset", new() { Permission = "managemix", Aliases = ["reset"] } },
         { "mix_start", new() { Permission = "managemix", Aliases = ["start"] } },
         { "forceready", new() { Permission = "managemix", Aliases = ["fr"] } },
@@ -152,6 +154,17 @@ public class MapDetails
             var id = Id?.Trim() ?? string.Empty;
             return id.Length > 0 ? id : Name.Trim();
         }
+    }
+
+    /// <summary>This entry as <c>IMixScrims.GetConfiguredMapPool</c> and the map menus' row tags carry it.</summary>
+    /// <returns>Null for an entry carrying no identifier, which <c>ChangeMap</c> could never resolve.</returns>
+    internal MapPoolEntry? ToPoolEntry()
+    {
+        // The resolved id, so a consumer never has to strip a `ws:` prefix itself.
+        var id = CanonicalId;
+        if (id.Length == 0) return null;
+        // An entry may legally carry only an Id; a blank menu label would be unrenderable.
+        return new MapPoolEntry(string.IsNullOrWhiteSpace(Name) ? id : Name, id);
     }
 }
 

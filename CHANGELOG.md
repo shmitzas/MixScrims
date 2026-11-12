@@ -5,6 +5,33 @@ Notable changes to MixScrims, newest first.
 <!-- Release notes are taken from the section matching PluginMetadata.Version in
      MixScrims/src/Main.cs, so every release needs a "## [x.y.z]" heading here. -->
 
+## [1.13.0] - 2026-11-12
+
+Adds an admin control panel, and lets plugins that draw MixScrims' menus their own way draw
+every one of them properly. Worth updating for `!mix` alone; required if you run such a plugin.
+
+- New `!mix` admin command (`managemix`) opens **Match control**: the current phase and ready
+  count, then start the match now, hold automatic phase changes, reset to warmup, force
+  everyone ready or unready, captains, block late joiners, kick spectators, change map and the
+  map pool. Each row runs its command with the same checks and replies. A row greys out only
+  where its command cannot run at all — the wrong phase, or captains turned off — so other
+  refusals, such as too few players, still answer in chat. Kick spectators, which has no
+  command, greys out until the teams are sealed with a human player on them, and never kicks
+  you. Hold switches on only in warmup, the second ready-up and the knife round, and off
+  anywhere if it was switched on from the panel: a hold a plugin set shows greyed out, and
+  only that plugin releases it. Off in warmup or the second ready-up, the match moves on at
+  once if enough players are ready; in the knife round, at the next round end. A hold still on
+  10 s after the match ends keeps it ended until you reset to warmup, and stays on after the
+  reset. Both switches show changes another admin or a plugin makes while the panel is open.
+- The captain menu now opens with both captain slots on top, showing who holds each. Pick a
+  slot, then the player — one menu sets either side. `!captain ct` / `!captain t` still open it
+  on that side.
+- Fixed `!captain` making the wrong player captain when two players share a name.
+- Plugins that draw MixScrims' menus can now tell what every row means — the map behind each map
+  vote row, the player behind each pick and captain row, Stay or Switch, Yes or No, and which
+  team a vote kick is for — and can read the pick order and timer, the side-choice timer and
+  team vote, and each vote's caller and time left (contract 2.10.0, additions only).
+
 ## [1.12.3] - 2026-11-01
 
 Requires **SwiftlyS2 1.5.0 or newer**.

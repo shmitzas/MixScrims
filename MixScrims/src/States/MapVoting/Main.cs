@@ -111,7 +111,7 @@ public partial class MixScrims
             {
                 RegisterMapVoteByName(ctx.Player, map.Name);
                 await ValueTask.CompletedTask;
-            });
+            }) { Tag = map.ToPoolEntry() };
             builder.Add(button);
         }
 

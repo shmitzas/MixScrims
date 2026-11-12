@@ -22,7 +22,11 @@ public partial class MixScrims
     // The built-in Stay/Switch menu for the current phase, closed when the phase ends.
     internal IMenu? sidePickMenu;
 
-    // Matches the DisableCaptains vote window below; a captain who never picks must not leave
+    // Snapshot fields for IMixScrims consumers, written before PickingStartingSide's MatchStateChanged.
+    internal Team? knifeRoundWinner;
+    internal DateTime? startingSideDeadline;
+
+    // Also the DisableCaptains vote window; a captain who never picks must not leave
     // the parked restart (and the server) frozen indefinitely.
     private const int StartingSidePickTimeoutSeconds = 30;
 
@@ -66,16 +70,15 @@ public partial class MixScrims
 
         // Symmetric to StartMatch: prime CCSGameRules limits before the restart below.
         // Defense in depth — the knife-round transition currently has zero pending team
-        // changes, and Stay/Switch crash evidence (see StartMatch comment + repo memory
-        // `mixscrims-mp-restartgame-team-limits-segv.md`) proved team-limit reconciliation
-        // is NOT the actual crash class. Kept for consistency with StartMatch and to
-        // survive any future refactor that adds team moves here.
+        // changes, and a match start that crashed on a Stay pick with no team moves proved
+        // team-limit reconciliation is NOT the actual crash class. Kept for consistency
+        // with StartMatch and to survive any future refactor that adds team moves here.
         RelaxEngineTeamLimits("StartKnifeRound");
 
         // knife_round.cfg is cvars only now - the plugin drives the round transition, same
-        // as StartMatch and StartTeamPickingPhase (repo memory
-        // `mixscrims-mp-restartgame-team-limits-segv.md`). The 0.5s delay lets the preceding
-        // UnpauseMatch's mp_pause 0 command drain before the exec.
+        // as StartMatch and StartTeamPickingPhase, here via TerminateRound because
+        // mp_restartgame's complete reset is a segfault site. The 0.5s delay lets the
+        // preceding UnpauseMatch's mp_pause 0 command drain before the exec.
         //   T+0.5s  exec knife_round.cfg (ends with mp_warmup_end)
         //   T+1.0s  TerminateRound(GameCommencing, 1.0f) -> RestartRound at T+2.0s
         var kCfgToken = Core.Scheduler.DelayBySeconds(0.5f, () =>
@@ -144,8 +147,10 @@ public partial class MixScrims
     /// </summary>
     internal void PromptWinnerTCaptainoChoseStartingSide(Team winnerTeam)
     {
-        mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
+        knifeRoundWinner = winnerTeam;
+        startingSideDeadline = DateTime.UtcNow.AddSeconds(StartingSidePickTimeoutSeconds);
         startingSideCommitted = false;
+        mixScrimsService.SetMatchState(MatchState.PickingStartingSide);
         BeginStartingSideRestartHold("PickingStartingSide");
         mixScrimsService.RaiseKnifeRoundWon(winnerTeam);
 
@@ -175,7 +180,7 @@ public partial class MixScrims
                 }
             }
 
-            var sideVoteToken = Core.Scheduler.DelayBySeconds(30, () =>
+            var sideVoteToken = Core.Scheduler.DelayBySeconds(StartingSidePickTimeoutSeconds, () =>
             {
                 if (mixScrimsService.GetCurrentMatchState() == MatchState.PickingStartingSide)
                 {
@@ -279,14 +284,14 @@ public partial class MixScrims
         {
             HandleCaptainSideChoice(ctx.Player, "Switch");
             await ValueTask.CompletedTask;
-        });
+        }) { Tag = false };
         builder.Add(switchBtn);
 
         var stayBtn = new ButtonComponent("Stay", async ctx =>
         {
             HandleCaptainSideChoice(ctx.Player, "Stay");
             await ValueTask.CompletedTask;
-        });
+        }) { Tag = true };
         builder.Add(stayBtn);
 
         return builder.Build();
@@ -367,20 +372,7 @@ public partial class MixScrims
         var votingTeam = sideVoteWinnerTeam != Team.None ? sideVoteWinnerTeam : fallbackTeam;
         if (votingTeam is not (Team.CT or Team.T)) return;
 
-        var roster = votingTeam == Team.CT ? playingCtPlayers : playingTPlayers;
-        // Two sets on purpose: membership decides whose vote survives, validity decides who we
-        // are still waiting on. Purging on validity would discard a vote from a team member
-        // whose pawn happens to read null at that instant.
-        var onTeam = new HashSet<int>();
-        var eligible = new HashSet<int>();
-        foreach (var player in roster)
-        {
-            if (leaver != null && IsSamePlayer(player, leaver)) continue;
-            var slot = SafePlayerId(player);
-            if (slot < 0) continue;
-            onTeam.Add(slot);
-            if (!IsBot(player) && IsPlayerValid(player)) eligible.Add(slot);
-        }
+        CollectSideVoteRoster(votingTeam, leaver, out var onTeam, out var eligible);
 
         // A vote from someone no longer on the team counts toward both the quorum below and
         // the Switch/Stay tally, so leaving it in lets a departed player close and decide the vote.
@@ -390,6 +382,40 @@ public partial class MixScrims
         if (sideVotes.Count < eligible.Count) return;
 
         ProcessTeamSideVotes();
+    }
+
+    /// <summary>The voting team's roster slots, and the live humans among them the vote waits on, both without <paramref name="leaver"/>.</summary>
+    private void CollectSideVoteRoster(Team votingTeam, IPlayer? leaver, out HashSet<int> onTeam, out HashSet<int> eligible)
+    {
+        var roster = votingTeam == Team.CT ? playingCtPlayers : playingTPlayers;
+        // Two sets on purpose: membership decides whose vote survives, validity decides who we
+        // are still waiting on. Purging on validity would discard a vote from a team member
+        // whose pawn happens to read null at that instant.
+        onTeam = new HashSet<int>();
+        eligible = new HashSet<int>();
+        foreach (var player in roster)
+        {
+            if (leaver != null && IsSamePlayer(player, leaver)) continue;
+            var slot = SafePlayerId(player);
+            if (slot < 0) continue;
+            onTeam.Add(slot);
+            if (!IsBot(player) && IsPlayerValid(player)) eligible.Add(slot);
+        }
+    }
+
+    /// <summary><c>IMixScrims.GetStartingSideVoteTally</c>: the open captains-disabled side vote, or zeros.</summary>
+    internal (int Switch, int Stay, int Eligible) CountStartingSideVotes()
+    {
+        if (!cfg.DisableCaptains || MatchState != MatchState.PickingStartingSide || startingSideCommitted)
+            return (0, 0, 0);
+        // Not sideVoteWinnerTeam: that is written after KnifeRoundWon, whose handlers read this.
+        if (knifeRoundWinner is not { } votingTeam) return (0, 0, 0);
+
+        CollectSideVoteRoster(votingTeam, null, out _, out var eligible);
+        return (
+            sideVotes.Values.Count(v => string.Equals(v, "Switch", StringComparison.OrdinalIgnoreCase)),
+            sideVotes.Values.Count(v => string.Equals(v, "Stay", StringComparison.OrdinalIgnoreCase)),
+            eligible.Count);
     }
 
     /// <summary>
@@ -559,6 +585,7 @@ public partial class MixScrims
         startingSideRestartHoldTimer = null;
         startingSidePickTimeoutTimer?.Cancel();
         startingSidePickTimeoutTimer = null;
+        startingSideDeadline = null;
     }
 
     /// <summary>
